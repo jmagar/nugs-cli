@@ -1517,6 +1517,100 @@ func listArtists(jsonLevel string) error {
 	return nil
 }
 
+// displayWelcome shows a welcome screen with latest shows from popular artists
+func displayWelcome() error {
+	fmt.Printf("\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", colorCyan, colorReset)
+	fmt.Printf("%s  Welcome to Nugs Downloader%s\n", colorBold, colorReset)
+	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
+
+	// Popular artists to showcase (Billy Strings, Dead & Company, Phish)
+	popularArtists := []struct {
+		id   string
+		name string
+	}{
+		{"1125", "Billy Strings"},
+		{"461", "Dead & Company"},
+		{"1045", "Phish"},
+	}
+
+	fmt.Printf("%sLatest Shows:%s\n\n", colorBold, colorReset)
+
+	for _, artist := range popularArtists {
+		allMeta, err := getArtistMeta(artist.id)
+		if err != nil {
+			continue // Skip on error
+		}
+
+		if len(allMeta) == 0 || len(allMeta[0].Response.Containers) == 0 {
+			continue
+		}
+
+		// Collect all containers and sort by date
+		type containerWithDate struct {
+			container *AlbArtResp
+			dateStr   string
+		}
+		var allContainers []containerWithDate
+
+		for _, meta := range allMeta {
+			for _, container := range meta.Response.Containers {
+				dateStr := container.PerformanceDateShortYearFirst
+				if dateStr == "" {
+					dateStr = container.PerformanceDate
+				}
+				allContainers = append(allContainers, containerWithDate{
+					container: container,
+					dateStr:   dateStr,
+				})
+			}
+		}
+
+		if len(allContainers) == 0 {
+			continue
+		}
+
+		// Sort by date descending
+		sort.Slice(allContainers, func(i, j int) bool {
+			dateI := allContainers[i].dateStr
+			dateJ := allContainers[j].dateStr
+			if dateI == "" && dateJ != "" {
+				return false
+			}
+			if dateI != "" && dateJ == "" {
+				return true
+			}
+			return dateI > dateJ
+		})
+
+		// Show top 3 latest shows
+		fmt.Printf("  %s%s%s\n", colorGreen, artist.name, colorReset)
+		showCount := 3
+		if len(allContainers) < showCount {
+			showCount = len(allContainers)
+		}
+
+		for i := 0; i < showCount; i++ {
+			item := allContainers[i]
+			title := item.container.ContainerInfo
+			if len(title) > 55 {
+				title = title[:55] + "..."
+			}
+			fmt.Printf("    %s%-12s%s %s\n", colorYellow, item.dateStr, colorReset, title)
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
+	fmt.Printf("%sQuick Start:%s\n", colorBold, colorReset)
+	fmt.Printf("  %snugs list artists%s              Browse all artists\n", colorCyan, colorReset)
+	fmt.Printf("  %snugs list 1125%s                 View Billy Strings shows\n", colorCyan, colorReset)
+	fmt.Printf("  %snugs 1125 latest%s               Download latest shows\n", colorCyan, colorReset)
+	fmt.Printf("  %snugs list artists --json standard%s | jq    Export to JSON\n", colorCyan, colorReset)
+	fmt.Printf("  %snugs help%s                      View all commands\n\n", colorCyan, colorReset)
+
+	return nil
+}
+
 // listArtistShows fetches and displays all shows for a specific artist identified by artistId.
 // The output is sorted by date in reverse chronological order (newest first) and includes
 // container ID, date, title, and venue for each show.
@@ -2383,6 +2477,15 @@ func main() {
 		if err != nil {
 			handleErr("Rclone check failed.", err, true)
 		}
+	}
+
+	// Show welcome screen if no arguments provided
+	if len(cfg.Urls) == 0 {
+		err := displayWelcome()
+		if err != nil {
+			fmt.Printf("Error displaying welcome screen: %v\n", err)
+		}
+		return
 	}
 
 	// Check if first argument is "list" command
