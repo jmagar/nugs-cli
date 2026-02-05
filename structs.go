@@ -11,29 +11,54 @@ type WriteCounter struct {
 }
 
 type Config struct {
-	Email           string
-	Password        string
-	Urls            []string
-	Format          int
-	OutPath         string
-	VideoFormat     int
-	WantRes         string
-	Token           string
-	UseFfmpegEnvVar bool
-	FfmpegNameStr   string
-	ForceVideo      bool
-	SkipVideos		bool
-	SkipChapters	bool
+	Email           string `json:"email"`
+	Password        string `json:"password"`
+	Urls            []string `json:"urls,omitempty"`
+	Format          int `json:"format"`
+	OutPath         string `json:"outPath"`
+	VideoFormat     int `json:"videoFormat"`
+	WantRes         string `json:"wantRes,omitempty"`
+	Token           string `json:"token"`
+	UseFfmpegEnvVar bool `json:"useFfmpegEnvVar"`
+	FfmpegNameStr   string `json:"ffmpegNameStr,omitempty"`
+	ForceVideo      bool `json:"forceVideo,omitempty"`
+	SkipVideos		bool `json:"skipVideos,omitempty"`
+	SkipChapters	bool `json:"skipChapters,omitempty"`
+	RcloneEnabled   bool `json:"rcloneEnabled,omitempty"`
+	RcloneRemote    string `json:"rcloneRemote,omitempty"`
+	RclonePath      string `json:"rclonePath,omitempty"`
+	DeleteAfterUpload bool `json:"deleteAfterUpload,omitempty"`
+	RcloneTransfers int `json:"rcloneTransfers,omitempty"`
 }
 
 type Args struct {
-	Urls         []string `arg:"positional, required"`
+	Urls         []string `arg:"positional"`
 	Format       int      `arg:"-f" default:"-1" help:"Track download format.\n\t\t\t 1 = 16-bit / 44.1 kHz ALAC\n\t\t\t 2 = 16-bit / 44.1 kHz FLAC\n\t\t\t 3 = 24-bit / 48 kHz MQA\n\t\t\t 4 = 360 Reality Audio / best available\n\t\t\t 5 = 150 Kbps AAC"`
 	VideoFormat  int      `arg:"-F" default:"-1" help:"Video download format.\n\t\t\t 1 = 480p\n\t\t\t 2 = 720p\n\t\t\t 3 = 1080p\n\t\t\t 4 = 1440p\n\t\t\t 5 = 4K / best available"`
 	OutPath      string   `arg:"-o" help:"Where to download to. Path will be made if it doesn't already exist."`
 	ForceVideo   bool     `arg:"--force-video" help:"Forces video when it co-exists with audio in release URLs."`
 	SkipVideos   bool     `arg:"--skip-videos" help:"Skips videos in artist URLs."`
 	SkipChapters bool     `arg:"--skip-chapters" help:"Skips chapters for videos."`
+}
+
+// Description provides custom help text
+func (Args) Description() string {
+	return `Nugs.net downloader - Download music and videos from Nugs.net
+
+SPECIAL COMMANDS:
+  help                           Show this help message
+  list artists                   List all available artists
+  list <artist_id>               List all shows for a specific artist
+  <artist_id> latest             Download latest shows from an artist
+
+EXAMPLES:
+  nugs_dl help
+  nugs_dl list artists
+  nugs_dl list 461
+  nugs_dl 1125 latest
+  nugs_dl https://play.nugs.net/release/12345
+  nugs_dl https://play.nugs.net/artist/461/latest
+  nugs_dl -f 3 https://play.nugs.net/release/12345`
 }
 
 type Auth struct {
@@ -465,7 +490,51 @@ type ArtistMeta struct {
 	} `json:"Response"`
 }
 
+type ArtistListResp struct {
+	MethodName                  string `json:"methodName"`
+	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
+	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
+	Response                    struct {
+		Artists []struct {
+			ArtistID   int    `json:"artistID"`
+			ArtistName string `json:"artistName"`
+			NumShows   int    `json:"numShows"`
+			NumAlbums  int    `json:"numAlbums"`
+		} `json:"artists"`
+	} `json:"Response"`
+}
+
 type PurchasedManResp struct {
 	FileURL      string `json:"fileURL"`
 	ResponseCode int    `json:"responseCode"`
+}
+
+// ArtistListOutput represents JSON output for list artists command
+type ArtistListOutput struct {
+	Artists []ArtistOutput `json:"artists"`
+	Total   int            `json:"total"`
+}
+
+type ArtistOutput struct {
+	ArtistID   int    `json:"artistID"`
+	ArtistName string `json:"artistName"`
+	NumShows   int    `json:"numShows"`
+	NumAlbums  int    `json:"numAlbums"`
+}
+
+// ShowListOutput represents JSON output for list shows command
+type ShowListOutput struct {
+	ArtistID   int          `json:"artistID"`
+	ArtistName string       `json:"artistName"`
+	Shows      []ShowOutput `json:"shows"`
+	Total      int          `json:"total"`
+}
+
+type ShowOutput struct {
+	ContainerID int    `json:"containerID"`
+	Date        string `json:"date"`
+	Title       string `json:"title"`
+	Venue       string `json:"venue"`
+	VenueCity   string `json:"venueCity,omitempty"`
+	VenueState  string `json:"venueState,omitempty"`
 }

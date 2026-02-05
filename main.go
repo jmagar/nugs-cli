@@ -32,6 +32,33 @@ import (
 	"github.com/grafov/m3u8"
 )
 
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorBold   = "\033[1m"
+)
+
+// Unicode symbols
+const (
+	symbolCheck    = "✓"
+	symbolCross    = "✗"
+	symbolArrow    = "→"
+	symbolMusic    = "♪"
+	symbolUpload   = "⬆"
+	symbolDownload = "⬇"
+	symbolInfo     = "ℹ"
+	symbolWarning  = "⚠"
+	symbolGear     = "⚙"
+	symbolPackage  = "📦"
+	symbolRocket   = "🚀"
+)
+
 const (
 	devKey         = "x7f54tgbdyc64y656thy47er4"
 	clientId       = "Eg7HuH873H65r5rt325UytR5429"
@@ -54,7 +81,7 @@ var (
 	client = &http.Client{Jar: jar}
 )
 
-var regexStrings = [11]string{
+var regexStrings = []string{
 	`^https://play.nugs.net/release/(\d+)$`,
 	`^https://play.nugs.net/#/playlists/playlist/(\d+)$`,
 	`^https://play.nugs.net/library/playlist/(\d+)$`,
@@ -67,6 +94,7 @@ var regexStrings = [11]string{
 	`^https://www.nugs.net/on/demandware.store/Sites-NugsNet-Site/d`+
 		`efault/(?:Stash-QueueVideo|NugsVideo-GetStashVideo)\?([a-zA-Z0-9=%&-]+$)`,
 	`^https://play.nugs.net/library/webcast/(\d+)$`,
+	`^(\d+)$`,
 }
 
 var qualityMap = map[string]Quality{
@@ -206,6 +234,318 @@ func processUrls(urls []string) ([]string, error) {
 		}
 	}
 	return processed, nil
+}
+
+// Colorized print functions
+func printSuccess(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorGreen, symbolCheck, colorReset, msg, colorReset)
+}
+
+func printError(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorRed, symbolCross, colorReset, msg, colorReset)
+}
+
+func printInfo(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorBlue, symbolInfo, colorReset, msg, colorReset)
+}
+
+func printWarning(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorYellow, symbolWarning, colorReset, msg, colorReset)
+}
+
+func printDownload(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorCyan, symbolDownload, colorReset, msg, colorReset)
+}
+
+func printUpload(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorPurple, symbolUpload, colorReset, msg, colorReset)
+}
+
+func printMusic(msg string) {
+	fmt.Printf("%s%s%s %s%s\n", colorGreen, symbolMusic, colorReset, msg, colorReset)
+}
+
+func checkRcloneAvailable(quiet bool) error {
+	cmd := exec.Command("rclone", "version")
+	output, err := cmd.Output()
+	if err != nil {
+		return fmt.Errorf("rclone is not installed or not available in PATH: %w\n"+
+			"Please install rclone from https://rclone.org/downloads/ or disable rclone in config.json", err)
+	}
+
+	// Extract and display version (first line of output)
+	if !quiet {
+		lines := strings.Split(string(output), "\n")
+		if len(lines) > 0 {
+			printSuccess(fmt.Sprintf("Rclone is available: %s", strings.TrimSpace(lines[0])))
+		}
+	}
+
+	return nil
+}
+
+func promptForConfig() error {
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Println("\n=== First Time Setup ===")
+	fmt.Println("No config.json found. Let's create one!\n")
+
+	// Email
+	fmt.Print("Enter your Nugs.net email: ")
+	scanner.Scan()
+	email := strings.TrimSpace(scanner.Text())
+	if email == "" {
+		return errors.New("email is required")
+	}
+
+	// Password
+	fmt.Print("Enter your Nugs.net password: ")
+	scanner.Scan()
+	password := strings.TrimSpace(scanner.Text())
+	if password == "" {
+		return errors.New("password is required")
+	}
+
+	// Format
+	fmt.Println("\nTrack download quality:")
+	fmt.Println("  1 = 16-bit / 44.1 kHz ALAC")
+	fmt.Println("  2 = 16-bit / 44.1 kHz FLAC")
+	fmt.Println("  3 = 24-bit / 48 kHz MQA")
+	fmt.Println("  4 = 360 Reality Audio / best available (recommended)")
+	fmt.Println("  5 = 150 Kbps AAC")
+	fmt.Print("Enter format choice [1-5] (default: 4): ")
+	scanner.Scan()
+	formatStr := strings.TrimSpace(scanner.Text())
+	format := 4
+	if formatStr != "" {
+		var err error
+		format, err = strconv.Atoi(formatStr)
+		if err != nil || format < 1 || format > 5 {
+			return errors.New("format must be between 1 and 5")
+		}
+	}
+
+	// Video Format
+	fmt.Println("\nVideo download format:")
+	fmt.Println("  1 = 480p")
+	fmt.Println("  2 = 720p")
+	fmt.Println("  3 = 1080p")
+	fmt.Println("  4 = 1440p")
+	fmt.Println("  5 = 4K / best available (recommended)")
+	fmt.Print("Enter video format choice [1-5] (default: 5): ")
+	scanner.Scan()
+	videoFormatStr := strings.TrimSpace(scanner.Text())
+	videoFormat := 5
+	if videoFormatStr != "" {
+		var err error
+		videoFormat, err = strconv.Atoi(videoFormatStr)
+		if err != nil || videoFormat < 1 || videoFormat > 5 {
+			return errors.New("video format must be between 1 and 5")
+		}
+	}
+
+	// Output Path
+	fmt.Print("\nEnter download directory (default: Nugs downloads): ")
+	scanner.Scan()
+	outPath := strings.TrimSpace(scanner.Text())
+	if outPath == "" {
+		outPath = "Nugs downloads"
+	}
+
+	// FFmpeg
+	fmt.Print("\nUse FFmpeg from system PATH? [y/N] (default: N): ")
+	scanner.Scan()
+	useFfmpegEnvVarStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	useFfmpegEnvVar := useFfmpegEnvVarStr == "y" || useFfmpegEnvVarStr == "yes"
+
+	// Rclone
+	fmt.Print("\nUpload to remote using rclone? [y/N] (default: N): ")
+	scanner.Scan()
+	rcloneEnabledStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
+	rcloneEnabled := rcloneEnabledStr == "y" || rcloneEnabledStr == "yes"
+
+	var rcloneRemote, rclonePath string
+	var deleteAfterUpload bool
+	var rcloneTransfers int
+
+	if rcloneEnabled {
+		fmt.Print("Enter rclone remote name (e.g., tootie): ")
+		scanner.Scan()
+		rcloneRemote = strings.TrimSpace(scanner.Text())
+		if rcloneRemote == "" {
+			return errors.New("rclone remote name is required")
+		}
+
+		fmt.Print("Enter remote path (e.g., /mnt/user/data/media/music): ")
+		scanner.Scan()
+		rclonePath = strings.TrimSpace(scanner.Text())
+		if rclonePath == "" {
+			return errors.New("rclone remote path is required")
+		}
+
+		fmt.Print("Enter number of parallel transfers (default: 4): ")
+		scanner.Scan()
+		transfersStr := strings.TrimSpace(scanner.Text())
+		if transfersStr == "" {
+			rcloneTransfers = 4
+		} else {
+			var err error
+			rcloneTransfers, err = strconv.Atoi(transfersStr)
+			if err != nil || rcloneTransfers < 1 {
+				return errors.New("transfers must be a positive integer")
+			}
+		}
+
+		fmt.Print("Delete local files after upload? [Y/n] (default: Y): ")
+		scanner.Scan()
+		deleteStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
+		deleteAfterUpload = deleteStr != "n" && deleteStr != "no"
+	}
+
+	// Create config object
+	config := Config{
+		Email:             email,
+		Password:          password,
+		Format:            format,
+		VideoFormat:       videoFormat,
+		OutPath:           outPath,
+		Token:             "",
+		UseFfmpegEnvVar:   useFfmpegEnvVar,
+		RcloneEnabled:     rcloneEnabled,
+		RcloneRemote:      rcloneRemote,
+		RclonePath:        rclonePath,
+		DeleteAfterUpload: deleteAfterUpload,
+		RcloneTransfers:   rcloneTransfers,
+	}
+
+	// Write to file
+	data, err := json.MarshalIndent(config, "", "    ")
+	if err != nil {
+		return err
+	}
+
+	err = ioutil.WriteFile("config.json", data, 0600)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("\n✓ config.json created successfully!")
+	fmt.Println("You can edit config.json later to change these settings.\n")
+	return nil
+}
+
+func validatePath(path string) error {
+	// Only block null bytes and newlines which can cause real issues
+	// exec.Command handles shell metacharacters safely
+	if strings.ContainsAny(path, "\x00\n\r") {
+		return fmt.Errorf("path contains invalid characters")
+	}
+	return nil
+}
+
+// uploadToRclone uploads the local directory at localPath to the configured rclone remote.
+// If cfg.RcloneEnabled is false, the function returns immediately without error.
+// The function uses cfg.RcloneTransfers (default 4) for parallel transfers and can
+// optionally delete local files after successful upload verification if cfg.DeleteAfterUpload is true.
+// Returns an error if:
+//   - Path validation fails
+//   - rclone copy command fails
+//   - Upload verification fails (requires rclone check command)
+//   - Local file deletion fails after successful upload
+func uploadToRclone(localPath string, cfg *Config) error {
+	if !cfg.RcloneEnabled {
+		return nil
+	}
+
+	// Validate paths before executing rclone command
+	if err := validatePath(localPath); err != nil {
+		return fmt.Errorf("invalid local path: %w", err)
+	}
+
+	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteDest, colorReset))
+
+	// Default to 4 transfers if not set
+	transfers := cfg.RcloneTransfers
+	if transfers == 0 {
+		transfers = 4
+	}
+
+	// Use rclone copy to upload without deleting remote files
+	transfersFlag := fmt.Sprintf("--transfers=%d", transfers)
+	cmd := exec.Command("rclone", "copy", localPath, remoteDest+"/"+filepath.Base(localPath),
+		"-P", transfersFlag)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("rclone upload failed: %w", err)
+	}
+
+	printSuccess("Upload complete!")
+
+	if cfg.DeleteAfterUpload {
+		// Verify upload before deleting local files
+		printInfo("Verifying upload integrity...")
+		verifyCmd := exec.Command("rclone", "check", "--one-way", localPath, remoteDest+"/"+filepath.Base(localPath))
+		var verifyOut, verifyErr bytes.Buffer
+		verifyCmd.Stdout = &verifyOut
+		verifyCmd.Stderr = &verifyErr
+
+		err = verifyCmd.Run()
+		if err != nil {
+			return fmt.Errorf("upload verification failed - NOT deleting local files: %w\nOutput: %s\nErrors: %s",
+				err, verifyOut.String(), verifyErr.String())
+		}
+
+		printSuccess("Upload verified successfully")
+		fmt.Printf("Deleting local files: %s\n", localPath)
+		err = os.RemoveAll(localPath)
+		if err != nil {
+			return fmt.Errorf("failed to delete local files: %w", err)
+		}
+		printSuccess("Local files deleted")
+	}
+
+	return nil
+}
+
+// remotePathExists checks if a directory exists at the specified remotePath on the configured rclone remote.
+// The remotePath is relative to cfg.RclonePath and should not include the remote name or base path.
+// Returns false without error if cfg.RcloneEnabled is false.
+// Returns true if the directory exists, false if it doesn't exist or on error.
+func remotePathExists(remotePath string, cfg *Config) (bool, error) {
+	if !cfg.RcloneEnabled {
+		return false, nil
+	}
+
+	// Validate paths before executing rclone command
+	if err := validatePath(remotePath); err != nil {
+		return false, fmt.Errorf("invalid remote path: %w", err)
+	}
+
+	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	fullPath := remoteDest + "/" + remotePath
+
+	cmd := exec.Command("rclone", "lsf", fullPath, "--dirs-only")
+	output, err := cmd.Output()
+
+	if err != nil {
+		// Check exit code to distinguish "doesn't exist" from other errors
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			// Exit code 3 means "directory not found" - this is expected
+			if exitErr.ExitCode() == 3 {
+				return false, nil
+			}
+			// Other exit codes indicate real errors
+			return false, fmt.Errorf("rclone error checking remote path (exit %d): %w", exitErr.ExitCode(), err)
+		}
+		// Non-exit errors (e.g., rclone not found) are real errors
+		return false, fmt.Errorf("failed to execute rclone: %w", err)
+	}
+
+	// If output is not empty, directory exists
+	return len(output) > 0, nil
 }
 
 func parseCfg() (*Config, error) {
@@ -530,6 +870,32 @@ func getArtistMeta(artistId string) ([]*ArtistMeta, error) {
 		offset += retLen
 	}
 	return allArtistMeta, nil
+}
+
+func getArtistList() (*ArtistListResp, error) {
+	req, err := http.NewRequest(http.MethodGet, streamApiBase+"api.aspx", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	query.Set("method", "catalog.artists")
+	query.Set("vdisp", "1")
+	req.URL.RawQuery = query.Encode()
+	req.Header.Add("User-Agent", userAgentTwo)
+	do, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer do.Body.Close()
+	if do.StatusCode != http.StatusOK {
+		return nil, errors.New(do.Status)
+	}
+	var obj ArtistListResp
+	err = json.NewDecoder(do.Body).Decode(&obj)
+	if err != nil {
+		return nil, err
+	}
+	return &obj, nil
 }
 
 func getPurchasedManUrl(skuID int, showID, userID, uguID string) (string, error) {
@@ -903,13 +1269,11 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 		return err
 	}
 	if exists {
-		fmt.Println("Track already exists locally.")
+		printInfo(fmt.Sprintf("Track exists %s skipping", symbolArrow))
 		return nil
 	}
-	fmt.Printf(
-		"Downloading track %d of %d: %s - %s\n", trackNum, trackTotal, track.SongTitle,
-		chosenQual.Specs,
-	)
+	printDownload(fmt.Sprintf("Track %d/%d: %s%s%s - %s",
+		trackNum, trackTotal, colorBold, track.SongTitle, colorReset, chosenQual.Specs))
 	if isHlsOnly {
 		err = hlsOnly(trackPath, chosenQual.URL, cfg.FfmpegNameStr)
 	} else {
@@ -922,6 +1286,11 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 	return nil
 }
 
+// album downloads an album or show from Nugs.net using the provided albumID.
+// If albumID is empty, uses the provided artResp metadata instead of fetching it.
+// The function creates artist and album directories, downloads all tracks, and optionally
+// uploads to rclone if configured. Skips download if the show already exists locally or on remote.
+// Returns an error if metadata fetching, directory creation, or any track download fails.
 func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *AlbArtResp) error {
 	var (
 		meta   *AlbArtResp
@@ -957,6 +1326,15 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 			return video(albumID, "", cfg, streamParams, meta, false)
 		}
 	}
+	// Create artist directory
+	artistFolder := sanitise(meta.ArtistName)
+	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	err := makeDirs(artistPath)
+	if err != nil {
+		fmt.Println("Failed to make artist folder.")
+		return err
+	}
+
 	albumFolder := meta.ArtistName + " - " + strings.TrimRight(meta.ContainerInfo, " ")
 	fmt.Println(albumFolder)
 	if len(albumFolder) > 120 {
@@ -964,8 +1342,27 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 		fmt.Println(
 			"Album folder name was chopped because it exceeds 120 characters.")
 	}
-	albumPath := filepath.Join(cfg.OutPath, sanitise(albumFolder))
-	err := makeDirs(albumPath)
+	albumPath := filepath.Join(artistPath, sanitise(albumFolder))
+
+	// Check if show already exists locally
+	if stat, err := os.Stat(albumPath); err == nil && stat.IsDir() {
+		printInfo(fmt.Sprintf("Show already exists locally %s skipping", symbolArrow))
+		return nil
+	}
+
+	// Check if show already exists on remote
+	remoteShowPath := artistFolder + "/" + sanitise(albumFolder)
+	printInfo(fmt.Sprintf("Checking remote for: %s%s%s", colorCyan, sanitise(albumFolder), colorReset))
+	exists, err := remotePathExists(remoteShowPath, cfg)
+	if err != nil {
+		printWarning(fmt.Sprintf("Failed to check remote: %v", err))
+		// Continue with download even if remote check fails
+	} else if exists {
+		printSuccess(fmt.Sprintf("Show found on remote %s skipping", symbolArrow))
+		return nil
+	}
+
+	err = makeDirs(albumPath)
 	if err != nil {
 		fmt.Println("Failed to make album folder.")
 		return err
@@ -978,6 +1375,15 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 			handleErr("Track failed.", err, false)
 		}
 	}
+
+	// Upload to rclone if enabled
+	if cfg.RcloneEnabled {
+		err = uploadToRclone(albumPath, cfg)
+		if err != nil {
+			handleErr("Upload failed.", err, false)
+		}
+	}
+
 	return nil
 }
 
@@ -1018,6 +1424,263 @@ func artist(artistId string, cfg *Config, streamParams *StreamParams) error {
 	return nil
 }
 
+// listArtists fetches and displays a formatted list of all artists available on Nugs.net.
+// The output includes artist ID, name, number of shows, and number of albums.
+// Returns an error if the artist list cannot be fetched from the API.
+func listArtists(jsonLevel string) error {
+	if jsonLevel == "" {
+		fmt.Println("Fetching artist catalog...")
+	}
+	artistList, err := getArtistList()
+	if err != nil {
+		fmt.Println("Failed to get artist list.")
+		return err
+	}
+
+	artists := artistList.Response.Artists
+	if len(artists) == 0 {
+		if jsonLevel != "" {
+			emptyOutput := ArtistListOutput{Artists: []ArtistOutput{}, Total: 0}
+			jsonData, _ := json.MarshalIndent(emptyOutput, "", "  ")
+			fmt.Println(string(jsonData))
+		} else {
+			fmt.Println("No artists found.")
+		}
+		return nil
+	}
+
+	if jsonLevel != "" {
+		// Raw mode: output full API response as-is
+		if jsonLevel == "raw" {
+			jsonData, err := json.MarshalIndent(artistList, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+			return nil
+		}
+
+		// Sort alphabetically for non-raw JSON output
+		sort.Slice(artists, func(i, j int) bool {
+			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
+		})
+
+		// Build structured JSON output (same for minimal/standard/extended)
+		output := ArtistListOutput{
+			Artists: make([]ArtistOutput, len(artists)),
+			Total:   len(artists),
+		}
+		for i, artist := range artists {
+			output.Artists[i] = ArtistOutput{
+				ArtistID:   artist.ArtistID,
+				ArtistName: artist.ArtistName,
+				NumShows:   artist.NumShows,
+				NumAlbums:  artist.NumAlbums,
+			}
+		}
+		jsonData, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonData))
+	} else {
+		// Existing table output
+		fmt.Printf("\nFound %d artists:\n\n", len(artists))
+		fmt.Printf("%-8s %-60s %-10s %-10s\n", "ID", "Name", "Shows", "Albums")
+		fmt.Println(strings.Repeat("-", 90))
+
+		for _, artist := range artists {
+			name := artist.ArtistName
+			if len(name) > 58 {
+				name = name[:58] + ".."
+			}
+			fmt.Printf("%-8d %-60s %-10d %-10d\n",
+				artist.ArtistID,
+				name,
+				artist.NumShows,
+				artist.NumAlbums)
+		}
+
+		fmt.Printf("\nTo list shows for an artist, use: list <artist_id>\n")
+	}
+	return nil
+}
+
+// listArtistShows fetches and displays all shows for a specific artist identified by artistId.
+// The output is sorted by date in reverse chronological order (newest first) and includes
+// container ID, date, title, and venue for each show.
+// Returns an error if the artist metadata cannot be fetched from the API.
+func listArtistShows(artistId string, jsonLevel string) error {
+	if jsonLevel == "" {
+		fmt.Println("Fetching artist shows...")
+	}
+	allMeta, err := getArtistMeta(artistId)
+	if err != nil {
+		fmt.Println("Failed to get artist metadata.")
+		return err
+	}
+
+	if len(allMeta) == 0 {
+		fmt.Println("No metadata found for this artist.")
+		return nil
+	}
+
+	// Extract artist name from first container
+	artistName := "Unknown Artist"
+	if len(allMeta) > 0 && len(allMeta[0].Response.Containers) > 0 {
+		artistName = allMeta[0].Response.Containers[0].ArtistName
+	}
+
+	// Collect all containers from all paginated responses
+	type containerWithDate struct {
+		container *AlbArtResp
+		dateStr   string
+	}
+	var allContainers []containerWithDate
+
+	for _, meta := range allMeta {
+		for _, container := range meta.Response.Containers {
+			dateStr := container.PerformanceDateShortYearFirst
+			if dateStr == "" {
+				dateStr = container.PerformanceDate
+			}
+			allContainers = append(allContainers, containerWithDate{
+				container: container,
+				dateStr:   dateStr,
+			})
+		}
+	}
+
+	if len(allContainers) == 0 {
+		if jsonLevel != "" {
+			artistIdInt, _ := strconv.Atoi(artistId)
+			emptyOutput := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      []ShowOutput{},
+				Total:      0,
+			}
+			jsonData, _ := json.MarshalIndent(emptyOutput, "", "  ")
+			fmt.Println(string(jsonData))
+		} else {
+			fmt.Printf("No shows found for %s\n", artistName)
+		}
+		return nil
+	}
+
+	// Sort by date in reverse chronological order (newest first)
+	// Empty dates go to the end
+	sort.Slice(allContainers, func(i, j int) bool {
+		dateI := allContainers[i].dateStr
+		dateJ := allContainers[j].dateStr
+
+		// Push empty dates to end
+		if dateI == "" && dateJ != "" {
+			return false
+		}
+		if dateI != "" && dateJ == "" {
+			return true
+		}
+		if dateI == "" && dateJ == "" {
+			return false
+		}
+
+		// Sort by date descending (newest first)
+		return dateI > dateJ
+	})
+
+	if jsonLevel != "" {
+		// Raw mode: output full API response as-is (array of paginated responses)
+		if jsonLevel == "raw" {
+			jsonData, err := json.MarshalIndent(allMeta, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+			return nil
+		}
+
+		// Build structured JSON output for minimal/standard/extended
+		artistIdInt, _ := strconv.Atoi(artistId)
+
+		if jsonLevel == "extended" {
+			// Extended: output full container structs with all fields
+			shows := make([]*AlbArtResp, len(allContainers))
+			for i, item := range allContainers {
+				shows[i] = item.container
+			}
+			output := map[string]interface{}{
+				"artistID":   artistIdInt,
+				"artistName": artistName,
+				"shows":      shows,
+				"total":      len(allContainers),
+			}
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		} else {
+			// Minimal or Standard: use ShowOutput struct
+			output := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      make([]ShowOutput, len(allContainers)),
+				Total:      len(allContainers),
+			}
+
+			for i, item := range allContainers {
+				show := ShowOutput{
+					ContainerID: item.container.ContainerID,
+					Date:        item.dateStr,
+					Title:       item.container.ContainerInfo,
+					Venue:       item.container.VenueName,
+				}
+
+				// Standard level includes location details
+				if jsonLevel == "standard" {
+					show.VenueCity = item.container.VenueCity
+					show.VenueState = item.container.VenueState
+				}
+
+				output.Shows[i] = show
+			}
+
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		}
+	} else {
+		// Existing table output
+		fmt.Printf("\n%s - %d shows:\n\n", artistName, len(allContainers))
+		fmt.Printf("%-10s %-12s %-50s %-30s\n", "ID", "Date", "Title", "Venue")
+		fmt.Println(strings.Repeat("-", 105))
+
+		for _, item := range allContainers {
+			container := item.container
+			title := container.ContainerInfo
+			if len(title) > 48 {
+				title = title[:48] + ".."
+			}
+			venue := container.VenueName
+			if len(venue) > 28 {
+				venue = venue[:28] + ".."
+			}
+
+			fmt.Printf("%-10d %-12s %-50s %-30s\n",
+				container.ContainerID,
+				item.dateStr,
+				title,
+				venue)
+		}
+
+		fmt.Printf("\nTo download a show, use: https://play.nugs.net/release/<container_id>\n")
+	}
+	return nil
+}
+
 func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
 	_meta, err := getPlistMeta(plistId, cfg.Email, legacyToken, cat)
 	if err != nil {
@@ -1047,6 +1710,15 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 			handleErr("Track failed.", err, false)
 		}
 	}
+
+	// Upload to rclone if enabled
+	if cfg.RcloneEnabled {
+		err = uploadToRclone(plistPath, cfg)
+		if err != nil {
+			handleErr("Upload failed.", err, false)
+		}
+	}
+
 	return nil
 }
 
@@ -1419,6 +2091,12 @@ func parseLstreamMeta(_meta *ArtistMeta) *AlbumMeta {
 	return parsed
 }
 
+// video downloads a video from Nugs.net using the provided videoID.
+// If _meta is provided, uses it instead of fetching metadata. uguID is used for purchased videos.
+// The isLstream parameter indicates whether this is a livestream video.
+// Downloads video in the highest quality matching cfg.VideoFormat, processes chapters if available,
+// converts from TS to MP4 container, and optionally uploads to rclone if configured.
+// Returns an error if metadata fetching, download, conversion, or upload fails.
 func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta *AlbArtResp, isLstream bool) error {
 	var (
 		chapsAvail bool
@@ -1476,7 +2154,17 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		fmt.Println("Failed to get video master manifest.")
 		return err
 	}
-	vidPathNoExt := filepath.Join(cfg.OutPath, sanitise(videoFname+"_"+retRes))
+
+	// Create artist directory
+	artistFolder := sanitise(meta.ArtistName)
+	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	err = makeDirs(artistPath)
+	if err != nil {
+		fmt.Println("Failed to make artist folder.")
+		return err
+	}
+
+	vidPathNoExt := filepath.Join(artistPath, sanitise(videoFname+"_"+retRes))
 	VidPathTs := vidPathNoExt + ".ts"
 	vidPath := vidPathNoExt + ".mp4"
 	exists, err := fileExists(vidPath)
@@ -1485,7 +2173,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		return err
 	}
 	if exists {
-		fmt.Println("Video already exists locally.")
+		printInfo(fmt.Sprintf("Video exists %s skipping", symbolArrow))
 		return nil
 	}
 	manBaseUrl, query, err := getManifestBase(manifestUrl)
@@ -1545,6 +2233,15 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	if err != nil {
 		fmt.Println("Failed to delete TS.")
 	}
+
+	// Upload to rclone if enabled
+	if cfg.RcloneEnabled {
+		err = uploadToRclone(artistPath, cfg)
+		if err != nil {
+			handleErr("Upload failed.", err, false)
+		}
+	}
+
 	return nil
 }
 
@@ -1597,11 +2294,17 @@ func paidLstream(query, uguID string, cfg *Config, streamParams *StreamParams) e
 }
 
 func init() {
+	// Check if --json flag is present, if so, suppress banner
+	for _, arg := range os.Args {
+		if arg == "--json" {
+			return
+		}
+	}
 	fmt.Println(`
- _____                ____                _           _         
-|   | |_ _ ___ ___   |    \ ___ _ _ _ ___| |___ ___ _| |___ ___ 
+ _____                ____                _           _
+|   | |_ _ ___ ___   |    \ ___ _ _ _ ___| |___ ___ _| |___ ___
 | | | | | | . |_ -|  |  |  | . | | | |   | | . | .'| . | -_|  _|
-|_|___|___|_  |___|  |____/|___|_____|_|_|_|___|__,|___|___|_|  
+|_|___|___|_  |___|  |____/|___|_____|_|_|_|___|__,|___|___|_|
 	  |___|
 `)
 }
@@ -1616,10 +2319,100 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	// Check if config.json exists, if not, prompt to create it
+	if _, err := os.Stat("config.json"); os.IsNotExist(err) {
+		err = promptForConfig()
+		if err != nil {
+			handleErr("Failed to create config.", err, true)
+		}
+	}
+
+	// Check if first argument is "help" before parsing
+	if len(os.Args) > 1 && os.Args[1] == "help" {
+		// Replace with --help to trigger help display
+		os.Args[1] = "--help"
+	}
+
+	// Check for --json flag with level parameter BEFORE parsing config
+	// This removes it from os.Args so the arg parser doesn't complain
+	jsonLevel := "" // empty = table output, "minimal"/"standard"/"extended"/"raw"
+	for i := 0; i < len(os.Args); i++ {
+		if os.Args[i] == "--json" {
+			// Check if value is provided
+			if i+1 >= len(os.Args) {
+				fmt.Println("Error: --json flag requires a level argument (minimal, standard, extended, raw)")
+				fmt.Println("Usage: list artists --json <level>")
+				return
+			}
+			jsonLevel = os.Args[i+1]
+			// Remove --json and its value from args
+			os.Args = append(os.Args[:i], os.Args[i+2:]...)
+			break
+		}
+	}
+
+	// Validate json level
+	if jsonLevel != "" && jsonLevel != "minimal" && jsonLevel != "standard" && jsonLevel != "extended" && jsonLevel != "raw" {
+		fmt.Printf("Invalid JSON level: %s. Valid options: minimal, standard, extended, raw\n", jsonLevel)
+		return
+	}
+
 	cfg, err := parseCfg()
 	if err != nil {
 		handleErr("Failed to parse config/args.", err, true)
 	}
+
+	// Check if rclone is available when enabled
+	if cfg.RcloneEnabled {
+		err = checkRcloneAvailable(jsonLevel != "")
+		if err != nil {
+			handleErr("Rclone check failed.", err, true)
+		}
+	}
+
+	// Check if first argument is "list" command
+	if len(cfg.Urls) > 0 && cfg.Urls[0] == "list" {
+		if len(cfg.Urls) < 2 {
+			fmt.Println("Usage: list artists | list <artist_id>")
+			return
+		}
+
+		subCmd := cfg.Urls[1]
+		if subCmd == "artists" {
+			err := listArtists(jsonLevel)
+			if err != nil {
+				handleErr("List artists failed.", err, true)
+			}
+			return
+		}
+
+		// Try to parse as artist ID
+		if _, err := strconv.Atoi(subCmd); err == nil {
+			err := listArtistShows(subCmd, jsonLevel)
+			if err != nil {
+				handleErr("List shows failed.", err, true)
+			}
+			return
+		}
+
+		fmt.Printf("Invalid list command: %s\n", subCmd)
+		fmt.Println("Usage: list artists | list <artist_id>")
+		return
+	}
+
+	// Check for "<artistID> latest" shorthand
+	if len(cfg.Urls) == 2 {
+		if artistID, err := strconv.Atoi(cfg.Urls[0]); err == nil {
+			if cfg.Urls[1] == "latest" {
+				// Construct the artist latest URL and replace the args
+				artistUrl := fmt.Sprintf("https://play.nugs.net/artist/%d/latest", artistID)
+				cfg.Urls = []string{artistUrl}
+				printMusic(fmt.Sprintf("Downloading latest shows from %sartist %d%s", colorBold, artistID, colorReset))
+			}
+		}
+	}
+
 	err = makeDirs(cfg.OutPath)
 	if err != nil {
 		handleErr("Failed to make output folder.", err, true)
@@ -1648,14 +2441,12 @@ func main() {
 	if !subInfo.IsContentAccessible {
 		planDesc = "no active subscription"
 	}
-	fmt.Println(
-		"Signed in successfully - " + planDesc + "\n",
-	)
+	printSuccess(fmt.Sprintf("Signed in - %s%s%s", colorCyan, planDesc, colorReset))
 	streamParams := parseStreamParams(userId, subInfo, isPromo)
 	albumTotal := len(cfg.Urls)
 	var itemErr error
 	for albumNum, _url := range cfg.Urls {
-		fmt.Printf("Item %d of %d:\n", albumNum+1, albumTotal)
+		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
 		itemId, mediaType := checkUrl(_url)
 		if itemId == "" {
 			fmt.Println("Invalid URL:", _url)
@@ -1676,6 +2467,8 @@ func main() {
 			itemErr = video(itemId, "", cfg, streamParams, nil, true)
 		case 9:
 			itemErr = paidLstream(itemId, uguID, cfg, streamParams)
+		case 11:
+			itemErr = album(itemId, cfg, streamParams, nil)
 		}
 		if itemErr != nil {
 			handleErr("Item failed.", itemErr, false)
