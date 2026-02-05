@@ -839,6 +839,32 @@ func getPlistMeta(plistId, email, legacyToken string, cat bool) (*PlistMeta, err
 	return &obj, nil
 }
 
+func getLatestCatalog() (*LatestCatalogResp, error) {
+	req, err := http.NewRequest(http.MethodGet, streamApiBase+"api.aspx", nil)
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	query.Set("method", "catalog.latest")
+	query.Set("vdisp", "1")
+	req.URL.RawQuery = query.Encode()
+	req.Header.Add("User-Agent", userAgentTwo)
+	do, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer do.Body.Close()
+	if do.StatusCode != http.StatusOK {
+		return nil, errors.New(do.Status)
+	}
+	var obj LatestCatalogResp
+	err = json.NewDecoder(do.Body).Decode(&obj)
+	if err != nil {
+		return nil, err
+	}
+	return &obj, nil
+}
+
 func getArtistMeta(artistId string) ([]*ArtistMeta, error) {
 	var allArtistMeta []*ArtistMeta
 	offset := 1
@@ -1517,90 +1543,64 @@ func listArtists(jsonLevel string) error {
 	return nil
 }
 
-// displayWelcome shows a welcome screen with latest shows from popular artists
+// displayWelcome shows a welcome screen with latest shows from the catalog
 func displayWelcome() error {
 	fmt.Printf("\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", colorCyan, colorReset)
 	fmt.Printf("%s  Welcome to Nugs Downloader%s\n", colorBold, colorReset)
 	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
 
-	// Popular artists to showcase (Billy Strings, Dead & Company, Phish)
-	popularArtists := []struct {
-		id   string
-		name string
-	}{
-		{"1125", "Billy Strings"},
-		{"461", "Dead & Company"},
-		{"1045", "Phish"},
+	// Fetch latest catalog additions
+	catalog, err := getLatestCatalog()
+	if err != nil {
+		fmt.Printf("Unable to fetch latest shows: %v\n\n", err)
+		return err
 	}
 
-	fmt.Printf("%sLatest Shows:%s\n\n", colorBold, colorReset)
-
-	for _, artist := range popularArtists {
-		allMeta, err := getArtistMeta(artist.id)
-		if err != nil {
-			continue // Skip on error
-		}
-
-		if len(allMeta) == 0 || len(allMeta[0].Response.Containers) == 0 {
-			continue
-		}
-
-		// Collect all containers and sort by date
-		type containerWithDate struct {
-			container *AlbArtResp
-			dateStr   string
-		}
-		var allContainers []containerWithDate
-
-		for _, meta := range allMeta {
-			for _, container := range meta.Response.Containers {
-				dateStr := container.PerformanceDateShortYearFirst
-				if dateStr == "" {
-					dateStr = container.PerformanceDate
-				}
-				allContainers = append(allContainers, containerWithDate{
-					container: container,
-					dateStr:   dateStr,
-				})
-			}
-		}
-
-		if len(allContainers) == 0 {
-			continue
-		}
-
-		// Sort by date descending
-		sort.Slice(allContainers, func(i, j int) bool {
-			dateI := allContainers[i].dateStr
-			dateJ := allContainers[j].dateStr
-			if dateI == "" && dateJ != "" {
-				return false
-			}
-			if dateI != "" && dateJ == "" {
-				return true
-			}
-			return dateI > dateJ
-		})
-
-		// Show top 3 latest shows
-		fmt.Printf("  %s%s%s\n", colorGreen, artist.name, colorReset)
-		showCount := 3
-		if len(allContainers) < showCount {
-			showCount = len(allContainers)
-		}
-
-		for i := 0; i < showCount; i++ {
-			item := allContainers[i]
-			title := item.container.ContainerInfo
-			if len(title) > 55 {
-				title = title[:55] + "..."
-			}
-			fmt.Printf("    %s%-12s%s %s\n", colorYellow, item.dateStr, colorReset, title)
-		}
-		fmt.Println()
+	if len(catalog.Response.RecentItems) == 0 {
+		fmt.Printf("No recent shows available.\n\n")
+		return nil
 	}
 
-	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
+	fmt.Printf("%sLatest Additions to Catalog:%s\n\n", colorBold, colorReset)
+
+	// Show top 15 latest additions
+	showCount := 15
+	if len(catalog.Response.RecentItems) < showCount {
+		showCount = len(catalog.Response.RecentItems)
+	}
+
+	for i := 0; i < showCount; i++ {
+		item := catalog.Response.RecentItems[i]
+
+		// Format artist name
+		artistName := item.ArtistName
+		if len(artistName) > 25 {
+			artistName = artistName[:25] + "..."
+		}
+
+		// Format title
+		title := item.ContainerInfo
+		if len(title) > 40 {
+			title = title[:40] + "..."
+		}
+
+		// Format location
+		location := item.Venue
+		if item.VenueCity != "" {
+			location = fmt.Sprintf("%s, %s", item.VenueCity, item.VenueState)
+		}
+		if len(location) > 30 {
+			location = location[:30] + "..."
+		}
+
+		fmt.Printf("  %s%-26s%s %s%-12s%s %s%-42s%s %s\n",
+			colorGreen, artistName, colorReset,
+			colorYellow, item.ShowDateFormattedShort, colorReset,
+			colorCyan, title, colorReset,
+			location)
+	}
+
+	fmt.Printf("\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
 	fmt.Printf("%sQuick Start:%s\n", colorBold, colorReset)
 	fmt.Printf("  %snugs list artists%s              Browse all artists\n", colorCyan, colorReset)
 	fmt.Printf("  %snugs list 1125%s                 View Billy Strings shows\n", colorCyan, colorReset)
