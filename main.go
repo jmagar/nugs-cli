@@ -59,6 +59,14 @@ const (
 	symbolRocket   = "🚀"
 )
 
+// JSON output levels
+const (
+	JSONLevelMinimal  = "minimal"
+	JSONLevelStandard = "standard"
+	JSONLevelExtended = "extended"
+	JSONLevelRaw      = "raw"
+)
+
 const (
 	devKey         = "x7f54tgbdyc64y656thy47er4"
 	clientId       = "Eg7HuH873H65r5rt325UytR5429"
@@ -1441,7 +1449,10 @@ func listArtists(jsonLevel string) error {
 	if len(artists) == 0 {
 		if jsonLevel != "" {
 			emptyOutput := ArtistListOutput{Artists: []ArtistOutput{}, Total: 0}
-			jsonData, _ := json.MarshalIndent(emptyOutput, "", "  ")
+			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal empty output: %w", err)
+			}
 			fmt.Println(string(jsonData))
 		} else {
 			fmt.Println("No artists found.")
@@ -1451,7 +1462,7 @@ func listArtists(jsonLevel string) error {
 
 	if jsonLevel != "" {
 		// Raw mode: output full API response as-is
-		if jsonLevel == "raw" {
+		if jsonLevel == JSONLevelRaw {
 			jsonData, err := json.MarshalIndent(artistList, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
@@ -1560,7 +1571,10 @@ func listArtistShows(artistId string, jsonLevel string) error {
 				Shows:      []ShowOutput{},
 				Total:      0,
 			}
-			jsonData, _ := json.MarshalIndent(emptyOutput, "", "  ")
+			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal empty output: %w", err)
+			}
 			fmt.Println(string(jsonData))
 		} else {
 			fmt.Printf("No shows found for %s\n", artistName)
@@ -1591,7 +1605,7 @@ func listArtistShows(artistId string, jsonLevel string) error {
 
 	if jsonLevel != "" {
 		// Raw mode: output full API response as-is (array of paginated responses)
-		if jsonLevel == "raw" {
+		if jsonLevel == JSONLevelRaw {
 			jsonData, err := json.MarshalIndent(allMeta, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
@@ -1603,7 +1617,7 @@ func listArtistShows(artistId string, jsonLevel string) error {
 		// Build structured JSON output for minimal/standard/extended
 		artistIdInt, _ := strconv.Atoi(artistId)
 
-		if jsonLevel == "extended" {
+		if jsonLevel == JSONLevelExtended {
 			// Extended: output full container structs with all fields
 			shows := make([]*AlbArtResp, len(allContainers))
 			for i, item := range allContainers {
@@ -1638,7 +1652,7 @@ func listArtistShows(artistId string, jsonLevel string) error {
 				}
 
 				// Standard level includes location details
-				if jsonLevel == "standard" {
+				if jsonLevel == JSONLevelStandard {
 					show.VenueCity = item.container.VenueCity
 					show.VenueState = item.container.VenueState
 				}
@@ -2353,8 +2367,8 @@ func main() {
 	}
 
 	// Validate json level
-	if jsonLevel != "" && jsonLevel != "minimal" && jsonLevel != "standard" && jsonLevel != "extended" && jsonLevel != "raw" {
-		fmt.Printf("Invalid JSON level: %s. Valid options: minimal, standard, extended, raw\n", jsonLevel)
+	if jsonLevel != "" && jsonLevel != JSONLevelMinimal && jsonLevel != JSONLevelStandard && jsonLevel != JSONLevelExtended && jsonLevel != JSONLevelRaw {
+		fmt.Printf("Invalid JSON level: %s. Valid options: %s, %s, %s, %s\n", jsonLevel, JSONLevelMinimal, JSONLevelStandard, JSONLevelExtended, JSONLevelRaw)
 		return
 	}
 
