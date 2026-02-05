@@ -1,0 +1,28 @@
+# Credentials and config
+config.json
+
+# Build artifacts
+nugs_dl
+nugs_dl_*
+*.exe
+
+# Downloads
+Nugs downloads/
+/mnt/user/data/media/music/
+
+# Temporary files
+*.tmp
+chapters_nugs_dl_tmp.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Cache
+.cache/
