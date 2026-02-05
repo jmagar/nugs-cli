@@ -49,16 +49,26 @@ SPECIAL COMMANDS:
   help                           Show this help message
   list artists                   List all available artists
   list <artist_id>               List all shows for a specific artist
+  list artists --json <level>    Output artists as JSON (minimal/standard/extended/raw)
+  list <artist_id> --json <level> Output shows as JSON
   <artist_id> latest             Download latest shows from an artist
 
+JSON OUTPUT LEVELS:
+  minimal                        Essential fields only
+  standard                       Adds location details (for shows)
+  extended                       All available metadata
+  raw                            Unmodified API response
+
 EXAMPLES:
-  nugs_dl help
-  nugs_dl list artists
-  nugs_dl list 461
-  nugs_dl 1125 latest
-  nugs_dl https://play.nugs.net/release/12345
-  nugs_dl https://play.nugs.net/artist/461/latest
-  nugs_dl -f 3 https://play.nugs.net/release/12345`
+  nugs help
+  nugs list artists
+  nugs list 461
+  nugs list artists --json standard
+  nugs list 1125 --json minimal | jq '.shows[:5]'
+  nugs 1125 latest
+  nugs https://play.nugs.net/release/12345
+  nugs https://play.nugs.net/artist/461/latest
+  nugs -f 3 https://play.nugs.net/release/12345`
 }
 
 type Auth struct {

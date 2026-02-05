@@ -5,6 +5,10 @@ config.json
 nugs_dl
 nugs_dl_*
 *.exe
+main
+nugs
+nugs-downloader
+bin/
 
 # Downloads
 Nugs downloads/

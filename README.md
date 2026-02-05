@@ -4,6 +4,28 @@ Nugs downloader written in Go.
 ![](https://i.imgur.com/BEudufy.png)
 [Windows, Linux, macOS, and Android binaries](https://github.com/Sorrow446/Nugs-Downloader/releases)
 
+# Building from Source
+
+**Requirements:** Go 1.16 or later
+
+```bash
+# Clone the repository
+git clone https://github.com/Sorrow446/Nugs-Downloader.git
+cd Nugs-Downloader
+
+# Build using Makefile (recommended)
+make build
+
+# Or build manually
+mkdir -p bin
+go build -o bin/nugs
+
+# Optionally install to system (requires sudo)
+make install
+```
+
+The binary will be created at `bin/nugs` and can be run from anywhere if you add `bin/` to your PATH or use `make install`.
+
 # Setup
 Input credentials into config file.
 Configure any other options if needed.
@@ -43,48 +65,139 @@ If you don't have root in Linux, you can have Nugs DL look for the binary in the
 You can browse the catalog without downloading:
 
 **List all artists:**
-```
-nugs_dl_x64.exe list artists
+```bash
+nugs list artists
 ```
 
 **List all shows for an artist:**
-```
-nugs_dl_x64.exe list 461
+```bash
+nugs list 461
 ```
 Replace `461` with any artist ID from the artist list.
 
 **Download an artist's latest shows:**
-```
-nugs_dl_x64.exe 461 latest
+```bash
+nugs 461 latest
 ```
 This automatically downloads the latest shows from the specified artist (shorthand for the full artist/latest URL).
+
+### JSON Output
+
+List commands support JSON output with the `--json <level>` flag for scripting and integration with tools like `jq`:
+
+**Output Levels:**
+- `minimal` - Essential fields only (ID, name, date, title, venue)
+- `standard` - Adds location details (city, state)
+- `extended` - All available metadata fields
+- `raw` - Unmodified API response
+
+**Examples:**
+
+```bash
+# Get artists as JSON (sorted alphabetically)
+nugs list artists --json standard
+
+# Get shows with location details
+nugs list 1125 --json standard
+
+# Filter with jq - artists with 100+ shows
+nugs list artists --json standard | jq '.artists[] | select(.numShows > 100)'
+
+# Get latest 5 shows
+nugs list 461 --json minimal | jq '.shows[:5]'
+
+# Find shows at specific venue
+nugs list 461 --json standard | jq '.shows[] | select(.venue == "Madison Square Garden")'
+```
+
+**Output Formats:**
+
+*Artists (minimal/standard/extended - all same data):*
+```json
+{
+  "artists": [
+    {
+      "artistID": 461,
+      "artistName": "Grateful Dead",
+      "numShows": 2500,
+      "numAlbums": 350
+    }
+  ],
+  "total": 1
+}
+```
+
+*Shows (minimal):*
+```json
+{
+  "artistID": 461,
+  "artistName": "Grateful Dead",
+  "shows": [
+    {
+      "containerID": 12345,
+      "date": "2024-10-15",
+      "title": "Fall Tour 2024",
+      "venue": "Madison Square Garden"
+    }
+  ],
+  "total": 1
+}
+```
+
+*Shows (standard - adds location):*
+```json
+{
+  "shows": [
+    {
+      "containerID": 12345,
+      "date": "2024-10-15",
+      "title": "Fall Tour 2024",
+      "venue": "Madison Square Garden",
+      "venueCity": "New York",
+      "venueState": "NY"
+    }
+  ]
+}
+```
 
 # Usage
 Args take priority over the config file.
 
 Download two albums:
-`nugs_dl_x64.exe https://play.nugs.net/release/23329 https://play.nugs.net/release/23790`
+```bash
+nugs https://play.nugs.net/release/23329 https://play.nugs.net/release/23790
+```
 
 Download using simple album IDs (shorthand):
-`nugs_dl_x64.exe 23329 23790`
+```bash
+nugs 23329 23790
+```
 
 Download a single album and from two text files:
-`nugs_dl_x64.exe https://play.nugs.net/release/23329 G:\1.txt G:\2.txt`
+```bash
+nugs https://play.nugs.net/release/23329 /path/to/urls1.txt /path/to/urls2.txt
+```
 
 Download a user playlist and video:
-`nugs_dl_x64.exe https://play.nugs.net/#/playlists/playlist/1215400 "https://play.nugs.net/#/videos/artist/1045/Dead%20and%20Company/container/27323"`
+```bash
+nugs https://play.nugs.net/#/playlists/playlist/1215400 "https://play.nugs.net/#/videos/artist/1045/Dead%20and%20Company/container/27323"
+```
+
+## Command Line Options
 
 ```
- _____                ____                _           _
-|   | |_ _ ___ ___   |    \ ___ _ _ _ ___| |___ ___ _| |___ ___
-| | | | | | . |_ -|  |  |  | . | | | |   | | . | .'| . | -_|  _|
-|_|___|___|_  |___|  |____/|___|_____|_|_|_|___|__,|___|___|_|
-          |___|
+Usage: nugs [--format FORMAT] [--videoformat VIDEOFORMAT] [--outpath OUTPATH] [--force-video] [--skip-videos] [--skip-chapters] [URLS [URLS ...]]
 
-Usage: nugs_dl_x64.exe [--format FORMAT] [--videoformat VIDEOFORMAT] [--outpath OUTPATH] URLS [URLS ...]
+Special Commands:
+  help                           Show this help message
+  list artists                   List all available artists
+  list <artist_id>               List all shows for a specific artist
+  list artists --json <level>    Output artists as JSON (minimal/standard/extended/raw)
+  list <artist_id> --json <level> Output shows as JSON
+  <artist_id> latest             Download latest shows from an artist
 
 Positional arguments:
-  URLS
+  URLS                           Album/artist URLs, IDs, or text files containing URLs
 
 Options:
   --format FORMAT, -f FORMAT
@@ -107,7 +220,7 @@ Options:
   --skip-videos          Skips videos in artist URLs.
   --skip-chapters        Skips chapters for videos.
   --help, -h             display this help and exit
-  ```
+```
  
 # Disclaimer
 - I will not be responsible for how you use Nugs Downloader.    
