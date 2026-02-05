@@ -13,18 +13,15 @@ Nugs downloader written in Go.
 git clone https://github.com/Sorrow446/Nugs-Downloader.git
 cd Nugs-Downloader
 
-# Build using Makefile (recommended)
+# Build using Makefile (recommended - installs to ~/.local/bin)
 make build
 
 # Or build manually
-mkdir -p bin
-go build -o bin/nugs
-
-# Optionally install to system (requires sudo)
-make install
+mkdir -p ~/.local/bin
+go build -o ~/.local/bin/nugs
 ```
 
-The binary will be created at `bin/nugs` and can be run from anywhere if you add `bin/` to your PATH or use `make install`.
+The binary will be installed to `~/.local/bin/nugs` which is automatically in your PATH. You can run `nugs` from anywhere!
 
 # Setup
 Input credentials into config file.
