@@ -105,7 +105,7 @@ This is a method-driven endpoint; behavior changes based on query parameters.
 
 #### `method=catalog.containersAll`
 - **Purpose**
-  - List containers for an artist (this corresponds to “list all shows with IDs from an artist”).
+  - List containers for an artist (this corresponds to "list all shows with IDs from an artist").
 - **Query params**
   - `method=catalog.containersAll`
   - `artistList=<artist_id>`
@@ -118,6 +118,36 @@ This is a method-driven endpoint; behavior changes based on query parameters.
 
 This is implemented in the Python client as:
 - `CatalogAPI.get_artist_metadata(artist_id, offset=1, limit=100)`
+
+#### `method=catalog.latest`
+- **Purpose**
+  - List recently added shows across ALL artists (global catalog additions).
+  - Returns ~13,000+ shows sorted by when they were added to the catalog.
+- **Query params**
+  - `method=catalog.latest`
+  - `vdisp=1`
+- **Headers**
+  - `User-Agent: <App UA>` (recommended; endpoint is unauthenticated)
+- **Response (observed fields)**
+  - `Response.recentItems[]` entries include:
+    - `containerID` - Show ID
+    - `artistID` - Artist ID
+    - `artistName` - Artist name
+    - `containerInfo` - Show title/description
+    - `showDateFormattedShort` - Performance date (MM/DD/YY format)
+    - `performanceDateStr` - Performance date (full string)
+    - `postedDate` - When show was added to catalog (MM/DD/YY format)
+    - `venue` - Venue name
+    - `venueCity` - Venue city
+    - `venueState` - Venue state
+    - `pageURL` - Relative URL path
+    - `imageURL` - Relative image path
+    - `categoryID` - Content category
+- **Notes**
+  - Returns the entire recent catalog (13,253+ shows as of Feb 2026)
+  - Shows are sorted by `postedDate` (most recently added first)
+  - This is NOT sorted by performance date
+  - Useful for displaying "what's new" on Nugs.net
 
 #### `method=catalog.playlist`
 - **Purpose**

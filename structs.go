@@ -548,3 +548,27 @@ type ShowOutput struct {
 	VenueCity   string `json:"venueCity,omitempty"`
 	VenueState  string `json:"venueState,omitempty"`
 }
+
+// LatestCatalogResp represents the response from catalog.latest
+type LatestCatalogResp struct {
+	MethodName                  string `json:"methodName"`
+	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
+	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
+	Response                    struct {
+		RecentItems []struct {
+			ContainerInfo         string `json:"containerInfo"`
+			ArtistName            string `json:"artistName"`
+			ShowDateFormattedShort string `json:"showDateFormattedShort"`
+			ArtistID              int    `json:"artistID"`
+			ContainerID           int    `json:"containerID"`
+			PerformanceDateStr    string `json:"performanceDateStr"`
+			PostedDate            string `json:"postedDate"`
+			VenueCity             string `json:"venueCity"`
+			VenueState            string `json:"venueState"`
+			Venue                 string `json:"venue"`
+			PageURL               string `json:"pageURL"`
+			CategoryID            int    `json:"categoryID"`
+			ImageURL              string `json:"imageURL"`
+		} `json:"recentItems"`
+	} `json:"Response"`
+}
