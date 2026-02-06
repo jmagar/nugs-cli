@@ -2843,7 +2843,7 @@ func main() {
 		return
 	}
 
-	// Check for "<artistID> latest" shorthand
+	// Check for "<artistID> latest" or "<artistID> full" shorthand
 	if len(cfg.Urls) == 2 {
 		if artistID, err := strconv.Atoi(cfg.Urls[0]); err == nil {
 			if cfg.Urls[1] == "latest" {
@@ -2851,6 +2851,11 @@ func main() {
 				artistUrl := fmt.Sprintf("https://play.nugs.net/artist/%d/latest", artistID)
 				cfg.Urls = []string{artistUrl}
 				printMusic(fmt.Sprintf("Downloading latest shows from %sartist %d%s", colorBold, artistID, colorReset))
+			} else if cfg.Urls[1] == "full" {
+				// Construct the full artist catalog URL and replace the args
+				artistUrl := fmt.Sprintf("https://play.nugs.net/#/artist/%d", artistID)
+				cfg.Urls = []string{artistUrl}
+				printMusic(fmt.Sprintf("Downloading entire catalog from %sartist %d%s", colorBold, artistID, colorReset))
 			}
 		}
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"golang.org/x/term"
@@ -45,15 +46,45 @@ func getTermWidth() int {
 	return width
 }
 
+// stripAnsiCodes removes ANSI escape sequences from a string
+func stripAnsiCodes(s string) string {
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	return ansiRegex.ReplaceAllString(s, "")
+}
+
+// visibleLength returns the visible length of a string (excluding ANSI codes)
+func visibleLength(s string) int {
+	return len(stripAnsiCodes(s))
+}
+
 // truncateWithEllipsis truncates a string to maxLen with ellipsis if needed
+// Handles ANSI color codes properly by only counting visible characters
 func truncateWithEllipsis(s string, maxLen int) string {
-	if len(s) <= maxLen {
+	visibleLen := visibleLength(s)
+	if visibleLen <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		return s[:maxLen]
+		// For very short limits, just strip and truncate
+		stripped := stripAnsiCodes(s)
+		return stripped[:maxLen]
 	}
-	return s[:maxLen-3] + "..."
+
+	// Extract ANSI codes and visible text
+	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
+	codes := ansiRegex.FindAllString(s, -1)
+	stripped := stripAnsiCodes(s)
+
+	// Truncate the visible text
+	truncated := stripped[:maxLen-3] + "..."
+
+	// If there were color codes, try to preserve the first one
+	if len(codes) > 0 {
+		// Apply first color code and reset at the end
+		return codes[0] + truncated + colorReset
+	}
+
+	return truncated
 }
 
 // padRight pads a string to the specified width

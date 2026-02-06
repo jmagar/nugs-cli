@@ -434,6 +434,21 @@ when multiple nugs processes run simultaneously.
 
 ## Recent Improvements
 
+### Artist Catalog Shortcuts (2026-02-05)
+
+**Implemented:**
+- `nugs <artist_id> full` - Download entire artist catalog
+- `nugs <artist_id> latest` - Download latest shows (already existed)
+
+**Improved UX:**
+- Before: `nugs https://play.nugs.net/#/artist/461`
+- After: `nugs 461 full`
+
+**Implementation:**
+- Added shorthand parser in main.go (lines 2846-2861)
+- Constructs full artist URL: `https://play.nugs.net/#/artist/{id}`
+- Displays message: "Downloading entire catalog from artist {id}"
+
 ### Catalog Caching System (2026-02-05)
 
 **Implemented:**
