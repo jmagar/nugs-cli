@@ -148,16 +148,26 @@ nugs/
 ### Configuration Management
 
 **Config File Location:**
-- Development: `./config.json` (current directory)
-- Production: `~/.nugs/config.json` (user home)
+
+Config files are searched in this order:
+1. `./config.json` (current directory)
+2. `~/.nugs/config.json` (recommended, user home)
+3. `~/.config/nugs/config.json` (XDG standard)
 
 **Reading Config:**
 ```go
 func readConfig() (*Config, error) {
-    // Tries ./config.json first, then ~/.nugs/config.json
-    // Creates default if not found
+    // Checks all three locations in order
+    // Returns first found config
+    // Warns if permissions are insecure (not 0600)
 }
 ```
+
+**Default Config Values:**
+- `catalogAutoRefresh`: `true` (enabled by default)
+- `catalogRefreshTime`: `"05:00"` (5am)
+- `catalogRefreshTimezone`: `"America/New_York"` (EST)
+- `catalogRefreshInterval`: `"daily"`
 
 **Writing Config:**
 ```go
@@ -297,12 +307,12 @@ make build
 nugs 23329
 
 # Test catalog
-nugs catalog update
-nugs catalog stats
-nugs catalog gaps 1125
+nugs update
+nugs stats
+nugs gaps 1125
 
 # Test auto-refresh
-nugs catalog config set
+nugs refresh set
 ```
 
 ### Test Data
@@ -438,7 +448,7 @@ when multiple nugs processes run simultaneously.
 
 **Implemented:**
 - `nugs <artist_id> full` - Download entire artist catalog
-- `nugs <artist_id> latest` - Download latest shows (already existed)
+- `nugs grab <artist_id> latest` - Download latest shows
 
 **Improved UX:**
 - Before: `nugs https://play.nugs.net/#/artist/461`
@@ -487,6 +497,89 @@ when multiple nugs processes run simultaneously.
 - Atomic write operations (temp file + rename)
 - Retry logic for lock acquisition
 - Grade improved from A- to A
+
+### Rclone Configuration Clarification (2026-02-05)
+
+**Important Behavioral Note:**
+The `rclonePath` configuration field in `config.json` specifies the **remote storage path** only. It does NOT affect local download paths.
+
+**Configuration Behavior:**
+- **Local downloads:** Always go to `outPath` (e.g., `/home/user/Music`)
+- **Remote uploads:** Go to `rcloneRemote:rclonePath` (e.g., `gdrive:/Music`)
+- **Artist folder structure:** Preserved in both local and remote locations
+
+**Example:**
+```json
+{
+  "outPath": "/home/user/Music",
+  "rclonePath": "/Music",
+  "rcloneRemote": "gdrive"
+}
+```
+
+Downloads create: `/home/user/Music/Artist Name/Album/`
+Uploads to: `gdrive:/Music/Artist Name/Album/`
+
+**Code Reference:**
+- See `structs.go` line 61 for field documentation
+- See `uploadToRclone()` in `main.go` for remote path construction
+
+---
+
+### Breaking Changes & Migration Notes
+
+#### rclonePath Behavior Change (2026-02-05)
+
+**⚠️ BREAKING CHANGE:** The `rclonePath` field no longer affects local download paths.
+
+**Previous Behavior (before 2026-02-05):**
+```go
+// rclonePath was used as a fallback for local base path
+basePath := cfg.OutPath
+if cfg.RclonePath != "" {
+    basePath = cfg.RclonePath  // ❌ Confusing dual-purpose
+}
+```
+
+**New Behavior (after 2026-02-05):**
+```go
+// rclonePath ONLY affects remote storage uploads
+basePath := cfg.OutPath  // Always use outPath for local downloads
+remotePath := cfg.RclonePath  // Only for remote storage
+```
+
+**Migration Guide:**
+
+If you previously set `rclonePath` expecting it to control local download locations:
+
+1. **Update your config:**
+   - Move your desired local path to `outPath`
+   - Keep `rclonePath` for the remote storage path only
+
+2. **Example migration:**
+   ```json
+   // OLD CONFIG (relied on rclonePath for local paths)
+   {
+     "outPath": "/tmp/music",
+     "rclonePath": "/mnt/user/data/media/music",
+     "rcloneEnabled": false
+   }
+
+   // NEW CONFIG (explicit local path in outPath)
+   {
+     "outPath": "/mnt/user/data/media/music",
+     "rclonePath": "/Music",
+     "rcloneEnabled": true,
+     "rcloneRemote": "gdrive"
+   }
+   ```
+
+3. **Impact:**
+   - Local-only users: Update `outPath` to your preferred download location
+   - Rclone users: `outPath` for local, `rclonePath` for remote (clear separation)
+
+**Rationale:**
+This change eliminates a confusing "leaky abstraction" where a field named "rclone**Path**" (implying remote storage) was also controlling local filesystem behavior. The new design provides clear separation of concerns: `outPath` = local, `rclonePath` = remote.
 
 ---
 

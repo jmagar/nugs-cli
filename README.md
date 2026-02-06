@@ -4,9 +4,6 @@ Download your favorite live shows from Nugs.net, browse 13,000+ concerts offline
 
 Built for Deadheads, jam band fans, and anyone who wants their live music collection organized and accessible.
 
-![Nugs CLI terminal interface showing catalog browsing and artist listings](https://i.imgur.com/NOsQjnP.png)
-![Nugs CLI download progress showing multiple format options and statistics](https://i.imgur.com/BEudufy.png)
-
 [![Release](https://img.shields.io/github/v/release/jmagar/nugs-cli)](https://github.com/jmagar/nugs-cli/releases)
 [![Go Version](https://img.shields.io/badge/Go-1.16+-blue.svg)](https://golang.org)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/jmagar/nugs-cli/releases)
@@ -29,6 +26,8 @@ Built for Deadheads, jam band fans, and anyone who wants their live music collec
   - [Auto-Refresh](#auto-refresh)
   - [Gap Detection](#gap-detection)
   - [Rclone Integration](#rclone-integration)
+- [Coming Soon](#coming-soon)
+  - [Watch Command](#watch-command)
 - [FFmpeg Setup](#ffmpeg-setup)
 - [Command Reference](#command-reference)
 - [Examples](#examples)
@@ -97,7 +96,11 @@ Alright, let's get you downloading shows in about 2 minutes.
 nugs
 ```
 
-**Step 2: Configure your credentials** in `~/.nugs/config.json`:
+**Step 2: Configure your credentials** in one of these locations:
+- `./config.json` (current directory)
+- `~/.nugs/config.json` (recommended)
+- `~/.config/nugs/config.json` (XDG standard)
+
 ```json
 {
   "email": "your-email@example.com",
@@ -106,6 +109,8 @@ nugs
   "format": 2
 }
 ```
+
+> **🔒 Security:** After creating your config, set secure permissions: `chmod 600 ~/.nugs/config.json`
 
 > **💡 Tip:** Most folks use `format: 2` (FLAC) for the best quality-to-size ratio.
 
@@ -116,7 +121,7 @@ nugs 23329
 
 **Step 4: Browse the catalog**:
 ```bash
-nugs list artists
+nugs list
 nugs list 1125  # Billy Strings
 ```
 
@@ -128,7 +133,12 @@ nugs list 1125  # Billy Strings
 
 Now that you've seen what Nugs CLI can do, let's customize it for your workflow.
 
-The config file lives at `~/.nugs/config.json`. On first run, you'll be prompted to create it.
+The config file can be placed in one of three locations (checked in this order):
+1. `./config.json` - Current directory
+2. `~/.nugs/config.json` - Recommended location
+3. `~/.config/nugs/config.json` - XDG standard location
+
+On first run, you'll be prompted to create it.
 
 ### Core Settings
 
@@ -160,20 +170,25 @@ The config file lives at `~/.nugs/config.json`. On first run, you'll be prompted
 | `deleteAfterUpload` | Delete local files after successful upload |
 | `rcloneTransfers` | Number of parallel transfers (default: 4) |
 
+> **Migration note (2026-02-06):**
+> `rclonePath` is now remote-only. Local download detection and storage always use `outPath`.
+> If you previously relied on `rclonePath` for local folder checks, move/update your `outPath`
+> to the local download root.
+
 ### Catalog Auto-Refresh
 
 | Option | Description | Default |
 |--------|-------------|---------|
-| `catalogAutoRefresh` | Enable automatic catalog updates | `false` |
+| `catalogAutoRefresh` | Enable automatic catalog updates | `true` |
 | `catalogRefreshTime` | Time to refresh (24-hour format) | `"05:00"` |
 | `catalogRefreshTimezone` | Timezone for refresh time | `"America/New_York"` |
-| `catalogRefreshInterval` | Refresh frequency | `"daily"` or `"weekly"` |
+| `catalogRefreshInterval` | Refresh frequency | `"daily"` |
 
-Configure via commands:
+Auto-refresh is **enabled by default** to keep your catalog up-to-date. Configure via commands:
 ```bash
-nugs catalog config enable   # Enable with defaults (5am EST daily)
-nugs catalog config set      # Interactive configuration
-nugs catalog config disable  # Disable auto-refresh
+nugs refresh set      # Change schedule (time/timezone/interval)
+nugs refresh disable  # Disable auto-refresh
+nugs refresh enable   # Re-enable with current settings
 ```
 
 ---
@@ -184,7 +199,7 @@ nugs catalog config disable  # Disable auto-refresh
 |------|-------------|-----------|
 | **Album** | `https://play.nugs.net/release/23329` | `23329` |
 | **Artist (all)** | `https://play.nugs.net/#/artist/461` | `461 full` |
-| **Artist (latest)** | `https://play.nugs.net/#/artist/461/latest` | `461 latest` |
+| **Artist (latest)** | `https://play.nugs.net/#/artist/461/latest` | `grab 461 latest` |
 | **Catalog Playlist** | `https://2nu.gs/3PmqXLW` | - |
 | **User Playlist** | `https://play.nugs.net/#/playlists/playlist/1215400` | - |
 | **Video** | `https://play.nugs.net/#/videos/artist/1045/.../27323` | - |
@@ -220,8 +235,8 @@ nugs /path/to/urls.txt
 
 **Download artist's latest shows:**
 ```bash
-nugs 1125 latest  # Billy Strings
-nugs 461 latest   # Grateful Dead
+nugs grab 1125 latest  # Billy Strings
+nugs grab 461 latest   # Grateful Dead
 ```
 
 **Download entire artist catalog:**
@@ -243,7 +258,7 @@ nugs -o /mnt/storage/music 23329   # Custom output path
 
 **List all artists:**
 ```bash
-nugs list artists
+nugs list
 ```
 
 **View artist's shows:**
@@ -252,20 +267,21 @@ nugs list 1125  # Billy Strings
 nugs list 461   # Grateful Dead
 ```
 
-**JSON output for scripting:**
+**Filter and search shows:**
 ```bash
-# Get all artists as JSON
-nugs list artists --json standard
-
-# Get shows with jq filtering
-nugs list 461 --json standard | jq '.shows[] | select(.venue == "Red Rocks")'
+# Filter shows by venue
+nugs list 461 "Red Rocks"
 
 # Find artists with 100+ shows
-nugs list artists --json standard | jq '.artists[] | select(.numShows > 100)'
+nugs list ">100"
+nugs list "<=50"
+nugs list "=25"
 
-# Get latest 5 shows
-nugs list 1125 --json minimal | jq '.shows[:5]'
+# Get artist's latest 5 shows
+nugs list 1125 latest 5
 ```
+
+> **💡 Advanced users:** All commands support `--json <level>` output for piping to `jq` or other tools.
 
 ---
 
@@ -277,7 +293,7 @@ Want to browse Nugs.net's 13,000+ shows offline? The catalog system has you cove
 
 **Fetch latest catalog** (updates cache with current Nugs.net catalog):
 ```bash
-nugs catalog update
+nugs update
 ```
 
 Output:
@@ -292,7 +308,7 @@ Output:
 
 **View cache information:**
 ```bash
-nugs catalog cache
+nugs cache
 ```
 
 Output:
@@ -311,7 +327,7 @@ Catalog Cache Status:
 
 **View catalog statistics:**
 ```bash
-nugs catalog stats
+nugs stats
 ```
 
 Output:
@@ -336,8 +352,8 @@ Top 10 Artists by Show Count:
 
 **View recently added shows:**
 ```bash
-nugs catalog latest       # Default: 15 shows
-nugs catalog latest 50    # Show 50 most recent
+nugs latest       # Default: 15 shows
+nugs latest 50    # Show 50 most recent
 ```
 
 Output:
@@ -354,48 +370,84 @@ Latest 15 Shows in Catalog:
 
 **Find missing shows in your collection:**
 ```bash
-nugs catalog gaps 1125  # Billy Strings
+nugs gaps 1125  # Billy Strings
+nugs gaps 1125 461 1045  # Multiple artists at once
 ```
 
 Output:
 ```
-Gap Analysis: Billy Strings
-
-  Total Shows:      430
-  Downloaded:       23 (5.3%)
-  Missing:          407 (94.7%)
-
-Missing Shows:
-
   ID       Date         Title
   ────────────────────────────────────────────────────────────
   46385    12/14/25     12/14/25 ACL Live Austin, TX
   46380    12/13/25     12/13/25 The Criterion Oklahoma City
   ...
-
-To download: nugs <container_id>
-Example: nugs 46385
 ```
 
 **Get IDs only for piping:**
 ```bash
-nugs catalog gaps 1125 --ids-only
+nugs gaps 1125 --ids-only
 # Output: 46385
 #         46380
 #         46375
 
 # Download all gaps
-nugs catalog gaps 1125 --ids-only | xargs -n1 nugs
+nugs gaps 1125 --ids-only | xargs -n1 nugs
 
 # Download first 10 gaps
-nugs catalog gaps 1125 --ids-only | head -10 | xargs -n1 nugs
+nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs
+```
+
+**Auto-download all missing shows:**
+```bash
+nugs gaps 1045 fill
+```
+
+Output:
+```
+Filling Gaps: Phish
+
+  Total Missing:    234 shows
+
+⬇ Downloading 1/234: 2025-12-14 - 12/14/25 Madison Square Garden...
+⬇ Downloading 2/234: 2025-12-13 - 12/13/25 Madison Square Garden...
+...
+
+Download Summary:
+  Total Attempted:         234
+  Successfully Downloaded: 232
+  Failed:                 2
+```
+
+#### Coverage Statistics
+
+**Check download coverage for artists:**
+```bash
+# Single artist
+nugs coverage 1125
+
+# Multiple artists
+nugs coverage 1125 461 1045
+
+# All artists with downloads (auto-detects from output directory)
+nugs coverage
+```
+
+Output:
+```
+Download Coverage Statistics
+
+  Artist ID    Artist Name                              Downloaded    Total    Coverage
+  ────────────────────────────────────────────────────────────────────────────────────
+        1125   Billy Strings                                   23      430       5.3%
+         461   Phish                                          195      734      26.6%
+        1045   Widespread Panic                               142      892      15.9%
 ```
 
 ---
 
 ### JSON Output
 
-All catalog commands support `--json <level>` for machine-readable output:
+All catalog commands support `--json <level>` for machine-readable output. Advanced users can pipe JSON to `jq` or other tools for custom filtering.
 
 **Levels:**
 - `minimal` - Essential fields only
@@ -403,35 +455,13 @@ All catalog commands support `--json <level>` for machine-readable output:
 - `extended` - All metadata
 - `raw` - Unmodified API response
 
-**Examples:**
-
+**Example:**
 ```bash
-# Cache status as JSON
-nugs catalog cache --json standard | jq .
-{
-  "exists": true,
-  "lastUpdated": "2026-02-05T14:30:00Z",
-  "ageSeconds": 7200,
-  "totalShows": 13253,
-  "totalArtists": 335,
-  "cacheVersion": "v1.0.0",
-  "fileSizeHuman": "7.4 MB"
-}
+# Get cache status as JSON
+nugs cache --json standard
 
-# Statistics as JSON
-nugs catalog stats --json standard | jq '.topArtists[:3]'
-[
-  {"artistID": 1125, "artistName": "Billy Strings", "showCount": 430},
-  {"artistID": 22, "artistName": "Umphrey's McGee", "showCount": 415},
-  {"artistID": 1084, "artistName": "Spafford", "showCount": 411}
-]
-
-# Gap analysis as JSON
-nugs catalog gaps 1125 --json standard | jq '{total: .totalShows, missing: .missing}'
-{
-  "total": 430,
-  "missing": 407
-}
+# Pipe to jq for custom filtering
+nugs stats --json standard | jq '.topArtists[:3]'
 ```
 
 ---
@@ -440,24 +470,24 @@ nugs catalog gaps 1125 --json standard | jq '{total: .totalShows, missing: .miss
 
 ### Auto-Refresh
 
-Automatically update the catalog cache on a schedule:
-
-**Enable with defaults** (5am EST, daily):
-```bash
-nugs catalog config enable
-```
+The catalog cache automatically updates on a schedule. **Auto-refresh is enabled by default** (5am EST, daily).
 
 **Configure custom schedule:**
 ```bash
-nugs catalog config set
+nugs refresh set
 # Enter refresh time: 03:00
 # Enter timezone: America/Los_Angeles
 # Enter interval: weekly
 ```
 
-**Disable:**
+**Disable auto-refresh:**
 ```bash
-nugs catalog config disable
+nugs refresh disable
+```
+
+**Re-enable auto-refresh:**
+```bash
+nugs refresh enable
 ```
 
 > **🔄 Auto-refresh triggers at startup when:**
@@ -471,29 +501,33 @@ Find shows you haven't downloaded yet:
 
 **Basic gap detection:**
 ```bash
-nugs catalog gaps 1125  # Shows you're missing
+nugs gaps 1125  # Shows you're missing
 ```
 
 **Integration with downloads:**
 ```bash
 # Download all missing shows
-nugs catalog gaps 1125 --ids-only | xargs -n1 nugs
+nugs gaps 1125 --ids-only | xargs -n1 nugs
 
 # Download 5 most recent gaps
-nugs catalog gaps 1125 --ids-only | head -5 | xargs -n1 nugs
+nugs gaps 1125 --ids-only | head -5 | xargs -n1 nugs
 
 # Download in parallel (3 concurrent)
-nugs catalog gaps 1125 --ids-only | xargs -P 3 -n1 nugs
+nugs gaps 1125 --ids-only | xargs -P 3 -n1 nugs
 
 # Save gaps to file for later
-nugs catalog gaps 1125 --ids-only > billy-gaps.txt
+nugs gaps 1125 --ids-only > billy-gaps.txt
 ```
 
 **Check multiple artists:**
 ```bash
+# All at once
+nugs gaps 1125 461 1045
+
+# Or use a loop for more control
 for artist in 1125 461 1045; do
   echo "Gaps for artist $artist:"
-  nugs catalog gaps $artist --ids-only | wc -l
+  nugs gaps $artist --ids-only | wc -l
 done
 ```
 
@@ -527,6 +561,38 @@ nugs 23329  # Downloads and uploads to gdrive:/Music/Nugs/
 ```
 
 > **📍 Smart Gap Detection:** Gap detection checks both local storage AND your rclone remote, so you won't accidentally re-download shows that are already in the cloud.
+
+---
+
+## Coming Soon
+
+### Watch Command
+
+The `nugs watch <artist_id>` command is in development and will provide automated monitoring for your favorite artists:
+
+**Features:**
+- **Auto-discovery**: Watches for new shows when the catalog refreshes
+- **Smart downloads**: Automatically downloads new additions for watched artists
+- **Gap filling**: Automatically fills all gaps in your collection for the artist
+- **Multiple artists**: Watch multiple artists simultaneously
+- **Notification support**: Get notified when new shows are downloaded
+
+**Example usage:**
+```bash
+# Watch Billy Strings for new shows
+nugs watch 1125
+
+# Watch multiple artists
+nugs watch 1125 461 1045
+
+# List watched artists
+nugs watch list
+
+# Stop watching an artist
+nugs watch remove 1125
+```
+
+This feature will combine catalog auto-refresh with gap detection to create a fully automated download workflow for your favorite artists.
 
 ---
 
@@ -582,7 +648,7 @@ Just drop the `ffmpeg` binary in the same directory as `nugs`.
 
 ```bash
 nugs <url|id>...              # Download one or more albums
-nugs <artist_id> latest       # Download artist's latest shows
+nugs grab <artist_id> latest  # Download artist's latest shows
 nugs <artist_id> full         # Download artist's entire catalog
 nugs -f <format> <url>        # Override audio format
 nugs -F <format> <url>        # Override video format
@@ -592,24 +658,42 @@ nugs -o <path> <url>          # Custom output directory
 ### List Commands
 
 ```bash
-nugs list artists             # List all artists
-nugs list <artist_id>         # List artist's shows
-nugs list artists --json <level>      # JSON output
-nugs list <artist_id> --json <level>  # JSON output
+nugs list                                    # List all artists
+nugs list >100                               # Filter artists by show count
+nugs list <=50                               # Operators: >, <, >=, <=, =
+nugs list <artist_id>                        # List all artist's shows
+nugs list <artist_id> latest <N>             # List latest N shows
+nugs list <artist_id> "venue"                # Filter shows by venue name
+nugs list --json <level>                     # JSON output
+nugs list <artist_id> --json <level>         # JSON output
+```
+
+**Examples:**
+```bash
+# List latest 5 shows from Billy Strings
+nugs list 1125 latest 5
+
+# Find all Grateful Dead shows at Red Rocks
+nugs list 461 "Red Rocks"
+
+# Find all Billy Strings shows at Ryman (case-insensitive)
+nugs list 1125 "ryman"
 ```
 
 ### Catalog Commands
 
 ```bash
-nugs catalog update           # Update catalog cache
-nugs catalog cache            # View cache status
-nugs catalog stats            # View statistics
-nugs catalog latest [limit]   # View latest additions
-nugs catalog gaps <artist_id> # Find missing shows
-nugs catalog gaps <id> --ids-only     # IDs only (for piping)
-nugs catalog config enable    # Enable auto-refresh
-nugs catalog config disable   # Disable auto-refresh
-nugs catalog config set       # Configure auto-refresh
+nugs update                        # Update catalog cache
+nugs cache                         # View cache status
+nugs stats                         # View statistics
+nugs latest [limit]                # View latest additions
+nugs gaps <artist_id> [...]        # List missing shows only (one or more artists)
+nugs gaps <id> [...]  --ids-only   # IDs only (for piping)
+nugs gaps <id> fill                # Auto-download all missing shows
+nugs coverage [artist_ids...]      # Show download coverage stats
+nugs refresh enable                # Enable auto-refresh
+nugs refresh disable               # Disable auto-refresh
+nugs refresh set                   # Configure auto-refresh
 ```
 
 ### Global Options
@@ -632,7 +716,7 @@ nugs catalog config set       # Configure auto-refresh
 ### Example 1: Download Billy Strings Shows
 ```bash
 # Latest shows only
-nugs 1125 latest
+nugs grab 1125 latest
 
 # Entire catalog (all 430+ shows)
 nugs 1125 full
@@ -644,13 +728,13 @@ nugs 23329
 ### Example 2: Find and Download Missing Dead & Company Shows
 ```bash
 # See what you're missing
-nugs catalog gaps 1045
+nugs gaps 1045
 
 # Download all gaps
-nugs catalog gaps 1045 --ids-only | xargs -n1 nugs
+nugs gaps 1045 --ids-only | xargs -n1 nugs
 
 # Or just the 10 most recent
-nugs catalog gaps 1045 --ids-only | head -10 | xargs -n1 nugs
+nugs gaps 1045 --ids-only | head -10 | xargs -n1 nugs
 ```
 
 ### Example 3: Batch Download from File
@@ -668,11 +752,10 @@ nugs shows.txt
 
 ### Example 4: Find All Red Rocks Shows
 ```bash
-# Get Billy Strings shows at Red Rocks
-nugs list 1125 --json standard | \
-  jq '.shows[] | select(.venue | contains("Red Rocks"))'
+# Filter shows by venue (case-insensitive)
+nugs list 1125 shows "Red Rocks"
 
-# Download them
+# Advanced: Use JSON output with jq
 nugs list 1125 --json standard | \
   jq -r '.shows[] | select(.venue | contains("Red Rocks")) | .containerID' | \
   xargs -n1 nugs
@@ -684,22 +767,21 @@ nugs list 1125 --json standard | \
 # daily-catalog-update.sh
 
 # Update catalog
-nugs catalog update
+nugs update
 
-# Email yourself the stats
-nugs catalog stats --json standard | \
-  jq -r '"New catalog stats:\nTotal shows: \(.totalShows)\nTop artist: \(.topArtists[0].artistName) (\(.topArtists[0].showCount) shows)"' | \
-  mail -s "Nugs Catalog Update" you@example.com
+# View the stats
+nugs stats
 ```
 
 ### Example 6: Check Collection Coverage
 ```bash
-# Get coverage stats for your favorite artists
-for artist in 1125 461 1045; do
-  echo -n "Artist $artist: "
-  nugs catalog gaps $artist --json standard | \
-    jq -r '"\(.downloaded)/\(.totalShows) (\(.downloadedPct | floor)%)"'
-done
+# Get coverage stats for your favorite artists (coming soon)
+nugs coverage
+
+# Or check individual artists
+nugs gaps 1125  # Shows coverage percentage
+nugs gaps 461
+nugs gaps 1045
 ```
 
 ---
@@ -708,9 +790,9 @@ done
 
 ### Common Issues
 
-> **❌ Error:** "No cache found - run 'nugs catalog update' first"
+> **❌ Error:** "No cache found - run 'nugs update' first"
 >
-> **✅ Solution:** Run `nugs catalog update` to download the catalog cache.
+> **✅ Solution:** Run `nugs update` to download the catalog cache.
 
 > **❌ Error:** FFmpeg not found
 >
@@ -741,7 +823,7 @@ done
 >
 > **✅ Solution:**
 > - Make sure `outPath` in config matches your actual download location
-> - Run `nugs catalog update` to refresh the catalog
+> - Run `nugs update` to refresh the catalog
 > - Verify you haven't manually moved or renamed files
 
 ### Getting Help
