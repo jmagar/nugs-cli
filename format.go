@@ -119,12 +119,12 @@ func padCenter(s string, width int) string {
 // printHeader prints a styled header with box drawing
 func printHeader(title string) {
 	width := getTermWidth()
-	titleLen := len(title) + 4 // 2 spaces on each side
+	titleLen := visibleLength(title) + 4 // 2 spaces on each side
 
 	// Ensure we don't exceed terminal width
 	if titleLen > width-4 {
 		title = truncateWithEllipsis(title, width-10)
-		titleLen = len(title) + 4
+		titleLen = visibleLength(title) + 4
 	}
 
 	lineLen := width - 2
@@ -309,6 +309,31 @@ func printKeyValue(key, value, valueColor string) {
 func printDivider() {
 	width := getTermWidth()
 	fmt.Printf("%s%s%s\n", colorCyan, strings.Repeat(boxHorizontal, width-1), colorReset)
+}
+
+// printProgress displays a styled progress bar with percentage and transfer stats
+func printProgress(percentage int, speed, downloaded, total string) {
+	// Clamp percentage to 0-100
+	if percentage < 0 {
+		percentage = 0
+	}
+	if percentage > 100 {
+		percentage = 100
+	}
+
+	// Progress bar width (adjust to terminal width if needed)
+	barWidth := 30
+	filled := (percentage * barWidth) / 100
+	empty := barWidth - filled
+
+	// Build progress bar with filled/empty blocks
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+
+	// Format: [████████████░░░░░░░░░░░░] 45% @ 2.5 MB/s, 120 MB/500 MB
+	fmt.Printf("\r%s[%s%s%s]%s %s%3d%%%s @ %s/s, %s/%s ",
+		colorCyan, colorGreen, bar, colorCyan, colorReset,
+		colorBold, percentage, colorReset,
+		speed, downloaded, total)
 }
 
 // printBox prints text in a box
