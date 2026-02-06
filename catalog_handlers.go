@@ -119,18 +119,33 @@ func catalogStats(jsonLevel string) error {
 	// Build statistics
 	showsPerArtist := make(map[int]int)
 	artistNames := make(map[int]string)
-	var earliestDate, latestDate string
+	var earliestTime, latestTime time.Time
 
 	for _, item := range catalog.Response.RecentItems {
 		showsPerArtist[item.ArtistID]++
 		artistNames[item.ArtistID] = item.ArtistName
 
-		if earliestDate == "" || item.PerformanceDateStr < earliestDate {
-			earliestDate = item.PerformanceDateStr
+		// Parse performance date (format: "Jan 02, 2006")
+		if item.PerformanceDateStr != "" {
+			t, err := time.Parse("Jan 02, 2006", item.PerformanceDateStr)
+			if err == nil {
+				if earliestTime.IsZero() || t.Before(earliestTime) {
+					earliestTime = t
+				}
+				if latestTime.IsZero() || t.After(latestTime) {
+					latestTime = t
+				}
+			}
 		}
-		if latestDate == "" || item.PerformanceDateStr > latestDate {
-			latestDate = item.PerformanceDateStr
-		}
+	}
+
+	// Format dates for display
+	var earliestDate, latestDate string
+	if !earliestTime.IsZero() {
+		earliestDate = earliestTime.Format("Jan 02, 2006")
+	}
+	if !latestTime.IsZero() {
+		latestDate = latestTime.Format("Jan 02, 2006")
 	}
 
 	// Sort artists by show count
