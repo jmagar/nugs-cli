@@ -454,6 +454,13 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 		return fmt.Errorf("invalid local path: %w", err)
 	}
 
+	// Validate artist folder path if provided
+	if artistFolder != "" {
+		if err := validatePath(artistFolder); err != nil {
+			return fmt.Errorf("invalid artist folder: %w", err)
+		}
+	}
+
 	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
 	
 	// Preserve artist folder structure in remote
@@ -673,6 +680,22 @@ func fileExists(path string) (bool, error) {
 func sanitise(filename string) string {
 	san := regexp.MustCompile(sanRegexStr).ReplaceAllString(filename, "_")
 	return strings.TrimSuffix(san, "	")
+}
+
+// buildAlbumFolderName constructs a sanitized folder name for an album
+// from artist name and container info. This ensures consistent naming
+// across all download and gap detection logic.
+// maxLen parameter allows customizing the length limit (default 120 for albums, 110 for videos).
+func buildAlbumFolderName(artistName, containerInfo string, maxLen ...int) string {
+	limit := 120
+	if len(maxLen) > 0 && maxLen[0] > 0 {
+		limit = maxLen[0]
+	}
+	albumFolder := artistName + " - " + strings.TrimRight(containerInfo, " ")
+	if len(albumFolder) > limit {
+		albumFolder = albumFolder[:limit]
+	}
+	return sanitise(albumFolder)
 }
 
 func auth(email, pwd string) (string, error) {
@@ -1393,30 +1416,22 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 			return video(albumID, "", cfg, streamParams, meta, false)
 		}
 	}
-	// Determine base path: use rclonePath if specified, otherwise outPath
-	basePath := cfg.OutPath
-	if cfg.RclonePath != "" {
-		basePath = cfg.RclonePath
-	}
-
 	// Create artist directory
-	// Note: We sanitize for filesystem safety, but keep original name for metadata
 	artistFolder := sanitise(meta.ArtistName)
-	artistPath := filepath.Join(basePath, artistFolder)
+	artistPath := filepath.Join(cfg.OutPath, artistFolder)
 	err := makeDirs(artistPath)
 	if err != nil {
 		printError("Failed to make artist folder")
 		return err
 	}
 
-	albumFolder := meta.ArtistName + " - " + strings.TrimRight(meta.ContainerInfo, " ")
+	albumFolder := buildAlbumFolderName(meta.ArtistName, meta.ContainerInfo)
 	fmt.Println(albumFolder)
-	if len(albumFolder) > 120 {
-		albumFolder = albumFolder[:120]
+	if len(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " ")) > 120 {
 		fmt.Println(
 			"Album folder name was chopped because it exceeds 120 characters.")
 	}
-	albumPath := filepath.Join(artistPath, sanitise(albumFolder))
+	albumPath := filepath.Join(artistPath, albumFolder)
 
 	// Check if show already exists locally
 	if stat, err := os.Stat(albumPath); err == nil && stat.IsDir() {
@@ -2493,14 +2508,7 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 		fmt.Println(
 			"Playlist folder name was chopped because it exceeds 120 characters.")
 	}
-
-	// Determine base path: use rclonePath if specified, otherwise outPath
-	basePath := cfg.OutPath
-	if cfg.RclonePath != "" {
-		basePath = cfg.RclonePath
-	}
-
-	plistPath := filepath.Join(basePath, sanitise(plistName))
+	plistPath := filepath.Join(cfg.OutPath, sanitise(plistName))
 	err = makeDirs(plistPath)
 	if err != nil {
 		printError("Failed to make playlist folder")
@@ -2921,10 +2929,9 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		chapsAvail = !reflect.ValueOf(meta.VideoChapters).IsZero()
 	}
 
-	videoFname := meta.ArtistName + " - " + strings.TrimRight(meta.ContainerInfo, " ")
+	videoFname := buildAlbumFolderName(meta.ArtistName, meta.ContainerInfo, 110)
 	fmt.Println(videoFname)
-	if len(videoFname) > 110 {
-		videoFname = videoFname[:110]
+	if len(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " ")) > 110 {
 		fmt.Println(
 			"Video filename was chopped because it exceeds 120 characters.")
 	}
@@ -2955,15 +2962,9 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		return err
 	}
 
-	// Determine base path: use rclonePath if specified, otherwise outPath
-	basePath := cfg.OutPath
-	if cfg.RclonePath != "" {
-		basePath = cfg.RclonePath
-	}
-
 	// Create artist directory
 	artistFolder := sanitise(meta.ArtistName)
-	artistPath := filepath.Join(basePath, artistFolder)
+	artistPath := filepath.Join(cfg.OutPath, artistFolder)
 	err = makeDirs(artistPath)
 	if err != nil {
 		printError("Failed to make artist folder")
@@ -3042,8 +3043,8 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
-		// Videos upload the entire artist folder, not a subfolder
-		err = uploadToRclone(artistPath, "", cfg)
+		// Upload the video file to the artist folder on remote
+		err = uploadToRclone(vidPath, artistFolder, cfg)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -3426,7 +3427,7 @@ func main() {
 				artistUrl := fmt.Sprintf("https://play.nugs.net/#/artist/%d", artistID)
 				cfg.Urls = []string{artistUrl}
 				printMusic(fmt.Sprintf("Downloading entire catalog from %sartist %d%s", colorBold, artistID, colorReset))
-			case "gaps", "update", "cache", "stats", "latest-shows", "config":
+			case "gaps", "update", "cache", "stats", "config", "coverage", "list":
 				// User likely meant a catalog command
 				fmt.Printf("%s✗ Invalid syntax%s\n\n", colorRed, colorReset)
 				fmt.Printf("Did you mean: %snugs catalog %s %d%s\n\n", colorBold, cfg.Urls[1], artistID, colorReset)
