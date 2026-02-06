@@ -183,7 +183,7 @@ nugs catalog config disable  # Disable auto-refresh
 | Type | URL Example | Shorthand |
 |------|-------------|-----------|
 | **Album** | `https://play.nugs.net/release/23329` | `23329` |
-| **Artist (all)** | `https://play.nugs.net/#/artist/461` | `461` |
+| **Artist (all)** | `https://play.nugs.net/#/artist/461` | `461 full` |
 | **Artist (latest)** | `https://play.nugs.net/#/artist/461/latest` | `461 latest` |
 | **Catalog Playlist** | `https://2nu.gs/3PmqXLW` | - |
 | **User Playlist** | `https://play.nugs.net/#/playlists/playlist/1215400` | - |
@@ -226,7 +226,8 @@ nugs 461 latest   # Grateful Dead
 
 **Download entire artist catalog:**
 ```bash
-nugs https://play.nugs.net/#/artist/461
+nugs 1125 full  # Billy Strings - all shows
+nugs 461 full   # Grateful Dead - complete catalog
 ```
 
 **Override quality settings:**
@@ -582,6 +583,7 @@ Just drop the `ffmpeg` binary in the same directory as `nugs`.
 ```bash
 nugs <url|id>...              # Download one or more albums
 nugs <artist_id> latest       # Download artist's latest shows
+nugs <artist_id> full         # Download artist's entire catalog
 nugs -f <format> <url>        # Override audio format
 nugs -F <format> <url>        # Override video format
 nugs -o <path> <url>          # Custom output directory
@@ -627,13 +629,16 @@ nugs catalog config set       # Configure auto-refresh
 
 ## Examples
 
-### Example 1: Download Billy Strings' Latest Shows
+### Example 1: Download Billy Strings Shows
 ```bash
-# Method 1: Using shorthand
+# Latest shows only
 nugs 1125 latest
 
-# Method 2: Using full URL
-nugs https://play.nugs.net/#/artist/1125/latest
+# Entire catalog (all 430+ shows)
+nugs 1125 full
+
+# Specific show
+nugs 23329
 ```
 
 ### Example 2: Find and Download Missing Dead & Company Shows
