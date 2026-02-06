@@ -21,6 +21,7 @@ import (
 	"reflect"
 	"regexp"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,33 +30,6 @@ import (
 	"github.com/alexflint/go-arg"
 	"github.com/dustin/go-humanize"
 	"github.com/grafov/m3u8"
-)
-
-// ANSI color codes
-const (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorPurple = "\033[35m"
-	colorCyan   = "\033[36m"
-	colorBold   = "\033[1m"
-)
-
-// Unicode symbols
-const (
-	symbolCheck    = "✓"
-	symbolCross    = "✗"
-	symbolArrow    = "→"
-	symbolMusic    = "♪"
-	symbolUpload   = "⬆"
-	symbolDownload = "⬇"
-	symbolInfo     = "ℹ"
-	symbolWarning  = "⚠"
-	symbolGear     = "⚙"
-	symbolPackage  = "📦"
-	symbolRocket   = "🚀"
 )
 
 // JSON output levels
@@ -88,6 +62,9 @@ var (
 	client = &http.Client{Jar: jar}
 )
 
+// loadedConfigPath tracks which config file was loaded so writeConfig can save to the same location
+var loadedConfigPath string
+
 var regexStrings = []string{
 	`^https://play.nugs.net/release/(\d+)$`,
 	`^https://play.nugs.net/#/playlists/playlist/(\d+)$`,
@@ -98,7 +75,7 @@ var regexStrings = []string{
 	`^https://play.nugs.net/livestream/(\d+)/exclusive$`,
 	`^https://play.nugs.net/watch/livestreams/exclusive/(\d+)$`,
 	`^https://play.nugs.net/#/my-webcasts/\d+-(\d+)-\d+-\d+$`,
-	`^https://www.nugs.net/on/demandware.store/Sites-NugsNet-Site/d`+
+	`^https://www.nugs.net/on/demandware.store/Sites-NugsNet-Site/d` +
 		`efault/(?:Stash-QueueVideo|NugsVideo-GetStashVideo)\?([a-zA-Z0-9=%&-]+$)`,
 	`^https://play.nugs.net/library/webcast/(\d+)$`,
 	`^(\d+)$`,
@@ -109,11 +86,11 @@ var qualityMap = map[string]Quality{
 	".flac16/": {Specs: "16-bit / 44.1 kHz FLAC", Extension: ".flac", Format: 2},
 	// .mqa24/ must be above .flac?
 	".mqa24/":  {Specs: "24-bit / 48 kHz MQA", Extension: ".flac", Format: 3},
-	".flac?": {Specs: "FLAC", Extension: ".flac", Format: 2},
+	".flac?":   {Specs: "FLAC", Extension: ".flac", Format: 2},
 	".s360/":   {Specs: "360 Reality Audio", Extension: ".mp4", Format: 4},
 	".aac150/": {Specs: "150 Kbps AAC", Extension: ".m4a", Format: 5},
-	".m4a?": {Specs: "AAC", Extension: ".m4a", Format: 5},
-	".m3u8?":	{Extension: ".m4a", Format: 6},
+	".m4a?":    {Specs: "AAC", Extension: ".m4a", Format: 5},
+	".m3u8?":   {Extension: ".m4a", Format: 6},
 }
 
 var resolveRes = map[int]string{
@@ -413,18 +390,22 @@ func promptForConfig() error {
 
 	// Create config object
 	config := Config{
-		Email:             email,
-		Password:          password,
-		Format:            format,
-		VideoFormat:       videoFormat,
-		OutPath:           outPath,
-		Token:             "",
-		UseFfmpegEnvVar:   useFfmpegEnvVar,
-		RcloneEnabled:     rcloneEnabled,
-		RcloneRemote:      rcloneRemote,
-		RclonePath:        rclonePath,
-		DeleteAfterUpload: deleteAfterUpload,
-		RcloneTransfers:   rcloneTransfers,
+		Email:                  email,
+		Password:               password,
+		Format:                 format,
+		VideoFormat:            videoFormat,
+		OutPath:                outPath,
+		Token:                  "",
+		UseFfmpegEnvVar:        useFfmpegEnvVar,
+		RcloneEnabled:          rcloneEnabled,
+		RcloneRemote:           rcloneRemote,
+		RclonePath:             rclonePath,
+		DeleteAfterUpload:      deleteAfterUpload,
+		RcloneTransfers:        rcloneTransfers,
+		CatalogAutoRefresh:     true,
+		CatalogRefreshTime:     "05:00",
+		CatalogRefreshTimezone: "America/New_York",
+		CatalogRefreshInterval: "daily",
 	}
 
 	// Write to file
@@ -463,7 +444,7 @@ func validatePath(path string) error {
 //   - rclone copy command fails
 //   - Upload verification fails (requires rclone check command)
 //   - Local file deletion fails after successful upload
-func uploadToRclone(localPath string, cfg *Config) error {
+func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 	if !cfg.RcloneEnabled {
 		return nil
 	}
@@ -474,7 +455,17 @@ func uploadToRclone(localPath string, cfg *Config) error {
 	}
 
 	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
-	printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteDest, colorReset))
+	
+	// Preserve artist folder structure in remote
+	var remoteFullPath string
+	if artistFolder != "" {
+		remoteFullPath = remoteDest + "/" + artistFolder + "/" + filepath.Base(localPath)
+	} else {
+		// Fallback for legacy calls without artist folder
+		remoteFullPath = remoteDest + "/" + filepath.Base(localPath)
+	}
+	
+	printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteFullPath, colorReset))
 
 	// Default to 4 transfers if not set
 	transfers := cfg.RcloneTransfers
@@ -484,7 +475,7 @@ func uploadToRclone(localPath string, cfg *Config) error {
 
 	// Use rclone copy to upload without deleting remote files
 	transfersFlag := fmt.Sprintf("--transfers=%d", transfers)
-	cmd := exec.Command("rclone", "copy", localPath, remoteDest+"/"+filepath.Base(localPath),
+	cmd := exec.Command("rclone", "copy", localPath, remoteFullPath,
 		"-P", transfersFlag)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -499,7 +490,7 @@ func uploadToRclone(localPath string, cfg *Config) error {
 	if cfg.DeleteAfterUpload {
 		// Verify upload before deleting local files
 		printInfo("Verifying upload integrity...")
-		verifyCmd := exec.Command("rclone", "check", "--one-way", localPath, remoteDest+"/"+filepath.Base(localPath))
+		verifyCmd := exec.Command("rclone", "check", "--one-way", localPath, remoteFullPath)
 		var verifyOut, verifyErr bytes.Buffer
 		verifyCmd.Stdout = &verifyOut
 		verifyCmd.Stderr = &verifyErr
@@ -572,10 +563,10 @@ func parseCfg() (*Config, error) {
 	if args.VideoFormat != -1 {
 		cfg.VideoFormat = args.VideoFormat
 	}
-	if !(cfg.Format >= 1 && cfg.Format <= 5) {
+	if cfg.Format < 1 || cfg.Format > 5 {
 		return nil, errors.New("track Format must be between 1 and 5")
 	}
-	if !(cfg.VideoFormat >= 1 && cfg.VideoFormat <= 5) {
+	if cfg.VideoFormat < 1 || cfg.VideoFormat > 5 {
 		return nil, errors.New("video format must be between 1 and 5")
 	}
 	cfg.WantRes = resolveRes[cfg.VideoFormat]
@@ -595,7 +586,7 @@ func parseCfg() (*Config, error) {
 	}
 	cfg.Urls, err = processUrls(args.Urls)
 	if err != nil {
-		fmt.Println("Failed to process URLs.")
+		printError("Failed to process URLs")
 		return nil, err
 	}
 	cfg.ForceVideo = args.ForceVideo
@@ -605,15 +596,56 @@ func parseCfg() (*Config, error) {
 }
 
 func readConfig() (*Config, error) {
-	data, err := os.ReadFile("config.json")
+	// Try config locations in order: ./config.json, ~/.nugs/config.json, ~/.config/nugs/config.json
+	homeDir, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
 	}
+
+	configPaths := []string{
+		"config.json",
+		filepath.Join(homeDir, ".nugs", "config.json"),
+		filepath.Join(homeDir, ".config", "nugs", "config.json"),
+	}
+
+	var data []byte
+	var configPath string
+	var lastErr error
+
+	for _, path := range configPaths {
+		data, err = os.ReadFile(path)
+		if err == nil {
+			configPath = path
+			break
+		}
+		lastErr = err
+	}
+
+	if data == nil {
+		return nil, fmt.Errorf("config file not found in any location (./config.json, ~/.nugs/config.json, ~/.config/nugs/config.json): %w", lastErr)
+	}
+
 	var obj Config
 	err = json.Unmarshal(data, &obj)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse config at %s: %w", configPath, err)
 	}
+
+	// Track which config file was loaded for writeConfig
+	loadedConfigPath = configPath
+
+	// Security warning for config file permissions
+	fileInfo, err := os.Stat(configPath)
+	if err == nil {
+		mode := fileInfo.Mode()
+		if mode.Perm()&0077 != 0 {
+			fmt.Fprintf(os.Stderr, "%s WARNING: Config file has insecure permissions (%04o)\n", colorYellow+symbolWarning+colorReset, mode.Perm())
+			fmt.Fprintf(os.Stderr, "   File: %s\n", configPath)
+			fmt.Fprintf(os.Stderr, "   Risk: Config contains credentials and should only be readable by you\n")
+			fmt.Fprintf(os.Stderr, "   Fix:  chmod 600 %s\n\n", configPath)
+		}
+	}
+
 	return &obj, nil
 }
 
@@ -1113,7 +1145,7 @@ func getKey(keyUrl string) ([]byte, error) {
 
 // func decryptTrack(key, iv []byte, inPath, outPath string) error {
 // 	var stream cipher.Stream
-// 	fmt.Println("Decrypting...")
+// 	printInfo("Decrypting...")
 // 	in_f, err := os.Open(inPath)
 // 	if err != nil {
 // 		return err
@@ -1161,7 +1193,7 @@ func decryptTrack(key, iv []byte) ([]byte, error) {
 	}
 	ecb := cipher.NewCBCDecrypter(block, iv)
 	decrypted := make([]byte, len(encData))
-	fmt.Println("Decrypting...")
+	printInfo("Decrypting...")
 	ecb.CryptBlocks(decrypted, encData)
 	return decrypted, nil
 }
@@ -1178,7 +1210,6 @@ func tsToAac(decData []byte, outPath, ffmpegNameStr string) error {
 	}
 	return nil
 }
-
 
 func hlsOnly(trackPath, manUrl, ffmpegNameStr string) error {
 	req, err := client.Get(manUrl)
@@ -1249,14 +1280,14 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 	for _, i := range [4]int{1, 4, 7, 10} {
 		streamUrl, err := getStreamMeta(track.TrackID, 0, i, streamParams)
 		if err != nil {
-			fmt.Println("failed to get track stream metadata")
+			printError("Failed to get track stream metadata")
 			return err
 		} else if streamUrl == "" {
 			return errors.New("the api didn't return a track stream URL")
 		}
 		quality := queryQuality(streamUrl)
 		if quality == nil {
-			fmt.Println("The API returned an unsupported format, URL:", streamUrl)
+			printError(fmt.Sprintf("The API returned an unsupported format: %s", streamUrl))
 			continue
 			//return errors.New("The API returned an unsupported format.")
 		}
@@ -1274,7 +1305,7 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 	isHlsOnly := checkIfHlsOnly(quals)
 
 	if isHlsOnly {
-		fmt.Println("HLS-only track. Only AAC is available, tags currently unsupported.")
+		printInfo("HLS-only track. Only AAC is available, tags currently unsupported")
 		chosenQual = quals[0]
 		err := parseHlsMaster(chosenQual)
 		if err != nil {
@@ -1290,11 +1321,9 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 				wantFmt = trackFallback[wantFmt]
 			}
 		}
-		if chosenQual == nil {
-			return errors.New("no track format was chosen")
-		}
+		// chosenQual is guaranteed non-nil after loop exit
 		if wantFmt != origWantFmt && origWantFmt != 4 {
-			fmt.Println("Unavailable in your chosen format.")
+			printInfo("Unavailable in your chosen format")
 		}
 	}
 	trackFname := fmt.Sprintf(
@@ -1303,7 +1332,7 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 	trackPath := filepath.Join(folPath, trackFname)
 	exists, err := fileExists(trackPath)
 	if err != nil {
-		fmt.Println("Failed to check if track already exists locally.")
+		printError("Failed to check if track already exists locally")
 		return err
 	}
 	if exists {
@@ -1318,7 +1347,7 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 		err = downloadTrack(trackPath, chosenQual.URL)
 	}
 	if err != nil {
-		fmt.Println("Failed to download track.")
+		printError("Failed to download track")
 		return err
 	}
 	return nil
@@ -1340,7 +1369,7 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 	} else {
 		_meta, err := getAlbumMeta(albumID)
 		if err != nil {
-			fmt.Println("Failed to get metadata.")
+			printError("Failed to get metadata")
 			return err
 		}
 		meta = _meta.Response
@@ -1357,19 +1386,26 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 
 	if skuID != 0 {
 		if cfg.SkipVideos {
-			fmt.Println("Video-only album, skipped.")
+			printInfo("Video-only album, skipped")
 			return nil
 		}
 		if cfg.ForceVideo || trackTotal < 1 {
 			return video(albumID, "", cfg, streamParams, meta, false)
 		}
 	}
+	// Determine base path: use rclonePath if specified, otherwise outPath
+	basePath := cfg.OutPath
+	if cfg.RclonePath != "" {
+		basePath = cfg.RclonePath
+	}
+
 	// Create artist directory
+	// Note: We sanitize for filesystem safety, but keep original name for metadata
 	artistFolder := sanitise(meta.ArtistName)
-	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	artistPath := filepath.Join(basePath, artistFolder)
 	err := makeDirs(artistPath)
 	if err != nil {
-		fmt.Println("Failed to make artist folder.")
+		printError("Failed to make artist folder")
 		return err
 	}
 
@@ -1402,7 +1438,7 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 
 	err = makeDirs(albumPath)
 	if err != nil {
-		fmt.Println("Failed to make album folder.")
+		printError("Failed to make album folder")
 		return err
 	}
 	for trackNum, track := range tracks {
@@ -1416,7 +1452,7 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
-		err = uploadToRclone(albumPath, cfg)
+		err = uploadToRclone(albumPath, artistFolder, cfg)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -1436,7 +1472,7 @@ func getAlbumTotal(meta []*ArtistMeta) int {
 func artist(artistId string, cfg *Config, streamParams *StreamParams) error {
 	meta, err := getArtistMeta(artistId)
 	if err != nil {
-		fmt.Println("Failed to get artist metadata.")
+		printError("Failed to get artist metadata")
 		return err
 	}
 	if len(meta) == 0 {
@@ -1462,20 +1498,74 @@ func artist(artistId string, cfg *Config, streamParams *StreamParams) error {
 	return nil
 }
 
+// parseShowFilter parses a filter expression like "shows >100" into operator and value
+// Returns operator (">", "<", ">=", "<=", "="), value, and error
+func parseShowFilter(filter string) (string, int, error) {
+	// Match patterns: >N, <N, >=N, <=N, =N
+	re := regexp.MustCompile(`^(>=|<=|>|<|=)\s*(\d+)$`)
+	matches := re.FindStringSubmatch(filter)
+	if matches == nil {
+		return "", 0, fmt.Errorf("invalid filter format: %s (expected: >N, <N, >=N, <=N, or =N)", filter)
+	}
+
+	operator := matches[1]
+	value, err := strconv.Atoi(matches[2])
+	if err != nil {
+		return "", 0, fmt.Errorf("invalid number in filter: %s", matches[2])
+	}
+
+	return operator, value, nil
+}
+
+// applyShowFilter filters artists based on show count operator and value
+func applyShowFilter(artists []Artist, operator string, value int) []Artist {
+	var filtered []Artist
+	for _, artist := range artists {
+		include := false
+		switch operator {
+		case ">":
+			include = artist.NumShows > value
+		case "<":
+			include = artist.NumShows < value
+		case ">=":
+			include = artist.NumShows >= value
+		case "<=":
+			include = artist.NumShows <= value
+		case "=":
+			include = artist.NumShows == value
+		}
+		if include {
+			filtered = append(filtered, artist)
+		}
+	}
+	return filtered
+}
+
 // listArtists fetches and displays a formatted list of all artists available on Nugs.net.
+// Supports filtering by show count with: shows >N, shows <N, shows >=N, shows <=N, shows =N
 // The output includes artist ID, name, number of shows, and number of albums.
 // Returns an error if the artist list cannot be fetched from the API.
-func listArtists(jsonLevel string) error {
+func listArtists(jsonLevel string, showFilter string) error {
 	if jsonLevel == "" {
-		fmt.Println("Fetching artist catalog...")
+		printInfo("Fetching artist catalog...")
 	}
 	artistList, err := getArtistList()
 	if err != nil {
-		fmt.Println("Failed to get artist list.")
+		printError("Failed to get artist list")
 		return err
 	}
 
 	artists := artistList.Response.Artists
+	// Apply show filter if provided
+	var filterOperator string
+	var filterValue int
+	if showFilter != "" {
+		filterOperator, filterValue, err = parseShowFilter(showFilter)
+		if err != nil {
+			return err
+		}
+		artists = applyShowFilter(artists, filterOperator, filterValue)
+	}
 	if len(artists) == 0 {
 		if jsonLevel != "" {
 			emptyOutput := ArtistListOutput{Artists: []ArtistOutput{}, Total: 0}
@@ -1485,14 +1575,23 @@ func listArtists(jsonLevel string) error {
 			}
 			fmt.Println(string(jsonData))
 		} else {
-			fmt.Println("No artists found.")
+			if showFilter != "" {
+				fmt.Printf("No artists found with shows %s%d.\n", filterOperator, filterValue)
+			} else {
+				fmt.Println("No artists found.")
+			}
 		}
 		return nil
 	}
 
 	if jsonLevel != "" {
-		// Raw mode: output full API response as-is
+		// Raw mode: output full API response, applying filter if active
 		if jsonLevel == JSONLevelRaw {
+			if showFilter != "" {
+				// Filter was applied, so output the filtered list (raw unfiltered
+				// API response would contradict the user's filter intent)
+				artistList.Response.Artists = artists
+			}
 			jsonData, err := json.MarshalIndent(artistList, "", "  ")
 			if err != nil {
 				return fmt.Errorf("failed to marshal JSON: %w", err)
@@ -1525,33 +1624,43 @@ func listArtists(jsonLevel string) error {
 		}
 		fmt.Println(string(jsonData))
 	} else {
-		// Existing table output
-		fmt.Printf("\nFound %d artists:\n\n", len(artists))
-		fmt.Printf("%-8s %-60s %-10s %-10s\n", "ID", "Name", "Shows", "Albums")
-		fmt.Println(strings.Repeat("-", 90))
+		// Sort alphabetically for table output
+		sort.Slice(artists, func(i, j int) bool {
+			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
+		})
 
-		for _, artist := range artists {
-			name := artist.ArtistName
-			if len(name) > 58 {
-				name = name[:58] + ".."
-			}
-			fmt.Printf("%-8d %-60s %-10d %-10d\n",
-				artist.ArtistID,
-				name,
-				artist.NumShows,
-				artist.NumAlbums)
+		// Table output
+		if showFilter != "" {
+			printSection(fmt.Sprintf("Found %d artists with shows %s%d", len(artists), filterOperator, filterValue))
+		} else {
+			printSection(fmt.Sprintf("Found %d artists", len(artists)))
 		}
 
-		fmt.Printf("\nTo list shows for an artist, use: list <artist_id>\n")
+		table := NewTable([]TableColumn{
+			{Header: "ID", Width: 8, Align: "left"},
+			{Header: "Name", Width: 55, Align: "left"},
+			{Header: "Shows", Width: 10, Align: "right"},
+			{Header: "Albums", Width: 10, Align: "right"},
+		})
+
+		for _, artist := range artists {
+			table.AddRow(
+				strconv.Itoa(artist.ArtistID),
+				artist.ArtistName,
+				strconv.Itoa(artist.NumShows),
+				strconv.Itoa(artist.NumAlbums),
+			)
+		}
+
+		table.Print()
+		printInfo("To list shows for an artist, use: nugs list <artist_id>")
 	}
 	return nil
 }
 
 // displayWelcome shows a welcome screen with latest shows from the catalog
 func displayWelcome() error {
-	fmt.Printf("\n%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", colorCyan, colorReset)
-	fmt.Printf("%s  Welcome to Nugs Downloader%s\n", colorBold, colorReset)
-	fmt.Printf("%s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", colorCyan, colorReset)
+	printHeader("Welcome to Nugs Downloader")
 
 	// Fetch latest catalog additions
 	catalog, err := getLatestCatalog()
@@ -1568,12 +1677,9 @@ func displayWelcome() error {
 	fmt.Printf("%sLatest Additions to Catalog:%s\n\n", colorBold, colorReset)
 
 	// Show top 15 latest additions
-	showCount := 15
-	if len(catalog.Response.RecentItems) < showCount {
-		showCount = len(catalog.Response.RecentItems)
-	}
+	showCount := min(15, len(catalog.Response.RecentItems))
 
-	for i := 0; i < showCount; i++ {
+	for i := range showCount {
 		item := catalog.Response.RecentItems[i]
 
 		// Format artist name
@@ -1621,16 +1727,16 @@ func displayWelcome() error {
 // Returns an error if the artist metadata cannot be fetched from the API.
 func listArtistShows(artistId string, jsonLevel string) error {
 	if jsonLevel == "" {
-		fmt.Println("Fetching artist shows...")
+		printInfo("Fetching artist shows...")
 	}
 	allMeta, err := getArtistMeta(artistId)
 	if err != nil {
-		fmt.Println("Failed to get artist metadata.")
+		printError("Failed to get artist metadata")
 		return err
 	}
 
 	if len(allMeta) == 0 {
-		fmt.Println("No metadata found for this artist.")
+		printWarning("No metadata found for this artist")
 		return nil
 	}
 
@@ -1765,35 +1871,377 @@ func listArtistShows(artistId string, jsonLevel string) error {
 			fmt.Println(string(jsonData))
 		}
 	} else {
-		// Existing table output
-		fmt.Printf("\n%s - %d shows:\n\n", artistName, len(allContainers))
-		fmt.Printf("%-10s %-12s %-50s %-30s\n", "ID", "Date", "Title", "Venue")
-		fmt.Println(strings.Repeat("-", 105))
+		// Table output
+		printSection(fmt.Sprintf("%s - %d shows", artistName, len(allContainers)))
+
+		table := NewTable([]TableColumn{
+			{Header: "ID", Width: 10, Align: "left"},
+			{Header: "Date", Width: 12, Align: "left"},
+			{Header: "Title", Width: 45, Align: "left"},
+			{Header: "Venue", Width: 30, Align: "left"},
+		})
 
 		for _, item := range allContainers {
 			container := item.container
-			title := container.ContainerInfo
-			if len(title) > 48 {
-				title = title[:48] + ".."
-			}
-			venue := container.VenueName
-			if len(venue) > 28 {
-				venue = venue[:28] + ".."
-			}
-
-			fmt.Printf("%-10d %-12s %-50s %-30s\n",
-				container.ContainerID,
+			table.AddRow(
+				strconv.Itoa(container.ContainerID),
 				item.dateStr,
-				title,
-				venue)
+				container.ContainerInfo,
+				container.VenueName,
+			)
 		}
 
-		fmt.Printf("\nTo download a show, use: https://play.nugs.net/release/<container_id>\n")
+		table.Print()
+		printInfo("To download a show, use: nugs <container_id>")
 	}
 	return nil
 }
 
 // Cache I/O Functions
+// listArtistShowsByVenue filters artist shows by venue name (case-insensitive substring match)
+func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel string) error {
+	// Validate artistId is numeric
+	if _, err := strconv.Atoi(artistId); err != nil {
+		return fmt.Errorf("invalid artist ID: %s (must be numeric)", artistId)
+	}
+
+	if jsonLevel == "" {
+		fmt.Printf("Fetching shows at venues matching \"%s\"...\n", venueFilter)
+	}
+
+	allMeta, err := getArtistMeta(artistId)
+	if err != nil {
+		printError("Failed to get artist metadata")
+		return err
+	}
+
+	if len(allMeta) == 0 {
+		printWarning("No metadata found for this artist")
+		return nil
+	}
+
+	// Extract artist name from first container
+	artistName := "Unknown Artist"
+	if len(allMeta[0].Response.Containers) > 0 {
+		artistName = allMeta[0].Response.Containers[0].ArtistName
+	}
+
+	// Collect and filter containers by venue (case-insensitive substring match)
+	// Checks both VenueName and Venue fields since API may populate either
+	type containerWithDate struct {
+		container *AlbArtResp
+		dateStr   string
+	}
+	var filteredContainers []containerWithDate
+	venueFilterLower := strings.ToLower(venueFilter)
+
+	for _, meta := range allMeta {
+		for _, container := range meta.Response.Containers {
+			venueNameLower := strings.ToLower(container.VenueName)
+			venueLower := strings.ToLower(container.Venue)
+			if strings.Contains(venueNameLower, venueFilterLower) || strings.Contains(venueLower, venueFilterLower) {
+				dateStr := container.PerformanceDateShortYearFirst
+				if dateStr == "" {
+					dateStr = container.PerformanceDate
+				}
+				filteredContainers = append(filteredContainers, containerWithDate{
+					container: container,
+					dateStr:   dateStr,
+				})
+			}
+		}
+	}
+
+	if len(filteredContainers) == 0 {
+		if jsonLevel != "" {
+			artistIdInt, _ := strconv.Atoi(artistId)
+			emptyOutput := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      []ShowOutput{},
+				Total:      0,
+			}
+			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal empty output: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		} else {
+			fmt.Printf("No shows found for %s at venues matching \"%s\"\n", artistName, venueFilter)
+		}
+		return nil
+	}
+
+	// Sort by date in reverse chronological order (newest first)
+	sort.Slice(filteredContainers, func(i, j int) bool {
+		dateI := filteredContainers[i].dateStr
+		dateJ := filteredContainers[j].dateStr
+
+		// Push empty dates to end
+		if dateI == "" && dateJ != "" {
+			return false
+		}
+		if dateI != "" && dateJ == "" {
+			return true
+		}
+		if dateI == "" && dateJ == "" {
+			return false
+		}
+
+		// Sort by date descending (newest first)
+		return dateI > dateJ
+	})
+
+	if jsonLevel != "" {
+		// Raw mode not applicable for filtered results - use extended instead
+		artistIdInt, _ := strconv.Atoi(artistId)
+
+		if jsonLevel == JSONLevelExtended || jsonLevel == JSONLevelRaw {
+			// Extended: output full container structs with all fields
+			shows := make([]*AlbArtResp, len(filteredContainers))
+			for i, item := range filteredContainers {
+				shows[i] = item.container
+			}
+			output := map[string]any{
+				"artistID":    artistIdInt,
+				"artistName":  artistName,
+				"venueFilter": venueFilter,
+				"shows":       shows,
+				"total":       len(filteredContainers),
+			}
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		} else {
+			// Minimal or Standard: use ShowOutput struct
+			output := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      make([]ShowOutput, len(filteredContainers)),
+				Total:      len(filteredContainers),
+			}
+
+			for i, item := range filteredContainers {
+				show := ShowOutput{
+					ContainerID: item.container.ContainerID,
+					Date:        item.dateStr,
+					Title:       item.container.ContainerInfo,
+					Venue:       item.container.VenueName,
+				}
+
+				// Standard level includes location details
+				if jsonLevel == JSONLevelStandard {
+					show.VenueCity = item.container.VenueCity
+					show.VenueState = item.container.VenueState
+				}
+
+				output.Shows[i] = show
+			}
+
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		}
+	} else {
+		// Table output
+		printSection(fmt.Sprintf("%s - Shows at \"%s\" (%d shows)", artistName, venueFilter, len(filteredContainers)))
+
+		table := NewTable([]TableColumn{
+			{Header: "ID", Width: 10, Align: "left"},
+			{Header: "Date", Width: 12, Align: "left"},
+			{Header: "Title", Width: 45, Align: "left"},
+			{Header: "Venue", Width: 30, Align: "left"},
+		})
+
+		for _, item := range filteredContainers {
+			container := item.container
+			table.AddRow(
+				strconv.Itoa(container.ContainerID),
+				item.dateStr,
+				container.ContainerInfo,
+				container.VenueName,
+			)
+		}
+
+		table.Print()
+		printInfo("To download a show, use: nugs <container_id>")
+	}
+	return nil
+}
+
+// listArtistLatestShows displays the latest N shows for an artist
+func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
+	if jsonLevel == "" {
+		fmt.Printf("Fetching latest %d shows...\n", limit)
+	}
+
+	allMeta, err := getArtistMeta(artistId)
+	if err != nil {
+		printError("Failed to get artist metadata")
+		return err
+	}
+
+	if len(allMeta) == 0 {
+		printWarning("No metadata found for this artist")
+		return nil
+	}
+
+	// Extract artist name from first container
+	artistName := "Unknown Artist"
+	if len(allMeta) > 0 && len(allMeta[0].Response.Containers) > 0 {
+		artistName = allMeta[0].Response.Containers[0].ArtistName
+	}
+
+	// Collect all containers from all paginated responses
+	type containerWithDate struct {
+		container *AlbArtResp
+		dateStr   string
+	}
+	var allContainers []containerWithDate
+
+	for _, meta := range allMeta {
+		for _, container := range meta.Response.Containers {
+			dateStr := container.PerformanceDateShortYearFirst
+			if dateStr == "" {
+				dateStr = container.PerformanceDate
+			}
+			allContainers = append(allContainers, containerWithDate{
+				container: container,
+				dateStr:   dateStr,
+			})
+		}
+	}
+
+	if len(allContainers) == 0 {
+		if jsonLevel != "" {
+			artistIdInt, _ := strconv.Atoi(artistId)
+			emptyOutput := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      []ShowOutput{},
+				Total:      0,
+			}
+			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal empty output: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		} else {
+			fmt.Printf("No shows found for %s\n", artistName)
+		}
+		return nil
+	}
+
+	// Sort by date in reverse chronological order (newest first)
+	sort.Slice(allContainers, func(i, j int) bool {
+		dateI := allContainers[i].dateStr
+		dateJ := allContainers[j].dateStr
+
+		// Push empty dates to end
+		if dateI == "" && dateJ != "" {
+			return false
+		}
+		if dateI != "" && dateJ == "" {
+			return true
+		}
+		if dateI == "" && dateJ == "" {
+			return false
+		}
+
+		// Sort by date descending (newest first)
+		return dateI > dateJ
+	})
+
+	// Limit to N latest shows
+	if limit > len(allContainers) {
+		limit = len(allContainers)
+	}
+	latestContainers := allContainers[:limit]
+
+	if jsonLevel != "" {
+		// Raw mode not applicable for limited results - use extended instead
+		artistIdInt, _ := strconv.Atoi(artistId)
+
+		if jsonLevel == JSONLevelExtended || jsonLevel == JSONLevelRaw {
+			// Extended: output full container structs with all fields
+			shows := make([]*AlbArtResp, len(latestContainers))
+			for i, item := range latestContainers {
+				shows[i] = item.container
+			}
+			output := map[string]any{
+				"artistID":   artistIdInt,
+				"artistName": artistName,
+				"limit":      limit,
+				"shows":      shows,
+				"total":      len(latestContainers),
+			}
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		} else {
+			// Minimal or Standard: use ShowOutput struct
+			output := ShowListOutput{
+				ArtistID:   artistIdInt,
+				ArtistName: artistName,
+				Shows:      make([]ShowOutput, len(latestContainers)),
+				Total:      len(latestContainers),
+			}
+
+			for i, item := range latestContainers {
+				show := ShowOutput{
+					ContainerID: item.container.ContainerID,
+					Date:        item.dateStr,
+					Title:       item.container.ContainerInfo,
+					Venue:       item.container.VenueName,
+				}
+
+				// Standard level includes location details
+				if jsonLevel == JSONLevelStandard {
+					show.VenueCity = item.container.VenueCity
+					show.VenueState = item.container.VenueState
+				}
+
+				output.Shows[i] = show
+			}
+
+			jsonData, err := json.MarshalIndent(output, "", "  ")
+			if err != nil {
+				return fmt.Errorf("failed to marshal JSON: %w", err)
+			}
+			fmt.Println(string(jsonData))
+		}
+	} else {
+		// Table output
+		printHeader(fmt.Sprintf("%s - Latest %d Shows", artistName, len(latestContainers)))
+
+		table := NewTable([]TableColumn{
+			{Header: "ID", Width: 10, Align: "right"},
+			{Header: "Date", Width: 12, Align: "left"},
+			{Header: "Title", Width: 50, Align: "left"},
+			{Header: "Venue", Width: 30, Align: "left"},
+		})
+
+		for _, item := range latestContainers {
+			table.AddRow(
+				fmt.Sprintf("%d", item.container.ContainerID),
+				item.dateStr,
+				item.container.ContainerInfo,
+				item.container.VenueName,
+			)
+		}
+
+		table.Print()
+		fmt.Printf("\n%s%s%s To download: %snugs <container_id>%s\n\n",
+			colorCyan, symbolInfo, colorReset, colorBold, colorReset)
+	}
+	return nil
+}
 
 // getCacheDir returns the cache directory path, creating it if needed
 func getCacheDir() (string, error) {
@@ -1816,7 +2264,7 @@ func readCacheMeta() (*CacheMeta, error) {
 		return nil, err
 	}
 	metaPath := filepath.Join(cacheDir, "catalog_meta.json")
-	
+
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1824,7 +2272,7 @@ func readCacheMeta() (*CacheMeta, error) {
 		}
 		return nil, fmt.Errorf("failed to read cache metadata: %w", err)
 	}
-	
+
 	var meta CacheMeta
 	err = json.Unmarshal(data, &meta)
 	if err != nil {
@@ -1840,7 +2288,7 @@ func readCatalogCache() (*LatestCatalogResp, error) {
 		return nil, err
 	}
 	catalogPath := filepath.Join(cacheDir, "catalog.json")
-	
+
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1848,7 +2296,7 @@ func readCatalogCache() (*LatestCatalogResp, error) {
 		}
 		return nil, fmt.Errorf("failed to read catalog cache: %w", err)
 	}
-	
+
 	var catalog LatestCatalogResp
 	err = json.Unmarshal(data, &catalog)
 	if err != nil {
@@ -1884,7 +2332,7 @@ func writeCatalogCache(catalog *LatestCatalogResp, updateDuration time.Duration)
 		// Atomic rename
 		err = os.Rename(tmpCatalogPath, catalogPath)
 		if err != nil {
-			os.Remove(tmpCatalogPath)
+			_ = os.Remove(tmpCatalogPath) // Best effort cleanup
 			return fmt.Errorf("failed to rename catalog: %w", err)
 		}
 
@@ -1917,7 +2365,7 @@ func writeCatalogCache(catalog *LatestCatalogResp, updateDuration time.Duration)
 
 		err = os.Rename(tmpMetaPath, metaPath)
 		if err != nil {
-			os.Remove(tmpMetaPath)
+			_ = os.Remove(tmpMetaPath) // Best effort cleanup
 			return fmt.Errorf("failed to rename metadata: %w", err)
 		}
 
@@ -1965,7 +2413,7 @@ func buildArtistIndex(catalog *LatestCatalogResp) error {
 
 	err = os.Rename(tmpPath, indexPath)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // Best effort cleanup
 		return fmt.Errorf("failed to rename artist index: %w", err)
 	}
 
@@ -2006,7 +2454,7 @@ func buildContainerIndex(catalog *LatestCatalogResp) error {
 
 	err = os.Rename(tmpPath, indexPath)
 	if err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // Best effort cleanup
 		return fmt.Errorf("failed to rename container index: %w", err)
 	}
 
@@ -2034,7 +2482,7 @@ func formatDuration(d time.Duration) string {
 func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
 	_meta, err := getPlistMeta(plistId, cfg.Email, legacyToken, cat)
 	if err != nil {
-		fmt.Println("Failed to get playlist metadata.")
+		printError("Failed to get playlist metadata")
 		return err
 	}
 	meta := _meta.Response
@@ -2045,10 +2493,17 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 		fmt.Println(
 			"Playlist folder name was chopped because it exceeds 120 characters.")
 	}
-	plistPath := filepath.Join(cfg.OutPath, sanitise(plistName))
+
+	// Determine base path: use rclonePath if specified, otherwise outPath
+	basePath := cfg.OutPath
+	if cfg.RclonePath != "" {
+		basePath = cfg.RclonePath
+	}
+
+	plistPath := filepath.Join(basePath, sanitise(plistName))
 	err = makeDirs(plistPath)
 	if err != nil {
-		fmt.Println("Failed to make playlist folder.")
+		printError("Failed to make playlist folder")
 		return err
 	}
 	trackTotal := len(meta.Items)
@@ -2063,7 +2518,8 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
-		err = uploadToRclone(plistPath, cfg)
+		// Playlists don't have artist folder structure
+		err = uploadToRclone(plistPath, "", cfg)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -2141,11 +2597,9 @@ func chooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 			wantRes = resFallback[wantRes]
 		}
 	}
-	if wantVariant == nil {
-		return nil, "", errors.New("No variant was chosen.")
-	}
+	// wantVariant is guaranteed non-nil after loop exit
 	if wantRes != origWantRes {
-		fmt.Println("Unavailable in your chosen format.")
+		printInfo("Unavailable in your chosen format")
 	}
 	wantRes = formatRes(wantRes)
 	return wantVariant, wantRes, nil
@@ -2220,9 +2674,9 @@ func downloadVideo(videoPath, _url string) error {
 
 	totalBytes := do.ContentLength
 	counter := &WriteCounter{
-		Total:     totalBytes,
-		TotalStr:  humanize.Bytes(uint64(totalBytes)),
-		StartTime: time.Now().UnixMilli(),
+		Total:      totalBytes,
+		TotalStr:   humanize.Bytes(uint64(totalBytes)),
+		StartTime:  time.Now().UnixMilli(),
 		Downloaded: startByte,
 	}
 	_, err = io.Copy(f, io.TeeReader(do.Body, counter))
@@ -2240,9 +2694,6 @@ func downloadLstream(videoPath, baseUrl string, segUrls []string) error {
 	for segNum, segUrl := range segUrls {
 		segNum++
 		fmt.Printf("\rSegment %d of %d.", segNum, segTotal)
-		if err != nil {
-			return err
-		}
 		req, err := http.NewRequest(http.MethodGet, baseUrl+segUrl, nil)
 		if err != nil {
 			return err
@@ -2326,7 +2777,6 @@ func getNextChapStart(chapters []any, idx int) float64 {
 	}
 	return 0
 }
-
 
 func writeChapsFile(chapters []any, dur int) error {
 	f, err := os.OpenFile(chapsFileFname, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
@@ -2449,11 +2899,11 @@ func parseLstreamMeta(_meta *ArtistMeta) *AlbumMeta {
 // Returns an error if metadata fetching, download, conversion, or upload fails.
 func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta *AlbArtResp, isLstream bool) error {
 	var (
-		chapsAvail bool
-		skuID int
+		chapsAvail  bool
+		skuID       int
 		manifestUrl string
-		meta *AlbArtResp
-		err error
+		meta        *AlbArtResp
+		err         error
 	)
 
 	if _meta != nil {
@@ -2461,7 +2911,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	} else {
 		m, err := getAlbumMeta(videoID)
 		if err != nil {
-			fmt.Println("Failed to get metadata.")
+			printError("Failed to get metadata")
 			return err
 		}
 		meta = m.Response
@@ -2470,7 +2920,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	if !cfg.SkipChapters {
 		chapsAvail = !reflect.ValueOf(meta.VideoChapters).IsZero()
 	}
-	
+
 	videoFname := meta.ArtistName + " - " + strings.TrimRight(meta.ContainerInfo, " ")
 	fmt.Println(videoFname)
 	if len(videoFname) > 110 {
@@ -2494,23 +2944,29 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	}
 
 	if err != nil {
-		fmt.Println("Failed to get video file metadata.")
+		printError("Failed to get video file metadata")
 		return err
 	} else if manifestUrl == "" {
 		return errors.New("the api didn't return a video manifest url")
 	}
 	variant, retRes, err := chooseVariant(manifestUrl, cfg.WantRes)
 	if err != nil {
-		fmt.Println("Failed to get video master manifest.")
+		printError("Failed to get video master manifest")
 		return err
+	}
+
+	// Determine base path: use rclonePath if specified, otherwise outPath
+	basePath := cfg.OutPath
+	if cfg.RclonePath != "" {
+		basePath = cfg.RclonePath
 	}
 
 	// Create artist directory
 	artistFolder := sanitise(meta.ArtistName)
-	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	artistPath := filepath.Join(basePath, artistFolder)
 	err = makeDirs(artistPath)
 	if err != nil {
-		fmt.Println("Failed to make artist folder.")
+		printError("Failed to make artist folder")
 		return err
 	}
 
@@ -2519,7 +2975,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	vidPath := vidPathNoExt + ".mp4"
 	exists, err := fileExists(vidPath)
 	if err != nil {
-		fmt.Println("Failed to check if video already exists locally.")
+		printError("Failed to check if video already exists locally")
 		return err
 	}
 	if exists {
@@ -2528,13 +2984,13 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	}
 	manBaseUrl, query, err := getManifestBase(manifestUrl)
 	if err != nil {
-		fmt.Println("Failed to get video manifest base URL.")
+		printError("Failed to get video manifest base URL")
 		return err
 	}
 
 	segUrls, err := getSegUrls(manBaseUrl+variant.URI, query)
 	if err != nil {
-		fmt.Println("Failed to get video segment URLs.")
+		printError("Failed to get video segment URLs")
 		return err
 	}
 
@@ -2552,41 +3008,42 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		err = downloadVideo(VidPathTs, manBaseUrl+segUrls[0])
 	}
 	if err != nil {
-		fmt.Println("Failed to download video segments.")
+		printError("Failed to download video segments")
 		return err
 	}
 	if chapsAvail {
 		dur, err := getDuration(VidPathTs, cfg.FfmpegNameStr)
 		if err != nil {
-			fmt.Println("Failed to get TS duration.")
+			printError("Failed to get TS duration")
 			return err
 		}
 		err = writeChapsFile(meta.VideoChapters, dur)
 		if err != nil {
-			fmt.Println("Failed to write chapters file.")
+			printError("Failed to write chapters file")
 			return err
 		}
 	}
-	fmt.Println("Putting into MP4 container...")
+	printInfo("Putting into MP4 container...")
 	err = tsToMp4(VidPathTs, vidPath, cfg.FfmpegNameStr, chapsAvail)
 	if err != nil {
-		fmt.Println("Failed to put TS into MP4 container.")
+		printError("Failed to put TS into MP4 container")
 		return err
 	}
 	if chapsAvail {
 		err = os.Remove(chapsFileFname)
 		if err != nil {
-			fmt.Println("Failed to delete chapters file.")
+			printError("Failed to delete chapters file")
 		}
 	}
 	err = os.Remove(VidPathTs)
 	if err != nil {
-		fmt.Println("Failed to delete TS.")
+		printError("Failed to delete TS")
 	}
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
-		err = uploadToRclone(artistPath, cfg)
+		// Videos upload the entire artist folder, not a subfolder
+		err = uploadToRclone(artistPath, "", cfg)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -2631,7 +3088,7 @@ func catalogPlist(_plistId, legacyToken string, cfg *Config, streamParams *Strea
 }
 
 func paidLstream(query, uguID string, cfg *Config, streamParams *StreamParams) error {
-    q, err := url.ParseQuery(query)
+	q, err := url.ParseQuery(query)
 	if err != nil {
 		return err
 	}
@@ -2645,18 +3102,15 @@ func paidLstream(query, uguID string, cfg *Config, streamParams *StreamParams) e
 
 func init() {
 	// Check if --json flag is present, if so, suppress banner
-	for _, arg := range os.Args {
-		if arg == "--json" {
-			return
-		}
+	if slices.Contains(os.Args, "--json") {
+		return
 	}
 	fmt.Println(`
  _____                ____                _           _
 |   | |_ _ ___ ___   |    \ ___ _ _ _ ___| |___ ___ _| |___ ___
 | | | | | | . |_ -|  |  |  | . | | | |   | | . | .'| . | -_|  _|
 |_|___|___|_  |___|  |____/|___|_____|_|_|_|___|__,|___|___|_|
-	  |___|
-`)
+	  |___|`)
 }
 
 func main() {
@@ -2670,8 +3124,21 @@ func main() {
 		panic(err)
 	}
 
-	// Check if config.json exists, if not, prompt to create it
-	if _, err := os.Stat("config.json"); os.IsNotExist(err) {
+	// Check if any config file exists, if not, prompt to create one
+	configExists := false
+	homeDir, _ := os.UserHomeDir()
+	configSearchPaths := []string{
+		"config.json",
+		filepath.Join(homeDir, ".nugs", "config.json"),
+		filepath.Join(homeDir, ".config", "nugs", "config.json"),
+	}
+	for _, p := range configSearchPaths {
+		if _, statErr := os.Stat(p); statErr == nil {
+			configExists = true
+			break
+		}
+	}
+	if !configExists {
 		err = promptForConfig()
 		if err != nil {
 			handleErr("Failed to create config.", err, true)
@@ -2717,7 +3184,7 @@ func main() {
 	err = autoRefreshIfNeeded(cfg)
 	if err != nil {
 		// Log error but don't stop execution
-		fmt.Fprintf(os.Stderr, "Auto-refresh warning: %v\\n", err)
+		fmt.Fprintf(os.Stderr, "Auto-refresh warning: %v\n", err)
 	}
 
 	// Check if rclone is available when enabled
@@ -2740,37 +3207,94 @@ func main() {
 	// Check if first argument is "list" command
 	if len(cfg.Urls) > 0 && cfg.Urls[0] == "list" {
 		if len(cfg.Urls) < 2 {
-			fmt.Println("Usage: list artists | list <artist_id>")
+			fmt.Println("Usage: list artists | list <artist_id> [shows \"venue\" | latest <N>]")
 			return
 		}
 
 		subCmd := cfg.Urls[1]
 		if subCmd == "artists" {
-			err := listArtists(jsonLevel)
+			// Check for show count filter: list artists shows >100
+			showFilter := ""
+			if len(cfg.Urls) > 2 && cfg.Urls[2] == "shows" {
+				if len(cfg.Urls) < 4 {
+					fmt.Println("Usage: list artists shows <operator><number>")
+					fmt.Println("Examples:")
+					fmt.Println("  list artists shows >100")
+					fmt.Println("  list artists shows <=50")
+					fmt.Println("  list artists shows =25")
+					fmt.Println("Operators: >, <, >=, <=, =")
+					return
+				}
+				showFilter = cfg.Urls[3]
+			}
+
+			err := listArtists(jsonLevel, showFilter)
 			if err != nil {
 				handleErr("List artists failed.", err, true)
 			}
 			return
 		}
 
-		// Try to parse as artist ID
-		if _, err := strconv.Atoi(subCmd); err == nil {
-			err := listArtistShows(subCmd, jsonLevel)
+		// list <artist_id> subcommands
+		artistId := subCmd
+
+		// Check for venue filter: list <artist_id> shows "venue"
+		if len(cfg.Urls) > 2 && cfg.Urls[2] == "shows" {
+			if len(cfg.Urls) < 4 {
+				fmt.Println("Usage: list <artist_id> shows \"<venue_name>\"")
+				fmt.Println("Example: list 461 shows \"Red Rocks\"")
+				return
+			}
+			// Join remaining args to support multi-word venue names without quotes
+			// e.g., "list 461 shows Red Rocks" -> venueFilter = "Red Rocks"
+			venueFilter := strings.Join(cfg.Urls[3:], " ")
+			err := listArtistShowsByVenue(artistId, venueFilter, jsonLevel)
 			if err != nil {
-				handleErr("List shows failed.", err, true)
+				handleErr("List shows by venue failed.", err, true)
 			}
 			return
 		}
 
-		fmt.Printf("Invalid list command: %s\n", subCmd)
-		fmt.Println("Usage: list artists | list <artist_id>")
+		// Check for latest N: list <artist_id> latest <N>
+		if len(cfg.Urls) > 2 && cfg.Urls[2] == "latest" {
+			limit := 10 // default
+			if len(cfg.Urls) > 3 {
+				if parsedLimit, parseErr := strconv.Atoi(cfg.Urls[3]); parseErr == nil {
+					if parsedLimit < 1 {
+						fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
+						return
+					}
+					limit = parsedLimit
+				}
+			}
+			err := listArtistLatestShows(artistId, limit, jsonLevel)
+			if err != nil {
+				handleErr("List latest shows failed.", err, true)
+			}
+			return
+		}
+
+		// Default: list all shows for artist
+		err := listArtistShows(artistId, jsonLevel)
+		if err != nil {
+			handleErr("List shows failed.", err, true)
+		}
 		return
 	}
 
-	// Catalog commands
-	if len(cfg.Urls) > 0 && cfg.Urls[0] == "catalog" {
+	// Catalog commands (except "catalog gaps ... fill" which requires auth)
+	isCatalogGapsFill := len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill"
+	if len(cfg.Urls) > 0 && cfg.Urls[0] == "catalog" && !isCatalogGapsFill {
 		if len(cfg.Urls) < 2 {
-			fmt.Println("Usage: catalog update | catalog cache | catalog stats | catalog latest [limit] | catalog gaps <artist_id> | catalog config enable|disable|set")
+			fmt.Println("Usage: catalog update")
+			fmt.Println("       catalog cache")
+			fmt.Println("       catalog stats")
+			fmt.Println("       catalog latest [limit]")
+			fmt.Println("       catalog list <artist_id> [...]")
+			fmt.Println("       catalog gaps <artist_id> [...] [fill]")
+			fmt.Println("       catalog gaps <artist_id> [...] --ids-only")
+			fmt.Println("       catalog coverage [artist_ids...]")
+			fmt.Println("       catalog config enable|disable|set")
 			return
 		}
 
@@ -2795,6 +3319,10 @@ func main() {
 			limit := 15 // default
 			if len(cfg.Urls) > 2 {
 				if parsedLimit, err := strconv.Atoi(cfg.Urls[2]); err == nil {
+					if parsedLimit < 1 {
+						fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
+						return
+					}
 					limit = parsedLimit
 				}
 			}
@@ -2804,13 +3332,54 @@ func main() {
 			}
 		case "gaps":
 			if len(cfg.Urls) < 3 {
-				fmt.Println("Usage: catalog gaps <artist_id>")
+				fmt.Println("Usage: catalog gaps <artist_id> [...] [fill]")
+				fmt.Println("       catalog gaps <artist_id> [...] --ids-only")
 				return
 			}
-			artistId := cfg.Urls[2]
-			err := catalogGaps(artistId, cfg, jsonLevel)
+
+			// Check for --ids-only flag and collect artist IDs
+			idsOnly := false
+			artistIds := []string{}
+			for i := 2; i < len(cfg.Urls); i++ {
+				if cfg.Urls[i] == "--ids-only" {
+					idsOnly = true
+					continue
+				}
+				artistIds = append(artistIds, cfg.Urls[i])
+			}
+
+			if len(artistIds) == 0 {
+				fmt.Println("Error: No artist IDs provided")
+				return
+			}
+
+			err := catalogGaps(artistIds, cfg, jsonLevel, idsOnly)
 			if err != nil {
 				handleErr("Catalog gaps failed.", err, true)
+			}
+		case "list":
+			if len(cfg.Urls) < 3 {
+				fmt.Println("Usage: catalog list <artist_id> [...]")
+				return
+			}
+
+			// Get artist IDs (everything after "list")
+			artistIds := cfg.Urls[2:]
+
+			err := catalogList(artistIds, cfg, jsonLevel)
+			if err != nil {
+				handleErr("Catalog list failed.", err, true)
+			}
+		case "coverage":
+			// Get artist IDs (everything after "coverage")
+			artistIds := []string{}
+			if len(cfg.Urls) > 2 {
+				artistIds = cfg.Urls[2:]
+			}
+
+			err := catalogCoverage(artistIds, cfg, jsonLevel)
+			if err != nil {
+				handleErr("Catalog coverage failed.", err, true)
 			}
 		case "config":
 			if len(cfg.Urls) < 3 {
@@ -2835,10 +3404,10 @@ func main() {
 					handleErr("Configure auto-refresh failed.", err, true)
 				}
 			default:
-				fmt.Printf("Unknown config action: %s\\n", action)
+				fmt.Printf("Unknown config action: %s\n", action)
 			}
 		default:
-			fmt.Printf("Unknown catalog command: %s\\n", subCmd)
+			fmt.Printf("Unknown catalog command: %s\n", subCmd)
 		}
 		return
 	}
@@ -2846,16 +3415,34 @@ func main() {
 	// Check for "<artistID> latest" or "<artistID> full" shorthand
 	if len(cfg.Urls) == 2 {
 		if artistID, err := strconv.Atoi(cfg.Urls[0]); err == nil {
-			if cfg.Urls[1] == "latest" {
+			switch cfg.Urls[1] {
+			case "latest":
 				// Construct the artist latest URL and replace the args
 				artistUrl := fmt.Sprintf("https://play.nugs.net/artist/%d/latest", artistID)
 				cfg.Urls = []string{artistUrl}
 				printMusic(fmt.Sprintf("Downloading latest shows from %sartist %d%s", colorBold, artistID, colorReset))
-			} else if cfg.Urls[1] == "full" {
+			case "full":
 				// Construct the full artist catalog URL and replace the args
 				artistUrl := fmt.Sprintf("https://play.nugs.net/#/artist/%d", artistID)
 				cfg.Urls = []string{artistUrl}
 				printMusic(fmt.Sprintf("Downloading entire catalog from %sartist %d%s", colorBold, artistID, colorReset))
+			case "gaps", "update", "cache", "stats", "latest-shows", "config":
+				// User likely meant a catalog command
+				fmt.Printf("%s✗ Invalid syntax%s\n\n", colorRed, colorReset)
+				fmt.Printf("Did you mean: %snugs catalog %s %d%s\n\n", colorBold, cfg.Urls[1], artistID, colorReset)
+				fmt.Printf("Valid artist shortcuts:\n")
+				fmt.Printf("  • %snugs %d latest%s  - Download latest shows\n", colorBold, artistID, colorReset)
+				fmt.Printf("  • %snugs %d full%s    - Download entire catalog\n\n", colorBold, artistID, colorReset)
+				fmt.Printf("For catalog commands, use:\n")
+				fmt.Printf("  • %snugs catalog %s %d%s\n", colorBold, cfg.Urls[1], artistID, colorReset)
+				os.Exit(1)
+			default:
+				// Unknown subcommand after artist ID
+				fmt.Printf("%s✗ Unknown command: %s%s\n\n", colorRed, cfg.Urls[1], colorReset)
+				fmt.Printf("Valid artist shortcuts:\n")
+				fmt.Printf("  • %snugs %d latest%s  - Download latest shows\n", colorBold, artistID, colorReset)
+				fmt.Printf("  • %snugs %d full%s    - Download entire catalog\n\n", colorBold, artistID, colorReset)
+				os.Exit(1)
 			}
 		}
 	}
@@ -2890,6 +3477,37 @@ func main() {
 	}
 	printSuccess(fmt.Sprintf("Signed in - %s%s%s", colorCyan, planDesc, colorReset))
 	streamParams := parseStreamParams(userId, subInfo, isPromo)
+
+	// Handle "catalog gaps <artist_id> [...] fill" command (needs auth)
+	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
+		// Extract all artist IDs between "gaps" and "fill"
+		artistIds := []string{}
+		for i := 2; i < len(cfg.Urls)-1; i++ {
+			artistIds = append(artistIds, cfg.Urls[i])
+		}
+		if len(artistIds) == 0 {
+			fmt.Println("Error: No artist IDs provided")
+			fmt.Println("Usage: catalog gaps <artist_id> [...] fill")
+			return
+		}
+		for idx, artistId := range artistIds {
+			if idx > 0 && jsonLevel == "" {
+				fmt.Println()
+				fmt.Println(strings.Repeat("─", 80))
+				fmt.Println()
+			}
+			err := catalogGapsFill(artistId, cfg, streamParams, jsonLevel)
+			if err != nil {
+				if len(artistIds) > 1 {
+					printWarning(fmt.Sprintf("Failed to fill gaps for artist %s: %v", artistId, err))
+					continue
+				}
+				handleErr("Catalog gaps fill failed.", err, true)
+			}
+		}
+		return
+	}
+
 	albumTotal := len(cfg.Urls)
 	var itemErr error
 	for albumNum, _url := range cfg.Urls {
