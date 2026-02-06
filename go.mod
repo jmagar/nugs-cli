@@ -1,4 +1,4 @@
-module main
+module github.com/jmagar/nugs-cli
 
 go 1.24.0
 

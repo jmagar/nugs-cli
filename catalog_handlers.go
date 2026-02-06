@@ -8,26 +8,33 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
 // Catalog Command Handlers
 
+const artistMetaCacheTTL = 24 * time.Hour
+
+type artistPresenceIndex struct {
+	artistFolder  string
+	localFolders  map[string]struct{}
+	remoteFolders map[string]struct{}
+	remoteListErr error
+}
+
+var remoteCheckWarnOnce sync.Once
+
+func warnRemoteCheckError(err error) {
+	remoteCheckWarnOnce.Do(func() {
+		printWarning(fmt.Sprintf("Remote existence checks failed; treating as not found. First error: %v", err))
+	})
+}
+
 // showExists checks if a show has been downloaded locally or exists on remote storage
 func showExists(show *AlbArtResp, cfg *Config) bool {
-	albumFolder := fmt.Sprintf("%s - %s", show.ArtistName, show.ContainerInfo)
-	if len(albumFolder) > 120 {
-		albumFolder = albumFolder[:120]
-	}
-	albumFolder = sanitise(albumFolder)
-
-	// Determine base path: use rclonePath if specified, otherwise outPath
-	basePath := cfg.OutPath
-	if cfg.RclonePath != "" {
-		basePath = cfg.RclonePath
-	}
-
-	albumPath := filepath.Join(basePath, sanitise(show.ArtistName), albumFolder)
+	albumFolder := buildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+	albumPath := filepath.Join(cfg.OutPath, sanitise(show.ArtistName), albumFolder)
 
 	// Check local existence
 	_, err := os.Stat(albumPath)
@@ -38,7 +45,11 @@ func showExists(show *AlbArtResp, cfg *Config) bool {
 	// Check remote if rclone enabled
 	if cfg.RcloneEnabled {
 		remotePath := filepath.Join(sanitise(show.ArtistName), albumFolder)
-		remoteExists, _ := remotePathExists(remotePath, cfg)
+		remoteExists, err := remotePathExists(remotePath, cfg)
+		if err != nil {
+			warnRemoteCheckError(err)
+			return false
+		}
 		if remoteExists {
 			return true
 		}
@@ -56,6 +67,116 @@ func collectArtistShows(artistMetas []*ArtistMeta) (allShows []*AlbArtResp, arti
 		}
 	}
 	return allShows, artistName
+}
+
+func buildArtistPresenceIndex(artistName string, cfg *Config) artistPresenceIndex {
+	idx := artistPresenceIndex{
+		artistFolder:  sanitise(artistName),
+		localFolders:  make(map[string]struct{}),
+		remoteFolders: make(map[string]struct{}),
+	}
+
+	localArtistPath := filepath.Join(cfg.OutPath, idx.artistFolder)
+	if entries, err := os.ReadDir(localArtistPath); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			idx.localFolders[entry.Name()] = struct{}{}
+		}
+	}
+
+	if cfg.RcloneEnabled {
+		remoteFolders, err := listRemoteArtistFolders(idx.artistFolder, cfg)
+		if err != nil {
+			idx.remoteListErr = err
+		} else {
+			idx.remoteFolders = remoteFolders
+		}
+	}
+
+	return idx
+}
+
+func isShowDownloaded(show *AlbArtResp, idx artistPresenceIndex, cfg *Config) bool {
+	albumFolder := buildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+
+	if _, ok := idx.localFolders[albumFolder]; ok {
+		return true
+	}
+	if _, ok := idx.remoteFolders[albumFolder]; ok {
+		return true
+	}
+
+	// Fallback for remote-list failures to preserve correctness.
+	if cfg.RcloneEnabled && idx.remoteListErr != nil {
+		remotePath := filepath.Join(idx.artistFolder, albumFolder)
+		remoteExists, err := remotePathExists(remotePath, cfg)
+		if err != nil {
+			warnRemoteCheckError(err)
+			return false
+		}
+		return remoteExists
+	}
+
+	return false
+}
+
+func analyzeArtistCatalog(artistID string, cfg *Config, jsonLevel string) (*ArtistCatalogAnalysis, error) {
+	artistMetas, cacheUsed, cacheStaleUse, err := getArtistMetaCached(artistID, artistMetaCacheTTL)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get artist metadata: %w", err)
+	}
+
+	if len(artistMetas) == 0 {
+		return nil, fmt.Errorf("no shows found for artist %s", artistID)
+	}
+
+	allShows, artistName := collectArtistShows(artistMetas)
+	if len(allShows) == 0 {
+		return nil, fmt.Errorf("no shows found for artist %s", artistID)
+	}
+
+	sort.Slice(allShows, func(i, j int) bool {
+		return allShows[i].PerformanceDate > allShows[j].PerformanceDate
+	})
+
+	presenceIdx := buildArtistPresenceIndex(artistName, cfg)
+	if presenceIdx.remoteListErr != nil && jsonLevel == "" {
+		printWarning(fmt.Sprintf("Remote artist folder bulk check failed, falling back to per-show checks: %v", presenceIdx.remoteListErr))
+	}
+
+	analysis := &ArtistCatalogAnalysis{
+		ArtistID:      artistID,
+		ArtistName:    artistName,
+		TotalShows:    len(allShows),
+		Shows:         make([]ShowStatus, 0, len(allShows)),
+		MissingShows:  make([]ShowStatus, 0, len(allShows)),
+		CacheUsed:     cacheUsed,
+		CacheStaleUse: cacheStaleUse,
+	}
+
+	for _, show := range allShows {
+		downloaded := isShowDownloaded(show, presenceIdx, cfg)
+		status := ShowStatus{
+			Show:       show,
+			Downloaded: downloaded,
+		}
+		analysis.Shows = append(analysis.Shows, status)
+		if downloaded {
+			analysis.Downloaded++
+			continue
+		}
+		analysis.MissingShows = append(analysis.MissingShows, status)
+	}
+
+	analysis.Missing = len(analysis.MissingShows)
+	if analysis.TotalShows > 0 {
+		analysis.DownloadPct = float64(analysis.Downloaded) / float64(analysis.TotalShows) * 100
+		analysis.MissingPct = float64(analysis.Missing) / float64(analysis.TotalShows) * 100
+	}
+
+	return analysis, nil
 }
 
 // printJSON marshals data to JSON and prints it, handling errors properly
@@ -344,52 +465,20 @@ func catalogLatest(limit int, jsonLevel string) error {
 // catalogGapsForArtist finds missing shows for a single artist.
 // Returns structured gap data for aggregation by the caller.
 func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnly bool) error {
-
-	// Get all shows for this artist
-	artistMetas, err := getArtistMeta(artistId)
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
 	if err != nil {
-		return fmt.Errorf("failed to get artist metadata: %w", err)
+		return err
 	}
-
-	if len(artistMetas) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	allShows, artistName := collectArtistShows(artistMetas)
-
-	if len(allShows) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	// Check which shows are missing
-	var missingShows []*AlbArtResp
-	downloadedCount := 0
-
-	for _, show := range allShows {
-		if showExists(show, cfg) {
-			downloadedCount++
-		} else {
-			missingShows = append(missingShows, show)
-		}
-	}
-
-	// Sort missing shows by date (newest first)
-	sort.Slice(missingShows, func(i, j int) bool {
-		return missingShows[i].PerformanceDate > missingShows[j].PerformanceDate
-	})
-
-	totalShows := len(allShows)
-	downloadedPct := float64(downloadedCount) / float64(totalShows) * 100
-	missingPct := float64(len(missingShows)) / float64(totalShows) * 100
 
 	// Output results
 	if idsOnly {
-		for _, show := range missingShows {
-			fmt.Println(show.ContainerID)
+		for _, status := range analysis.MissingShows {
+			fmt.Println(status.Show.ContainerID)
 		}
 	} else if jsonLevel != "" {
-		missingData := make([]map[string]any, len(missingShows))
-		for i, show := range missingShows {
+		missingData := make([]map[string]any, len(analysis.MissingShows))
+		for i, status := range analysis.MissingShows {
+			show := status.Show
 			missingData[i] = map[string]any{
 				"containerID": show.ContainerID,
 				"date":        show.PerformanceDateShortYearFirst,
@@ -399,48 +488,40 @@ func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnl
 		}
 		output := map[string]any{
 			"artistID":      artistId,
-			"artistName":    artistName,
-			"totalShows":    totalShows,
-			"downloaded":    downloadedCount,
-			"downloadedPct": downloadedPct,
-			"missing":       len(missingShows),
-			"missingPct":    missingPct,
+			"artistName":    analysis.ArtistName,
+			"totalShows":    analysis.TotalShows,
+			"downloaded":    analysis.Downloaded,
+			"downloadedPct": analysis.DownloadPct,
+			"missing":       analysis.Missing,
+			"missingPct":    analysis.MissingPct,
 			"missingShows":  missingData,
+			"cacheUsed":     analysis.CacheUsed,
+			"cacheStaleUse": analysis.CacheStaleUse,
 		}
 		if err := printJSON(output); err != nil {
 			return err
 		}
 	} else {
-		printHeader(fmt.Sprintf("Gap Analysis: %s", artistName))
-
-		printKeyValue("Total Shows", fmt.Sprintf("%d", len(allShows)), colorCyan)
-		printKeyValue("Downloaded", fmt.Sprintf("%d (%.1f%%)", downloadedCount, downloadedPct), colorGreen)
-		printKeyValue("Missing", fmt.Sprintf("%d (%.1f%%)", len(missingShows), missingPct), colorYellow)
-
-		if len(missingShows) > 0 {
-			printSection("Missing Shows")
-
-			table := NewTable([]TableColumn{
-				{Header: "ID", Width: 10, Align: "right"},
-				{Header: "Date", Width: 14, Align: "left"},
-				{Header: "Title", Width: 60, Align: "left"},
-			})
-
-			for _, show := range missingShows {
-				table.AddRow(
-					fmt.Sprintf("%d", show.ContainerID),
-					show.PerformanceDateShortYearFirst,
-					show.ContainerInfo,
-				)
-			}
-
-			table.Print()
-
-			fmt.Printf("\n%s%s%s To download: %snugs <container_id>%s\n",
-				colorCyan, symbolInfo, colorReset, colorBold, colorReset)
-			fmt.Printf("  Example: %snugs %d%s\n\n",
-				colorGreen, missingShows[0].ContainerID, colorReset)
+		if len(analysis.MissingShows) == 0 {
+			fmt.Println("No missing shows")
+			return nil
 		}
+
+		table := NewTable([]TableColumn{
+			{Header: "ID", Width: 10, Align: "right"},
+			{Header: "Date", Width: 14, Align: "left"},
+			{Header: "Title", Width: 60, Align: "left"},
+		})
+
+		for _, status := range analysis.MissingShows {
+			show := status.Show
+			table.AddRow(
+				fmt.Sprintf("%d", show.ContainerID),
+				show.PerformanceDateShortYearFirst,
+				show.ContainerInfo,
+			)
+		}
+		table.Print()
 	}
 	return nil
 }
@@ -474,57 +555,35 @@ func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool
 
 // catalogGapsFill downloads all missing shows for an artist
 func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, jsonLevel string) error {
-	// Get all shows for this artist
-	artistMetas, err := getArtistMeta(artistId)
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
 	if err != nil {
-		return fmt.Errorf("failed to get artist metadata: %w", err)
+		return err
 	}
-
-	if len(artistMetas) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	allShows, artistName := collectArtistShows(artistMetas)
-
-	if len(allShows) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	// Check which shows are missing
-	var missingShows []*AlbArtResp
-	for _, show := range allShows {
-		if !showExists(show, cfg) {
-			missingShows = append(missingShows, show)
-		}
-	}
-
-	// Sort missing shows by date (newest first)
-	sort.Slice(missingShows, func(i, j int) bool {
-		return missingShows[i].PerformanceDate > missingShows[j].PerformanceDate
-	})
+	missingShows := analysis.MissingShows
 
 	if len(missingShows) == 0 {
 		if jsonLevel != "" {
 			output := map[string]any{
 				"success":    true,
 				"artistID":   artistId,
-				"artistName": artistName,
-				"totalShows": len(allShows),
+				"artistName": analysis.ArtistName,
+				"totalShows": analysis.TotalShows,
 				"downloaded": 0,
 				"message":    "No missing shows found",
+				"cacheUsed":  analysis.CacheUsed,
 			}
 			if err := printJSON(output); err != nil {
 				return err
 			}
 		} else {
-			printSuccess(fmt.Sprintf("All shows already downloaded for %s%s%s", colorCyan, artistName, colorReset))
+			printSuccess(fmt.Sprintf("All shows already downloaded for %s%s%s", colorCyan, analysis.ArtistName, colorReset))
 		}
 		return nil
 	}
 
 	// Display summary and start downloading
 	if jsonLevel == "" {
-		printHeader(fmt.Sprintf("Filling Gaps: %s", artistName))
+		printHeader(fmt.Sprintf("Filling Gaps: %s", analysis.ArtistName))
 		printKeyValue("Total Missing", fmt.Sprintf("%d shows", len(missingShows)), colorYellow)
 		fmt.Println()
 	}
@@ -539,7 +598,8 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 	signal.Notify(sigChan, os.Interrupt)
 	defer signal.Stop(sigChan)
 
-	for i, show := range missingShows {
+	for i, status := range missingShows {
+		show := status.Show
 		// Check for interrupt before starting next download
 		select {
 		case <-sigChan:
@@ -584,17 +644,19 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 
 	if jsonLevel != "" {
 		output := map[string]any{
-			"success":      failedCount == 0 && !interrupted,
-			"interrupted":  interrupted,
-			"artistID":     artistId,
-			"artistName":   artistName,
-			"totalShows":   len(allShows),
-			"totalMissing": len(missingShows),
-			"attempted":    attempted,
-			"downloaded":   successCount,
-			"failed":       failedCount,
-			"remaining":    remaining,
-			"failedShows":  failedShows,
+			"success":       failedCount == 0 && !interrupted,
+			"interrupted":   interrupted,
+			"artistID":      artistId,
+			"artistName":    analysis.ArtistName,
+			"totalShows":    analysis.TotalShows,
+			"totalMissing":  len(missingShows),
+			"attempted":     attempted,
+			"downloaded":    successCount,
+			"failed":        failedCount,
+			"remaining":     remaining,
+			"failedShows":   failedShows,
+			"cacheUsed":     analysis.CacheUsed,
+			"cacheStaleUse": analysis.CacheStaleUse,
 		}
 		if err := printJSON(output); err != nil {
 			return err
@@ -700,7 +762,7 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 
 	// Get coverage stats for each artist
 	for _, artistId := range artistIds {
-		artistMetas, err := getArtistMeta(artistId)
+		analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
 		if err != nil {
 			if jsonLevel == "" {
 				printWarning(fmt.Sprintf("Failed to get metadata for artist %s: %v", artistId, err))
@@ -708,31 +770,12 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 			continue
 		}
 
-		if len(artistMetas) == 0 {
-			continue
-		}
-
-		allShows, artistName := collectArtistShows(artistMetas)
-
-		// Count downloaded shows
-		downloadedCount := 0
-		for _, show := range allShows {
-			if showExists(show, cfg) {
-				downloadedCount++
-			}
-		}
-
-		coveragePct := 0.0
-		if len(allShows) > 0 {
-			coveragePct = float64(downloadedCount) / float64(len(allShows)) * 100
-		}
-
 		allStats = append(allStats, coverageStats{
 			artistID:        artistId,
-			artistName:      artistName,
-			totalShows:      len(allShows),
-			downloadedCount: downloadedCount,
-			coveragePct:     coveragePct,
+			artistName:      analysis.ArtistName,
+			totalShows:      analysis.TotalShows,
+			downloadedCount: analysis.Downloaded,
+			coveragePct:     analysis.DownloadPct,
 		})
 	}
 
@@ -826,76 +869,45 @@ func catalogList(artistIds []string, cfg *Config, jsonLevel string) error {
 
 // catalogListForArtist displays all shows for a single artist with status indicators
 func catalogListForArtist(artistId string, cfg *Config, jsonLevel string) error {
-	// Get all shows for this artist
-	artistMetas, err := getArtistMeta(artistId)
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
 	if err != nil {
-		return fmt.Errorf("failed to get artist metadata: %w", err)
+		return err
 	}
-
-	if len(artistMetas) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	allShows, artistName := collectArtistShows(artistMetas)
-
-	if len(allShows) == 0 {
-		return fmt.Errorf("no shows found for artist %s", artistId)
-	}
-
-	// Sort shows by date (newest first)
-	sort.Slice(allShows, func(i, j int) bool {
-		return allShows[i].PerformanceDate > allShows[j].PerformanceDate
-	})
-
-	// Calculate statistics
-	downloadedCount := 0
-	var downloadedShows []*AlbArtResp
-	var missingShows []*AlbArtResp
-
-	for _, show := range allShows {
-		if showExists(show, cfg) {
-			downloadedCount++
-			downloadedShows = append(downloadedShows, show)
-		} else {
-			missingShows = append(missingShows, show)
-		}
-	}
-
-	totalShows := len(allShows)
-	downloadedPct := float64(downloadedCount) / float64(totalShows) * 100
-	missingPct := float64(len(missingShows)) / float64(totalShows) * 100
 
 	// Output results
 	if jsonLevel != "" {
-		allShowsData := make([]map[string]any, len(allShows))
-		for i, show := range allShows {
+		allShowsData := make([]map[string]any, len(analysis.Shows))
+		for i, item := range analysis.Shows {
+			show := item.Show
 			allShowsData[i] = map[string]any{
 				"containerID": show.ContainerID,
 				"date":        show.PerformanceDateShortYearFirst,
 				"title":       show.ContainerInfo,
 				"venue":       show.Venue,
-				"downloaded":  showExists(show, cfg),
+				"downloaded":  item.Downloaded,
 			}
 		}
 		output := map[string]any{
 			"artistID":      artistId,
-			"artistName":    artistName,
-			"totalShows":    totalShows,
-			"downloaded":    downloadedCount,
-			"downloadedPct": downloadedPct,
-			"missing":       len(missingShows),
-			"missingPct":    missingPct,
+			"artistName":    analysis.ArtistName,
+			"totalShows":    analysis.TotalShows,
+			"downloaded":    analysis.Downloaded,
+			"downloadedPct": analysis.DownloadPct,
+			"missing":       analysis.Missing,
+			"missingPct":    analysis.MissingPct,
 			"shows":         allShowsData,
+			"cacheUsed":     analysis.CacheUsed,
+			"cacheStaleUse": analysis.CacheStaleUse,
 		}
 		if err := printJSON(output); err != nil {
 			return err
 		}
 	} else {
-		printHeader(fmt.Sprintf("Complete Catalog: %s", artistName))
+		printHeader(fmt.Sprintf("Complete Catalog: %s", analysis.ArtistName))
 
-		printKeyValue("Total Shows", fmt.Sprintf("%d", totalShows), colorCyan)
-		printKeyValue("Downloaded", fmt.Sprintf("%d (%.1f%%)", downloadedCount, downloadedPct), colorGreen)
-		printKeyValue("Missing", fmt.Sprintf("%d (%.1f%%)", len(missingShows), missingPct), colorYellow)
+		printKeyValue("Total Shows", fmt.Sprintf("%d", analysis.TotalShows), colorCyan)
+		printKeyValue("Downloaded", fmt.Sprintf("%d (%.1f%%)", analysis.Downloaded, analysis.DownloadPct), colorGreen)
+		printKeyValue("Missing", fmt.Sprintf("%d (%.1f%%)", analysis.Missing, analysis.MissingPct), colorYellow)
 
 		printSection("All Shows")
 
@@ -906,12 +918,13 @@ func catalogListForArtist(artistId string, cfg *Config, jsonLevel string) error 
 			{Header: "Title", Width: 55, Align: "left"},
 		})
 
-		for _, show := range allShows {
+		for _, item := range analysis.Shows {
+			show := item.Show
 			status := ""
-			if showExists(show, cfg) {
-				status = fmt.Sprintf("%s✓%s", colorGreen, colorReset)
+			if item.Downloaded {
+				status = fmt.Sprintf("%s%s%s", colorGreen, symbolCheck, colorReset)
 			} else {
-				status = fmt.Sprintf("%s✗%s", colorRed, colorReset)
+				status = fmt.Sprintf("%s%s%s", colorRed, symbolCross, colorReset)
 			}
 
 			table.AddRow(
@@ -924,10 +937,10 @@ func catalogListForArtist(artistId string, cfg *Config, jsonLevel string) error 
 
 		table.Print()
 
-		fmt.Printf("\n%s%s%s Legend: %s✓%s Downloaded  %s✗%s Missing\n",
+		fmt.Printf("\n%s%s%s Legend: %s%s%s Downloaded  %s%s%s Missing\n",
 			colorCyan, symbolInfo, colorReset,
-			colorGreen, colorReset,
-			colorRed, colorReset)
+			colorGreen, symbolCheck, colorReset,
+			colorRed, symbolCross, colorReset)
 		fmt.Printf("  To download: %snugs <container_id>%s\n\n",
 			colorBold, colorReset)
 	}

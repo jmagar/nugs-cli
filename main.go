@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -492,7 +493,10 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 	if cfg.DeleteAfterUpload {
 		// Verify upload before deleting local files
 		printInfo("Verifying upload integrity...")
-		verifyCmd := exec.Command("rclone", "check", "--one-way", localPath, remoteFullPath)
+		verifyCmd, err := buildRcloneVerifyCommand(localPath, remoteFullPath)
+		if err != nil {
+			return fmt.Errorf("failed to build upload verification command: %w", err)
+		}
 		var verifyOut, verifyErr bytes.Buffer
 		verifyCmd.Stdout = &verifyOut
 		verifyCmd.Stderr = &verifyErr
@@ -534,6 +538,24 @@ func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, trans
 		return exec.Command("rclone", "copy", localPath, remoteFullPath, "-P", transfersFlag), remoteFullPath, nil
 	}
 	return exec.Command("rclone", "copyto", localPath, remoteFullPath, "-P", transfersFlag), remoteFullPath, nil
+}
+
+func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
+	localInfo, err := os.Stat(localPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat local path for verification: %w", err)
+	}
+
+	if localInfo.IsDir() {
+		return exec.Command("rclone", "check", "--one-way", localPath, remoteFullPath), nil
+	}
+
+	// rclone check operates on directories; for file uploads, compare parent dirs
+	// and constrain comparison to the uploaded file only.
+	localDir := filepath.Dir(localPath)
+	remoteDir := path.Dir(remoteFullPath)
+	fileName := filepath.Base(localPath)
+	return exec.Command("rclone", "check", "--one-way", "--include", fileName, localDir, remoteDir), nil
 }
 
 // remotePathExists checks if a directory exists at the specified remotePath on the configured rclone remote.

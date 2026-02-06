@@ -20,6 +20,9 @@ Nugs downloads/
 # Temporary files
 *.tmp
 chapters_nugs_dl_tmp.txt
+*.backup
+*.orig
+*.rej
 
 # OS files
 .DS_Store
@@ -33,6 +36,9 @@ Thumbs.db
 
 # Cache
 .cache/
+
+# Documentation (session logs, etc.)
+.docs/
 
 # Serena agent files
 .serena/

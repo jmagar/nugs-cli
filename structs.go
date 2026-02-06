@@ -83,24 +83,24 @@ func (Args) Description() string {
 
 %s◆ LIST COMMANDS%s
 %s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %slist artists%s                      List all available artists
-  %s•%s %slist artists shows >100%s           Filter artists by show count (>, <, >=, <=, =)
+  %s•%s %slist%s                              List all available artists
+  %s•%s %slist >100%s                         Filter artists by show count (>, <, >=, <=, =)
   %s•%s %slist <artist_id>%s                  List all shows for a specific artist
-  %s•%s %slist <artist_id> shows "venue"%s    Filter shows by venue name
+  %s•%s %slist <artist_id> "venue"%s          Filter shows by venue name
   %s•%s %slist <artist_id> latest <N>%s       Show latest N shows for an artist
-  %s•%s %s<artist_id> latest%s                Download latest shows from an artist
+  %s•%s %sgrab <artist_id> latest%s           Download latest shows from an artist
 
 %s◆ CATALOG COMMANDS%s
 %s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %scatalog update%s                    Fetch and cache latest catalog
-  %s•%s %scatalog cache%s                     Show cache status and metadata
-  %s•%s %scatalog stats%s                     Display catalog statistics
-  %s•%s %scatalog latest [limit]%s            Show latest additions (default 15)
-  %s•%s %scatalog gaps <id> [...]%s           Find missing shows (one or more artists)
-  %s•%s %scatalog gaps <id> --ids-only%s      Output just IDs for piping
-  %s•%s %scatalog gaps <id> fill%s            Auto-download all missing shows
-  %s•%s %scatalog coverage [ids...]%s         Show download coverage statistics
-  %s•%s %scatalog config enable|disable|set%s Configure auto-refresh
+  %s•%s %supdate%s                            Fetch and cache latest catalog
+  %s•%s %scache%s                             Show cache status and metadata
+  %s•%s %sstats%s                             Display catalog statistics
+  %s•%s %slatest [limit]%s                    Show latest additions (default 15)
+  %s•%s %sgaps <id> [...]%s                   List missing shows only (one or more artists)
+  %s•%s %sgaps <id> --ids-only%s              Output just IDs for piping
+  %s•%s %sgaps <id> fill%s                    Auto-download all missing shows
+  %s•%s %scoverage [ids...]%s                 Show download coverage statistics
+  %s•%s %srefresh enable|disable|set%s        Configure auto-refresh
 
 %s◆ JSON OUTPUT LEVELS%s %s(--json <level>)%s
 %s─────────────────────────────────────────────────────────────────────────────%s
@@ -112,17 +112,17 @@ func (Args) Description() string {
 %s◆ EXAMPLES%s
 %s─────────────────────────────────────────────────────────────────────────────%s
   %s▸%s %snugs help%s
-  %s▸%s %snugs list artists%s
+  %s▸%s %snugs list%s
   %s▸%s %snugs list 461%s
-  %s▸%s %snugs list 461 shows "Red Rocks"%s
+  %s▸%s %snugs list 461 "Red Rocks"%s
   %s▸%s %snugs list 1125 latest 5%s
-  %s▸%s %snugs list artists shows ">100"%s
+  %s▸%s %snugs list ">100"%s
   %s▸%s %snugs 12345%s                        Download show by ID
-  %s▸%s %snugs 461 latest%s                   Download latest shows from artist
-  %s▸%s %snugs catalog update%s               Update local catalog cache
-  %s▸%s %snugs catalog gaps 1125%s            Find missing shows for artist
-  %s▸%s %snugs catalog gaps 1125 fill%s       Auto-download all missing shows
-  %s▸%s %snugs catalog coverage 1125 461%s    Check download coverage
+  %s▸%s %snugs grab 461 latest%s              Download latest shows from artist
+  %s▸%s %snugs update%s                       Update local catalog cache
+  %s▸%s %snugs gaps 1125%s                    Find missing shows for artist
+  %s▸%s %snugs gaps 1125 fill%s               Auto-download all missing shows
+  %s▸%s %snugs coverage 1125 461%s            Check download coverage
 
   %s→%s Full URLs also work: %snugs https://play.nugs.net/release/12345%s
 `,
@@ -701,4 +701,32 @@ type ContainerIndexEntry struct {
 	ArtistName      string `json:"artistName"`
 	ContainerInfo   string `json:"containerInfo"`
 	PerformanceDate string `json:"performanceDate"`
+}
+
+// ArtistMetaCache stores cached artist metadata pages from catalog.containersAll.
+type ArtistMetaCache struct {
+	ArtistID string        `json:"artistID"`
+	CachedAt time.Time     `json:"cachedAt"`
+	Pages    []*ArtistMeta `json:"pages"`
+}
+
+// ShowStatus stores a show and whether it is already downloaded.
+type ShowStatus struct {
+	Show       *AlbArtResp `json:"show"`
+	Downloaded bool        `json:"downloaded"`
+}
+
+// ArtistCatalogAnalysis stores the computed status for all shows for one artist.
+type ArtistCatalogAnalysis struct {
+	ArtistID      string       `json:"artistID"`
+	ArtistName    string       `json:"artistName"`
+	TotalShows    int          `json:"totalShows"`
+	Downloaded    int          `json:"downloaded"`
+	Missing       int          `json:"missing"`
+	Shows         []ShowStatus `json:"shows"`
+	MissingShows  []ShowStatus `json:"missingShows"`
+	DownloadPct   float64      `json:"downloadedPct"`
+	MissingPct    float64      `json:"missingPct"`
+	CacheUsed     bool         `json:"cacheUsed"`
+	CacheStaleUse bool         `json:"cacheStaleUse"`
 }
