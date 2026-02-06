@@ -1,6 +1,36 @@
 package main
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
+
+// ANSI color codes
+const (
+	colorReset  = "\033[0m"
+	colorRed    = "\033[31m"
+	colorGreen  = "\033[32m"
+	colorYellow = "\033[33m"
+	colorBlue   = "\033[34m"
+	colorPurple = "\033[35m"
+	colorCyan   = "\033[36m"
+	colorBold   = "\033[1m"
+)
+
+// Unicode symbols
+const (
+	symbolCheck    = "✓"
+	symbolCross    = "✗"
+	symbolArrow    = "→"
+	symbolMusic    = "♪"
+	symbolUpload   = "⬆"
+	symbolDownload = "⬇"
+	symbolInfo     = "ℹ"
+	symbolWarning  = "⚠"
+	symbolGear     = "⚙"
+	symbolPackage  = "📦"
+	symbolRocket   = "🚀"
+)
 
 type Transport struct{}
 
@@ -13,28 +43,28 @@ type WriteCounter struct {
 }
 
 type Config struct {
-	Email           string `json:"email"`
-	Password        string `json:"password"`
-	Urls            []string `json:"urls,omitempty"`
-	Format          int `json:"format"`
-	OutPath         string `json:"outPath"`
-	VideoFormat     int `json:"videoFormat"`
-	WantRes         string `json:"wantRes,omitempty"`
-	Token           string `json:"token"`
-	UseFfmpegEnvVar bool `json:"useFfmpegEnvVar"`
-	FfmpegNameStr   string `json:"ffmpegNameStr,omitempty"`
-	ForceVideo      bool `json:"forceVideo,omitempty"`
-	SkipVideos		bool `json:"skipVideos,omitempty"`
-	SkipChapters	bool `json:"skipChapters,omitempty"`
-	RcloneEnabled   bool `json:"rcloneEnabled,omitempty"`
-	RcloneRemote    string `json:"rcloneRemote,omitempty"`
-	RclonePath      string `json:"rclonePath,omitempty"`
-	DeleteAfterUpload bool `json:"deleteAfterUpload,omitempty"`
-	RcloneTransfers int `json:"rcloneTransfers,omitempty"`
-	CatalogAutoRefresh     bool   `json:"catalogAutoRefresh,omitempty"`
-	CatalogRefreshTime     string `json:"catalogRefreshTime,omitempty"`      // "05:00" (24-hour format)
-	CatalogRefreshTimezone string `json:"catalogRefreshTimezone,omitempty"`  // "America/New_York"
-	CatalogRefreshInterval string `json:"catalogRefreshInterval,omitempty"`  // "daily" or "weekly"
+	Email                  string   `json:"email"`
+	Password               string   `json:"password"`
+	Urls                   []string `json:"urls,omitempty"`
+	Format                 int      `json:"format"`
+	OutPath                string   `json:"outPath"`
+	VideoFormat            int      `json:"videoFormat"`
+	WantRes                string   `json:"wantRes,omitempty"`
+	Token                  string   `json:"token"`
+	UseFfmpegEnvVar        bool     `json:"useFfmpegEnvVar"`
+	FfmpegNameStr          string   `json:"ffmpegNameStr,omitempty"`
+	ForceVideo             bool     `json:"forceVideo,omitempty"`
+	SkipVideos             bool     `json:"skipVideos,omitempty"`
+	SkipChapters           bool     `json:"skipChapters,omitempty"`
+	RcloneEnabled          bool     `json:"rcloneEnabled,omitempty"`
+	RcloneRemote           string   `json:"rcloneRemote,omitempty"`
+	RclonePath             string   `json:"rclonePath,omitempty"` // Path on remote storage (NOT local base path)
+	DeleteAfterUpload      bool     `json:"deleteAfterUpload,omitempty"`
+	RcloneTransfers        int      `json:"rcloneTransfers,omitempty"`
+	CatalogAutoRefresh     bool     `json:"catalogAutoRefresh,omitempty"`
+	CatalogRefreshTime     string   `json:"catalogRefreshTime,omitempty"`     // "05:00" (24-hour format)
+	CatalogRefreshTimezone string   `json:"catalogRefreshTimezone,omitempty"` // "America/New_York"
+	CatalogRefreshInterval string   `json:"catalogRefreshInterval,omitempty"` // "daily" or "weekly"
 }
 
 type Args struct {
@@ -49,45 +79,95 @@ type Args struct {
 
 // Description provides custom help text
 func (Args) Description() string {
-	return `Nugs.net downloader - Download music and videos from Nugs.net
+	return fmt.Sprintf(`%s♪ Download music and videos from Nugs.net%s
 
-SPECIAL COMMANDS:
-  help                           Show this help message
-  list artists                   List all available artists
-  list <artist_id>               List all shows for a specific artist
-  list artists --json <level>    Output artists as JSON (minimal/standard/extended/raw)
-  list <artist_id> --json <level> Output shows as JSON
-  <artist_id> latest             Download latest shows from an artist
+%s◆ LIST COMMANDS%s
+%s─────────────────────────────────────────────────────────────────────────────%s
+  %s•%s %slist artists%s                      List all available artists
+  %s•%s %slist artists shows >100%s           Filter artists by show count (>, <, >=, <=, =)
+  %s•%s %slist <artist_id>%s                  List all shows for a specific artist
+  %s•%s %slist <artist_id> shows "venue"%s    Filter shows by venue name
+  %s•%s %slist <artist_id> latest <N>%s       Show latest N shows for an artist
+  %s•%s %s<artist_id> latest%s                Download latest shows from an artist
 
-CATALOG COMMANDS:
-  catalog update                 Fetch and cache latest catalog
-  catalog cache                  Show cache status and metadata
-  catalog stats                  Display catalog statistics
-  catalog latest [limit]         Show latest additions (default 15)
-  catalog gaps <artist_id>       Find missing shows for an artist
-  catalog gaps <id> --ids-only   Output just IDs for piping
-  catalog config enable|disable|set  Configure auto-refresh
+%s◆ CATALOG COMMANDS%s
+%s─────────────────────────────────────────────────────────────────────────────%s
+  %s•%s %scatalog update%s                    Fetch and cache latest catalog
+  %s•%s %scatalog cache%s                     Show cache status and metadata
+  %s•%s %scatalog stats%s                     Display catalog statistics
+  %s•%s %scatalog latest [limit]%s            Show latest additions (default 15)
+  %s•%s %scatalog gaps <id> [...]%s           Find missing shows (one or more artists)
+  %s•%s %scatalog gaps <id> --ids-only%s      Output just IDs for piping
+  %s•%s %scatalog gaps <id> fill%s            Auto-download all missing shows
+  %s•%s %scatalog coverage [ids...]%s         Show download coverage statistics
+  %s•%s %scatalog config enable|disable|set%s Configure auto-refresh
 
-JSON OUTPUT LEVELS:
-  minimal                        Essential fields only
-  standard                       Adds location details (for shows)
-  extended                       All available metadata
-  raw                            Unmodified API response
+%s◆ JSON OUTPUT LEVELS%s %s(--json <level>)%s
+%s─────────────────────────────────────────────────────────────────────────────%s
+  %s•%s %sminimal%s                           Essential fields only
+  %s•%s %sstandard%s                          Adds location details (for shows)
+  %s•%s %sextended%s                          All available metadata
+  %s•%s %sraw%s                               Unmodified API response
 
-EXAMPLES:
-  nugs help
-  nugs list artists
-  nugs list 461
-  nugs list artists --json standard
-  nugs list 1125 --json minimal | jq '.shows[:5]'
-  nugs 12345                     Download show by ID
-  nugs 461 latest                Download latest shows from artist
-  nugs -f 3 12345                Download in specific format
-  nugs catalog update            Update local catalog cache
-  nugs catalog gaps 1125         Find missing shows for artist
+%s◆ EXAMPLES%s
+%s─────────────────────────────────────────────────────────────────────────────%s
+  %s▸%s %snugs help%s
+  %s▸%s %snugs list artists%s
+  %s▸%s %snugs list 461%s
+  %s▸%s %snugs list 461 shows "Red Rocks"%s
+  %s▸%s %snugs list 1125 latest 5%s
+  %s▸%s %snugs list artists shows ">100"%s
+  %s▸%s %snugs 12345%s                        Download show by ID
+  %s▸%s %snugs 461 latest%s                   Download latest shows from artist
+  %s▸%s %snugs catalog update%s               Update local catalog cache
+  %s▸%s %snugs catalog gaps 1125%s            Find missing shows for artist
+  %s▸%s %snugs catalog gaps 1125 fill%s       Auto-download all missing shows
+  %s▸%s %snugs catalog coverage 1125 461%s    Check download coverage
 
-  Full URLs also work:
-  nugs https://play.nugs.net/release/12345`
+  %s→%s Full URLs also work: %snugs https://play.nugs.net/release/12345%s
+`,
+		colorBold, colorReset,
+		colorBold, colorReset,
+		colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorBold, colorReset,
+		colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorBold, colorReset, colorCyan, colorReset,
+		colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset,
+		colorBold, colorReset,
+		colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorYellow, colorReset, colorCyan, colorReset,
+		colorCyan, colorReset, colorYellow, colorReset,
+	)
 }
 
 type Auth struct {
@@ -127,12 +207,12 @@ type UserInfo struct {
 
 type SubInfo struct {
 	StripeMetaData struct {
-		SubscriptionID      string      `json:"subscriptionId"`
-		InvoiceID           string      `json:"invoiceId"`
-		PaymentIntentStatus any `json:"paymentIntentStatus"`
-		ReturnURL           any `json:"returnUrl"`
-		RedirectURL         any `json:"redirectUrl"`
-		PaymentError        any `json:"paymentError"`
+		SubscriptionID      string `json:"subscriptionId"`
+		InvoiceID           string `json:"invoiceId"`
+		PaymentIntentStatus any    `json:"paymentIntentStatus"`
+		ReturnURL           any    `json:"returnUrl"`
+		RedirectURL         any    `json:"redirectUrl"`
+		PaymentError        any    `json:"paymentError"`
 	} `json:"stripeMetaData"`
 	IsTrialAvailable        bool   `json:"isTrialAvailable"`
 	AllowAddNewSubscription bool   `json:"allowAddNewSubscription"`
@@ -144,33 +224,33 @@ type SubInfo struct {
 	EndsAt                  string `json:"endsAt"`
 	TrialEndsAt             string `json:"trialEndsAt"`
 	Plan                    struct {
-		ID              string      `json:"id"`
-		Price           float64     `json:"price"`
-		Period          int         `json:"period"`
-		TrialPeriodDays int         `json:"trialPeriodDays"`
-		PlanID          string      `json:"planId"`
-		Description     string      `json:"description"`
-		ServiceLevel    string      `json:"serviceLevel"`
-		StartsAt        any `json:"startsAt"`
-		EndsAt          any `json:"endsAt"`
+		ID              string  `json:"id"`
+		Price           float64 `json:"price"`
+		Period          int     `json:"period"`
+		TrialPeriodDays int     `json:"trialPeriodDays"`
+		PlanID          string  `json:"planId"`
+		Description     string  `json:"description"`
+		ServiceLevel    string  `json:"serviceLevel"`
+		StartsAt        any     `json:"startsAt"`
+		EndsAt          any     `json:"endsAt"`
 	} `json:"plan"`
 	Promo struct {
-		ID            string      `json:"id"`
-		PromoCode     string      `json:"promoCode"`
-		PromoPrice    float64     `json:"promoPrice"`
-		Description   string      `json:"description"`
-		PromoStartsAt any `json:"promoStartsAt"`
-		PromoEndsAt   any `json:"promoEndsAt"`
+		ID            string  `json:"id"`
+		PromoCode     string  `json:"promoCode"`
+		PromoPrice    float64 `json:"promoPrice"`
+		Description   string  `json:"description"`
+		PromoStartsAt any     `json:"promoStartsAt"`
+		PromoEndsAt   any     `json:"promoEndsAt"`
 		Plan          struct {
-			ID              string      `json:"id"`
-			Price           float64     `json:"price"`
-			Period          int         `json:"period"`
-			TrialPeriodDays int         `json:"trialPeriodDays"`
-			PlanID          string      `json:"planId"`
-			Description     string      `json:"description"`
-			ServiceLevel    string      `json:"serviceLevel"`
-			StartsAt        any `json:"startsAt"`
-			EndsAt          any `json:"endsAt"`
+			ID              string  `json:"id"`
+			Price           float64 `json:"price"`
+			Period          int     `json:"period"`
+			TrialPeriodDays int     `json:"trialPeriodDays"`
+			PlanID          string  `json:"planId"`
+			Description     string  `json:"description"`
+			ServiceLevel    string  `json:"serviceLevel"`
+			StartsAt        any     `json:"startsAt"`
+			EndsAt          any     `json:"endsAt"`
 		} `json:"plan"`
 		Gateway string `json:"gateway"`
 	}
@@ -185,41 +265,41 @@ type StreamParams struct {
 }
 
 type Product struct {
-	ProductStatusType    int           `json:"productStatusType"`
-	SkuIDExt             any   `json:"skuIDExt"`
-	FormatStr            string        `json:"formatStr"`
-	SkuID                int           `json:"skuID"`
-	Cost                 int           `json:"cost"`
-	CostplanID           int           `json:"costplanID"`
-	Pricing              any   `json:"pricing"`
-	Bundles              []any `json:"bundles"`
-	NumPublicPricePoints int           `json:"numPublicPricePoints"`
-	CartLink             string        `json:"cartLink"`
+	ProductStatusType    int    `json:"productStatusType"`
+	SkuIDExt             any    `json:"skuIDExt"`
+	FormatStr            string `json:"formatStr"`
+	SkuID                int    `json:"skuID"`
+	Cost                 int    `json:"cost"`
+	CostplanID           int    `json:"costplanID"`
+	Pricing              any    `json:"pricing"`
+	Bundles              []any  `json:"bundles"`
+	NumPublicPricePoints int    `json:"numPublicPricePoints"`
+	CartLink             string `json:"cartLink"`
 	LiveEventInfo        struct {
-		IsEventLive                  bool        `json:"isEventLive"`
-		EventID                      int         `json:"eventID"`
-		EventStartDateStr            string      `json:"eventStartDateStr"`
-		EventEndDateStr              string      `json:"eventEndDateStr"`
-		TimeZoneToDisplay            any `json:"timeZoneToDisplay"`
-		OffsetFromLocalTimeToDisplay int         `json:"offsetFromLocalTimeToDisplay"`
-		UTCoffset                    int         `json:"UTCoffset"`
-		EventCode                    any `json:"eventCode"`
-		LinkType                     int         `json:"linkType"`
+		IsEventLive                  bool   `json:"isEventLive"`
+		EventID                      int    `json:"eventID"`
+		EventStartDateStr            string `json:"eventStartDateStr"`
+		EventEndDateStr              string `json:"eventEndDateStr"`
+		TimeZoneToDisplay            any    `json:"timeZoneToDisplay"`
+		OffsetFromLocalTimeToDisplay int    `json:"offsetFromLocalTimeToDisplay"`
+		UTCoffset                    int    `json:"UTCoffset"`
+		EventCode                    any    `json:"eventCode"`
+		LinkType                     int    `json:"linkType"`
 	} `json:"liveEventInfo"`
 	SaleWindowInfo struct {
-		IsEventSelling               bool        `json:"isEventSelling"`
-		SswID                        int         `json:"sswID"`
-		TimeZoneToDisplay            any `json:"timeZoneToDisplay"`
-		OffsetFromLocalTimeToDisplay int         `json:"offsetFromLocalTimeToDisplay"`
-		SaleStartDateStr             any `json:"saleStartDateStr"`
-		SaleEndDateStr               any `json:"saleEndDateStr"`
+		IsEventSelling               bool `json:"isEventSelling"`
+		SswID                        int  `json:"sswID"`
+		TimeZoneToDisplay            any  `json:"timeZoneToDisplay"`
+		OffsetFromLocalTimeToDisplay int  `json:"offsetFromLocalTimeToDisplay"`
+		SaleStartDateStr             any  `json:"saleStartDateStr"`
+		SaleEndDateStr               any  `json:"saleEndDateStr"`
 	} `json:"saleWindowInfo"`
-	IosCost         int         `json:"iosCost"`
+	IosCost         int `json:"iosCost"`
 	IosPlanName     any `json:"iosPlanName"`
 	GooglePlanName  any `json:"googlePlanName"`
-	GoogleCost      int         `json:"googleCost"`
-	NumDiscs        int         `json:"numDiscs"`
-	IsSubStreamOnly int         `json:"isSubStreamOnly"`
+	GoogleCost      int `json:"googleCost"`
+	NumDiscs        int `json:"numDiscs"`
+	IsSubStreamOnly int `json:"isSubStreamOnly"`
 }
 
 type ProductFormatList struct {
@@ -230,19 +310,19 @@ type ProductFormatList struct {
 	CostplanID int    `json:"costplanID"`
 	PfTypeStr  string `json:"pfTypeStr"`
 	LiveEvent  struct {
-		EventID                      int         `json:"eventID"`
+		EventID                      int `json:"eventID"`
 		EventStartDateStr            any `json:"eventStartDateStr"`
 		EventEndDateStr              any `json:"eventEndDateStr"`
 		TimeZoneToDisplay            any `json:"timeZoneToDisplay"`
-		OffsetFromLocalTimeToDisplay int         `json:"offsetFromLocalTimeToDisplay"`
-		UTCoffset                    int         `json:"UTCoffset"`
+		OffsetFromLocalTimeToDisplay int `json:"offsetFromLocalTimeToDisplay"`
+		UTCoffset                    int `json:"UTCoffset"`
 		EventCode                    any `json:"eventCode"`
-		LinkType                     int         `json:"linkType"`
+		LinkType                     int `json:"linkType"`
 	} `json:"liveEvent"`
 	Salewindow struct {
-		SswID                        int         `json:"sswID"`
+		SswID                        int `json:"sswID"`
 		TimeZoneToDisplay            any `json:"timeZoneToDisplay"`
-		OffsetFromLocalTimeToDisplay int         `json:"offsetFromLocalTimeToDisplay"`
+		OffsetFromLocalTimeToDisplay int `json:"offsetFromLocalTimeToDisplay"`
 		SaleStartDateStr             any `json:"saleStartDateStr"`
 		SaleEndDateStr               any `json:"saleEndDateStr"`
 	} `json:"salewindow"`
@@ -251,12 +331,12 @@ type ProductFormatList struct {
 }
 
 type AlbArtResp struct {
-	NumReviews                int         `json:"numReviews"`
-	TotalContainerRunningTime int         `json:"totalContainerRunningTime"`
-	HhmmssTotalRunningTime    string      `json:"hhmmssTotalRunningTime"`
-	Products                  []Product   `json:"products"`
-	Subscriptions             any `json:"subscriptions"`
-	Tracks                    []Track     `json:"tracks"`
+	NumReviews                int       `json:"numReviews"`
+	TotalContainerRunningTime int       `json:"totalContainerRunningTime"`
+	HhmmssTotalRunningTime    string    `json:"hhmmssTotalRunningTime"`
+	Products                  []Product `json:"products"`
+	Subscriptions             any       `json:"subscriptions"`
+	Tracks                    []Track   `json:"tracks"`
 	Pics                      []struct {
 		PicID   int    `json:"picID"`
 		OrderID int    `json:"orderID"`
@@ -287,13 +367,13 @@ type AlbArtResp struct {
 		NoteID int    `json:"noteID"`
 		Note   string `json:"note"`
 	} `json:"notes"`
-	CategoryID       int         `json:"categoryID"`
-	Labels           any `json:"labels"`
-	PrevContainerID  int         `json:"prevContainerID"`
-	NextContainerID  int         `json:"nextContainerID"`
-	PrevContainerURL string      `json:"prevContainerURL"`
-	NextContainerURL string      `json:"nextContainerURL"`
-	VolumeName       string      `json:"volumeName"`
+	CategoryID       int    `json:"categoryID"`
+	Labels           any    `json:"labels"`
+	PrevContainerID  int    `json:"prevContainerID"`
+	NextContainerID  int    `json:"nextContainerID"`
+	PrevContainerURL string `json:"prevContainerURL"`
+	NextContainerURL string `json:"nextContainerURL"`
+	VolumeName       string `json:"volumeName"`
 	CdArtWorkList    []struct {
 		DiscNumber     int    `json:"discNumber"`
 		ArtWorkType    int    `json:"artWorkType"`
@@ -301,26 +381,26 @@ type AlbArtResp struct {
 		TemplateType   int    `json:"templateType"`
 		ArtWorkPath    string `json:"artWorkPath"`
 	} `json:"cdArtWorkList"`
-	ContainerGroups         any   `json:"containerGroups"`
-	VideoURL                any   `json:"videoURL"`
-	VideoImage              any   `json:"videoImage"`
-	VideoTitle              any   `json:"videoTitle"`
-	VideoDesc               any   `json:"videoDesc"`
-	VodPlayerImage          string        `json:"vodPlayerImage"`
-	IsInSubscriptionProgram bool          `json:"isInSubscriptionProgram"`
-	SvodskuID               int           `json:"svodskuID"`
-	LicensorName            string        `json:"licensorName"`
-	AffID                   int           `json:"affID"`
-	PageURL                 string        `json:"pageURL"`
-	CoverImage              any   `json:"coverImage"`
-	VenueName               string        `json:"venueName"`
-	VenueCity               string        `json:"venueCity"`
-	VenueState              string        `json:"venueState"`
-	ArtistName              string        `json:"artistName"`
-	AccessList              []any `json:"accessList"`
-	AvailabilityType        int           `json:"availabilityType"`
-	AvailabilityTypeStr     string        `json:"availabilityTypeStr"`
-	Venue                   string        `json:"venue"`
+	ContainerGroups         any    `json:"containerGroups"`
+	VideoURL                any    `json:"videoURL"`
+	VideoImage              any    `json:"videoImage"`
+	VideoTitle              any    `json:"videoTitle"`
+	VideoDesc               any    `json:"videoDesc"`
+	VodPlayerImage          string `json:"vodPlayerImage"`
+	IsInSubscriptionProgram bool   `json:"isInSubscriptionProgram"`
+	SvodskuID               int    `json:"svodskuID"`
+	LicensorName            string `json:"licensorName"`
+	AffID                   int    `json:"affID"`
+	PageURL                 string `json:"pageURL"`
+	CoverImage              any    `json:"coverImage"`
+	VenueName               string `json:"venueName"`
+	VenueCity               string `json:"venueCity"`
+	VenueState              string `json:"venueState"`
+	ArtistName              string `json:"artistName"`
+	AccessList              []any  `json:"accessList"`
+	AvailabilityType        int    `json:"availabilityType"`
+	AvailabilityTypeStr     string `json:"availabilityTypeStr"`
+	Venue                   string `json:"venue"`
 	Img                     struct {
 		PicID   int    `json:"picID"`
 		OrderID int    `json:"orderID"`
@@ -337,8 +417,8 @@ type AlbArtResp struct {
 	PerformanceDateShort          string               `json:"performanceDateShort"`
 	PerformanceDateShortYearFirst string               `json:"performanceDateShortYearFirst"`
 	PerformanceDateAbbr           string               `json:"performanceDateAbbr"`
-	SongList                      any          `json:"songList"`
-	ReleaseDate                   any          `json:"releaseDate"`
+	SongList                      any                  `json:"songList"`
+	ReleaseDate                   any                  `json:"releaseDate"`
 	ReleaseDateFormatted          string               `json:"releaseDateFormatted"`
 	ActiveState                   string               `json:"activeState"`
 	ContainerType                 int                  `json:"containerType"`
@@ -352,27 +432,27 @@ type AlbArtResp struct {
 	ContainsPreviewVideo          int                  `json:"containsPreviewVideo"`
 	ArtistID                      int                  `json:"artistID"`
 	ContainerCategoryID           int                  `json:"containerCategoryID"`
-	ContainerCategoryName         any          `json:"containerCategoryName"`
+	ContainerCategoryName         any                  `json:"containerCategoryName"`
 	ContainerCode                 string               `json:"containerCode"`
-	ContainerIDExt                any          `json:"containerIDExt"`
+	ContainerIDExt                any                  `json:"containerIDExt"`
 	ExtImage                      string               `json:"extImage"`
-	VideoChapters                 []any        `json:"videoChapters"`
+	VideoChapters                 []any                `json:"videoChapters"`
 }
 
 type AlbumMeta struct {
-	MethodName                  string     `json:"methodName"`
-	ResponseAvailabilityCode    int        `json:"responseAvailabilityCode"`
-	ResponseAvailabilityCodeStr string     `json:"responseAvailabilityCodeStr"`
+	MethodName                  string      `json:"methodName"`
+	ResponseAvailabilityCode    int         `json:"responseAvailabilityCode"`
+	ResponseAvailabilityCodeStr string      `json:"responseAvailabilityCodeStr"`
 	Response                    *AlbArtResp `json:"Response"`
 }
 
 type Token struct {
 	MethodName string `json:"methodName"`
 	Response   struct {
-		TokenValue     string      `json:"tokenValue"`
-		ReturnCode     int         `json:"returnCode"`
-		ReturnCodeStr  string      `json:"returnCodeStr"`
-		NnCustomerAuth any `json:"nnCustomerAuth"`
+		TokenValue     string `json:"tokenValue"`
+		ReturnCode     int    `json:"returnCode"`
+		ReturnCodeStr  string `json:"returnCodeStr"`
+		NnCustomerAuth any    `json:"nnCustomerAuth"`
 	} `json:"Response"`
 	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
 	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
@@ -392,7 +472,7 @@ type PlistMeta struct {
 			OrderID           int   `json:"orderID"`
 			Track             Track `json:"track"`
 			PlaylistContainer struct {
-				TotalRunningTime       int         `json:"totalRunningTime"`
+				TotalRunningTime       int `json:"totalRunningTime"`
 				HhmmssTotalRunningTime any `json:"hhmmssTotalRunningTime"`
 				Img                    struct {
 					PicID   int    `json:"picID"`
@@ -402,38 +482,38 @@ type PlistMeta struct {
 					Caption string `json:"caption"`
 					URL     string `json:"url"`
 				} `json:"img"`
-				ContainerInfo          string      `json:"containerInfo"`
-				Products               []Product   `json:"products"`
-				VenueName              string      `json:"venueName"`
-				VenueCity              string      `json:"venueCity"`
-				VenueState             string      `json:"venueState"`
-				ArtistName             string      `json:"artistName"`
-				Venue                  string      `json:"venue"`
-				ContainerID            int         `json:"containerID"`
-				PerformanceDate        string      `json:"performanceDate"`
-				ReleaseDate            any `json:"releaseDate"`
-				ContainerType          int         `json:"containerType"`
-				ArtistID               int         `json:"artistID"`
-				TitleType              int         `json:"titleType"`
-				StrTotalRunningTime    string      `json:"strTotalRunningTime"`
-				ContainerCategoryID    int         `json:"containerCategoryID"`
-				ContainerCategoryName  any `json:"containerCategoryName"`
-				ContainerCategoryOrder int         `json:"containerCategoryOrder"`
-				Availability           int         `json:"availability"`
-				TicketImage            any `json:"ticketImage"`
-				UnavailableNote        any `json:"unavailableNote"`
-				Numasterisks           string      `json:"numasterisks"`
-				CoverImage             any `json:"coverImage"`
+				ContainerInfo          string    `json:"containerInfo"`
+				Products               []Product `json:"products"`
+				VenueName              string    `json:"venueName"`
+				VenueCity              string    `json:"venueCity"`
+				VenueState             string    `json:"venueState"`
+				ArtistName             string    `json:"artistName"`
+				Venue                  string    `json:"venue"`
+				ContainerID            int       `json:"containerID"`
+				PerformanceDate        string    `json:"performanceDate"`
+				ReleaseDate            any       `json:"releaseDate"`
+				ContainerType          int       `json:"containerType"`
+				ArtistID               int       `json:"artistID"`
+				TitleType              int       `json:"titleType"`
+				StrTotalRunningTime    string    `json:"strTotalRunningTime"`
+				ContainerCategoryID    int       `json:"containerCategoryID"`
+				ContainerCategoryName  any       `json:"containerCategoryName"`
+				ContainerCategoryOrder int       `json:"containerCategoryOrder"`
+				Availability           int       `json:"availability"`
+				TicketImage            any       `json:"ticketImage"`
+				UnavailableNote        any       `json:"unavailableNote"`
+				Numasterisks           string    `json:"numasterisks"`
+				CoverImage             any       `json:"coverImage"`
 			} `json:"playlistContainer"`
 		} `json:"items"`
-		CreateDate          any `json:"createDate"`
-		PlayListName        string      `json:"playListName"`
-		AlreadyExistsFlag   bool        `json:"alreadyExistsFlag"`
-		PlayListUserInvalid bool        `json:"playListUserInvalid"`
-		PlaylistImage       any `json:"playlistImage"`
-		NumTracks           int         `json:"numTracks"`
-		GeneratedGUID       any `json:"generatedGUID"`
-		ShortenedLink       any `json:"shortenedLink"`
+		CreateDate          any    `json:"createDate"`
+		PlayListName        string `json:"playListName"`
+		AlreadyExistsFlag   bool   `json:"alreadyExistsFlag"`
+		PlayListUserInvalid bool   `json:"playListUserInvalid"`
+		PlaylistImage       any    `json:"playlistImage"`
+		NumTracks           int    `json:"numTracks"`
+		GeneratedGUID       any    `json:"generatedGUID"`
+		ShortenedLink       any    `json:"shortenedLink"`
 	} `json:"Response"`
 	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
 	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
@@ -442,57 +522,57 @@ type PlistMeta struct {
 }
 
 type Track struct {
-	AccessList             []any `json:"accessList"`
-	HhmmssTotalRunningTime string        `json:"hhmmssTotalRunningTime"`
-	TrackLabel             string        `json:"trackLabel"`
-	TrackURL               string        `json:"trackURL"`
-	SongID                 int           `json:"songID"`
-	SongTitle              string        `json:"songTitle"`
-	TotalRunningTime       int           `json:"totalRunningTime"`
-	DiscNum                int           `json:"discNum"`
-	TrackNum               int           `json:"trackNum"`
-	SetNum                 int           `json:"setNum"`
-	ClipURL                string        `json:"clipURL"`
-	TrackID                int           `json:"trackID"`
-	TrackExclude           int           `json:"trackExclude"`
-	Rootpath               any   `json:"rootpath"`
-	SourcePath             any   `json:"sourcePath"`
-	SourceFilename         any   `json:"sourceFilename"`
-	SourceFilePath         any   `json:"sourceFilePath"`
-	RootPathReal           any   `json:"rootPathReal"`
-	SourceFilePathReal     any   `json:"sourceFilePathReal"`
-	SkuIDExt               any   `json:"skuIDExt"`
-	TransportMethod        string        `json:"transportMethod"`
-	StrTotalRunningTime    any   `json:"strTotalRunningTime"`
-	Products               []Product     `json:"products"`
-	Subscriptions          any   `json:"subscriptions"`
-	AudioProduct           any   `json:"audioProduct"`
-	AudioLosslessProduct   any   `json:"audioLosslessProduct"`
-	AudioHDProduct         any   `json:"audioHDProduct"`
-	VideoProduct           any   `json:"videoProduct"`
-	LivestreamProduct      any   `json:"livestreamProduct"`
-	Mp4Product             any   `json:"mp4Product"`
-	VideoondemandProduct   any   `json:"videoondemandProduct"`
-	CdProduct              any   `json:"cdProduct"`
-	LiveHDstreamProduct    any   `json:"liveHDstreamProduct"`
-	HDvideoondemandProduct any   `json:"HDvideoondemandProduct"`
-	VinylProduct           any   `json:"vinylProduct"`
-	DsdProduct             any   `json:"dsdProduct"`
-	DvdProduct             any   `json:"dvdProduct"`
-	Reality360Product      any   `json:"reality360Product"`
-	ContainerGroups        any   `json:"containerGroups"`
-	IDList                 string        `json:"IDList"`
-	PlayListID             int           `json:"playListID"`
-	CatalogQueryType       int           `json:"catalogQueryType"`
+	AccessList             []any     `json:"accessList"`
+	HhmmssTotalRunningTime string    `json:"hhmmssTotalRunningTime"`
+	TrackLabel             string    `json:"trackLabel"`
+	TrackURL               string    `json:"trackURL"`
+	SongID                 int       `json:"songID"`
+	SongTitle              string    `json:"songTitle"`
+	TotalRunningTime       int       `json:"totalRunningTime"`
+	DiscNum                int       `json:"discNum"`
+	TrackNum               int       `json:"trackNum"`
+	SetNum                 int       `json:"setNum"`
+	ClipURL                string    `json:"clipURL"`
+	TrackID                int       `json:"trackID"`
+	TrackExclude           int       `json:"trackExclude"`
+	Rootpath               any       `json:"rootpath"`
+	SourcePath             any       `json:"sourcePath"`
+	SourceFilename         any       `json:"sourceFilename"`
+	SourceFilePath         any       `json:"sourceFilePath"`
+	RootPathReal           any       `json:"rootPathReal"`
+	SourceFilePathReal     any       `json:"sourceFilePathReal"`
+	SkuIDExt               any       `json:"skuIDExt"`
+	TransportMethod        string    `json:"transportMethod"`
+	StrTotalRunningTime    any       `json:"strTotalRunningTime"`
+	Products               []Product `json:"products"`
+	Subscriptions          any       `json:"subscriptions"`
+	AudioProduct           any       `json:"audioProduct"`
+	AudioLosslessProduct   any       `json:"audioLosslessProduct"`
+	AudioHDProduct         any       `json:"audioHDProduct"`
+	VideoProduct           any       `json:"videoProduct"`
+	LivestreamProduct      any       `json:"livestreamProduct"`
+	Mp4Product             any       `json:"mp4Product"`
+	VideoondemandProduct   any       `json:"videoondemandProduct"`
+	CdProduct              any       `json:"cdProduct"`
+	LiveHDstreamProduct    any       `json:"liveHDstreamProduct"`
+	HDvideoondemandProduct any       `json:"HDvideoondemandProduct"`
+	VinylProduct           any       `json:"vinylProduct"`
+	DsdProduct             any       `json:"dsdProduct"`
+	DvdProduct             any       `json:"dvdProduct"`
+	Reality360Product      any       `json:"reality360Product"`
+	ContainerGroups        any       `json:"containerGroups"`
+	IDList                 string    `json:"IDList"`
+	PlayListID             int       `json:"playListID"`
+	CatalogQueryType       int       `json:"catalogQueryType"`
 }
 
 type StreamMeta struct {
-	StreamLink         string      `json:"streamLink"`
-	Streamer           string      `json:"streamer"`
-	UserID             string      `json:"userID"`
-	Mason              any `json:"mason"`
-	SubContentAccess   int         `json:"subContentAccess"`
-	StashContentAccess int         `json:"stashContentAccess"`
+	StreamLink         string `json:"streamLink"`
+	Streamer           string `json:"streamer"`
+	UserID             string `json:"userID"`
+	Mason              any    `json:"mason"`
+	SubContentAccess   int    `json:"subContentAccess"`
+	StashContentAccess int    `json:"stashContentAccess"`
 }
 
 type Quality struct {
@@ -507,16 +587,24 @@ type ArtistMeta struct {
 	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
 	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
 	Response                    struct {
-		HeaderName          any   `json:"headerName"`
-		Packages            any   `json:"packages"`
+		HeaderName          any           `json:"headerName"`
+		Packages            any           `json:"packages"`
 		Containers          []*AlbArtResp `json:"containers"`
 		CategoryID          int           `json:"categoryID"`
 		ArtistID            int           `json:"artistID"`
-		ArtistName          any   `json:"artistName"`
+		ArtistName          any           `json:"artistName"`
 		LoadingState        int           `json:"loadingState"`
 		TotalMatchedRecords int           `json:"totalMatchedRecords"`
 		NnCheckSum          int           `json:"nnCheckSum"`
 	} `json:"Response"`
+}
+
+// Artist represents an artist with their metadata
+type Artist struct {
+	ArtistID   int    `json:"artistID"`
+	ArtistName string `json:"artistName"`
+	NumShows   int    `json:"numShows"`
+	NumAlbums  int    `json:"numAlbums"`
 }
 
 type ArtistListResp struct {
@@ -524,12 +612,7 @@ type ArtistListResp struct {
 	ResponseAvailabilityCode    int    `json:"responseAvailabilityCode"`
 	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
 	Response                    struct {
-		Artists []struct {
-			ArtistID   int    `json:"artistID"`
-			ArtistName string `json:"artistName"`
-			NumShows   int    `json:"numShows"`
-			NumAlbums  int    `json:"numAlbums"`
-		} `json:"artists"`
+		Artists []Artist `json:"artists"`
 	} `json:"Response"`
 }
 
@@ -575,31 +658,31 @@ type LatestCatalogResp struct {
 	ResponseAvailabilityCodeStr string `json:"responseAvailabilityCodeStr"`
 	Response                    struct {
 		RecentItems []struct {
-			ContainerInfo         string `json:"containerInfo"`
-			ArtistName            string `json:"artistName"`
+			ContainerInfo          string `json:"containerInfo"`
+			ArtistName             string `json:"artistName"`
 			ShowDateFormattedShort string `json:"showDateFormattedShort"`
-			ArtistID              int    `json:"artistID"`
-			ContainerID           int    `json:"containerID"`
-			PerformanceDateStr    string `json:"performanceDateStr"`
-			PostedDate            string `json:"postedDate"`
-			VenueCity             string `json:"venueCity"`
-			VenueState            string `json:"venueState"`
-			Venue                 string `json:"venue"`
-			PageURL               string `json:"pageURL"`
-			CategoryID            int    `json:"categoryID"`
-			ImageURL              string `json:"imageURL"`
+			ArtistID               int    `json:"artistID"`
+			ContainerID            int    `json:"containerID"`
+			PerformanceDateStr     string `json:"performanceDateStr"`
+			PostedDate             string `json:"postedDate"`
+			VenueCity              string `json:"venueCity"`
+			VenueState             string `json:"venueState"`
+			Venue                  string `json:"venue"`
+			PageURL                string `json:"pageURL"`
+			CategoryID             int    `json:"categoryID"`
+			ImageURL               string `json:"imageURL"`
 		} `json:"recentItems"`
 	} `json:"Response"`
 }
 
 // CacheMeta stores metadata about the cached catalog
 type CacheMeta struct {
-	LastUpdated    time.Time `json:"lastUpdated"`     // RFC3339
-	CacheVersion   string    `json:"cacheVersion"`    // "v1.0.0"
+	LastUpdated    time.Time `json:"lastUpdated"`  // RFC3339
+	CacheVersion   string    `json:"cacheVersion"` // "v1.0.0"
 	TotalShows     int       `json:"totalShows"`
 	TotalArtists   int       `json:"totalArtists"`
-	ApiMethod      string    `json:"apiMethod"`       // "catalog.latest"
-	UpdateDuration string    `json:"updateDuration"`  // e.g. "2.5s"
+	ApiMethod      string    `json:"apiMethod"`      // "catalog.latest"
+	UpdateDuration string    `json:"updateDuration"` // e.g. "2.5s"
 }
 
 // ArtistsIndex provides fast artist name → ID lookup

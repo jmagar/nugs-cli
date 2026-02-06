@@ -5,6 +5,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/term"
 )
@@ -23,12 +24,12 @@ const (
 	boxTeeBottom   = "┴"
 	boxCross       = "┼"
 
-	// Double line variants for emphasis
-	boxDoubleHorizontal = "═"
-	boxDoubleTopLeft    = "╔"
-	boxDoubleTopRight   = "╗"
-	boxDoubleBottomLeft = "╚"
-	boxDoubleBottomRight= "╚"
+	// Double line variants for emphasis (used in headers and emphasis areas)
+	boxDoubleHorizontal  = "═"
+	boxDoubleTopLeft     = "╔"
+	boxDoubleTopRight    = "╗"
+	boxDoubleBottomLeft  = "╚"
+	boxDoubleBottomRight = "╝"
 
 	// Bullets and decorations
 	bulletSquare  = "▪"
@@ -36,6 +37,9 @@ const (
 	bulletArrow   = "▸"
 	bulletDiamond = "◆"
 )
+
+// ansiRegex is compiled once at package init for performance
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // getTermWidth returns the terminal width, defaulting to 80 if not detectable
 func getTermWidth() int {
@@ -48,35 +52,39 @@ func getTermWidth() int {
 
 // stripAnsiCodes removes ANSI escape sequences from a string
 func stripAnsiCodes(s string) string {
-	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	return ansiRegex.ReplaceAllString(s, "")
 }
 
 // visibleLength returns the visible length of a string (excluding ANSI codes)
+// Uses UTF-8 rune counting to handle multi-byte characters correctly
 func visibleLength(s string) int {
-	return len(stripAnsiCodes(s))
+	return utf8.RuneCountInString(stripAnsiCodes(s))
 }
 
 // truncateWithEllipsis truncates a string to maxLen with ellipsis if needed
-// Handles ANSI color codes properly by only counting visible characters
+// Handles ANSI color codes and multi-byte UTF-8 characters properly
 func truncateWithEllipsis(s string, maxLen int) string {
 	visibleLen := visibleLength(s)
 	if visibleLen <= maxLen {
 		return s
 	}
 	if maxLen <= 3 {
-		// For very short limits, just strip and truncate
+		// For very short limits, just strip and truncate using runes
 		stripped := stripAnsiCodes(s)
-		return stripped[:maxLen]
+		runes := []rune(stripped)
+		if len(runes) <= maxLen {
+			return stripped
+		}
+		return string(runes[:maxLen])
 	}
 
 	// Extract ANSI codes and visible text
-	ansiRegex := regexp.MustCompile(`\x1b\[[0-9;]*m`)
 	codes := ansiRegex.FindAllString(s, -1)
 	stripped := stripAnsiCodes(s)
 
-	// Truncate the visible text
-	truncated := stripped[:maxLen-3] + "..."
+	// Truncate the visible text using runes for proper UTF-8 handling
+	runes := []rune(stripped)
+	truncated := string(runes[:maxLen-3]) + "..."
 
 	// If there were color codes, try to preserve the first one
 	if len(codes) > 0 {
@@ -87,20 +95,22 @@ func truncateWithEllipsis(s string, maxLen int) string {
 	return truncated
 }
 
-// padRight pads a string to the specified width
+// padRight pads a string to the specified width using visible length (ANSI-aware)
 func padRight(s string, width int) string {
-	if len(s) >= width {
+	visLen := visibleLength(s)
+	if visLen >= width {
 		return s
 	}
-	return s + strings.Repeat(" ", width-len(s))
+	return s + strings.Repeat(" ", width-visLen)
 }
 
-// padCenter centers a string in the specified width
+// padCenter centers a string in the specified width using visible length (ANSI-aware)
 func padCenter(s string, width int) string {
-	if len(s) >= width {
+	visLen := visibleLength(s)
+	if visLen >= width {
 		return s
 	}
-	padding := width - len(s)
+	padding := width - visLen
 	leftPad := padding / 2
 	rightPad := padding - leftPad
 	return strings.Repeat(" ", leftPad) + s + strings.Repeat(" ", rightPad)
@@ -182,7 +192,7 @@ func (t *Table) Print() {
 
 	// Auto-adjust column widths to fit terminal
 	termWidth := getTermWidth()
-	totalBorders := len(t.Columns) + 1 // +1 for edges
+	totalBorders := len(t.Columns) + 1                                // +1 for edges
 	availableWidth := termWidth - totalBorders - (len(t.Columns) * 2) // -2 for padding per column
 
 	// Calculate proportional widths
@@ -244,7 +254,13 @@ func (t *Table) Print() {
 			var formatted string
 			switch col.Align {
 			case "right":
-				formatted = fmt.Sprintf("%*s", col.Width, truncated)
+				// Use visible length for ANSI-aware right-alignment
+				visLen := visibleLength(truncated)
+				if visLen < col.Width {
+					formatted = strings.Repeat(" ", col.Width-visLen) + truncated
+				} else {
+					formatted = truncated
+				}
 			case "center":
 				formatted = padCenter(truncated, col.Width)
 			default: // "left"
