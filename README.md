@@ -116,7 +116,7 @@ nugs
 
 **Step 3: Download your first show**:
 ```bash
-nugs 23329
+nugs grab 23329
 ```
 
 **Step 4: Browse the catalog**:
@@ -219,13 +219,13 @@ Let's get to the good stuff - actually downloading music.
 
 **Download single album:**
 ```bash
-nugs 23329
-nugs https://play.nugs.net/release/23329
+nugs grab 23329
+nugs grab https://play.nugs.net/release/23329
 ```
 
 **Download multiple albums:**
 ```bash
-nugs 23329 23790 24105
+nugs grab 23329 23790 24105
 ```
 
 **Download from text file:**
@@ -247,9 +247,9 @@ nugs 461 full   # Grateful Dead - complete catalog
 
 **Override quality settings:**
 ```bash
-nugs -f 3 23329                    # MQA quality
+nugs grab -f 3 23329               # MQA quality
 nugs -F 5 video-url                # 4K video
-nugs -o /mnt/storage/music 23329   # Custom output path
+nugs grab -o /mnt/storage/music 23329  # Custom output path
 ```
 
 ---
@@ -391,10 +391,10 @@ nugs gaps 1125 --ids-only
 #         46375
 
 # Download all gaps
-nugs gaps 1125 --ids-only | xargs -n1 nugs
+nugs gaps 1125 --ids-only | xargs -n1 nugs grab
 
 # Download first 10 gaps
-nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs
+nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs grab
 ```
 
 **Auto-download all missing shows:**
@@ -507,13 +507,13 @@ nugs gaps 1125  # Shows you're missing
 **Integration with downloads:**
 ```bash
 # Download all missing shows
-nugs gaps 1125 --ids-only | xargs -n1 nugs
+nugs gaps 1125 --ids-only | xargs -n1 nugs grab
 
 # Download 5 most recent gaps
-nugs gaps 1125 --ids-only | head -5 | xargs -n1 nugs
+nugs gaps 1125 --ids-only | head -5 | xargs -n1 nugs grab
 
 # Download in parallel (3 concurrent)
-nugs gaps 1125 --ids-only | xargs -P 3 -n1 nugs
+nugs gaps 1125 --ids-only | xargs -P 3 -n1 nugs grab
 
 # Save gaps to file for later
 nugs gaps 1125 --ids-only > billy-gaps.txt
@@ -557,7 +557,7 @@ rclone config
 
 **3. Download and upload automatically:**
 ```bash
-nugs 23329  # Downloads and uploads to gdrive:/Music/Nugs/
+nugs grab 23329  # Downloads and uploads to gdrive:/Music/Nugs/
 ```
 
 > **📍 Smart Gap Detection:** Gap detection checks both local storage AND your rclone remote, so you won't accidentally re-download shows that are already in the cloud.
@@ -722,7 +722,7 @@ nugs grab 1125 latest
 nugs 1125 full
 
 # Specific show
-nugs 23329
+nugs grab 23329
 ```
 
 ### Example 2: Find and Download Missing Dead & Company Shows
@@ -731,10 +731,10 @@ nugs 23329
 nugs gaps 1045
 
 # Download all gaps
-nugs gaps 1045 --ids-only | xargs -n1 nugs
+nugs gaps 1045 --ids-only | xargs -n1 nugs grab
 
 # Or just the 10 most recent
-nugs gaps 1045 --ids-only | head -10 | xargs -n1 nugs
+nugs gaps 1045 --ids-only | head -10 | xargs -n1 nugs grab
 ```
 
 ### Example 3: Batch Download from File
@@ -753,12 +753,12 @@ nugs shows.txt
 ### Example 4: Find All Red Rocks Shows
 ```bash
 # Filter shows by venue (case-insensitive)
-nugs list 1125 shows "Red Rocks"
+nugs list 1125 "Red Rocks"
 
 # Advanced: Use JSON output with jq
 nugs list 1125 --json standard | \
   jq -r '.shows[] | select(.venue | contains("Red Rocks")) | .containerID' | \
-  xargs -n1 nugs
+  xargs -n1 nugs grab
 ```
 
 ### Example 5: Daily Catalog Update Script

@@ -4,10 +4,10 @@
   • list artists                      List all available artists
     >> nugs list
     
-  • list artists shows >100           Filter artists by show count (>, <, >=, <=, =)
-    >> nugs list >100
+  • list artists shows ">100"         Filter artists by show count (>, <, >=, <=, =)
+    >> nugs list ">100"
     
-  • list <artist_id>                  List all shows for a specific 
+  • list <artist_id>                  List all shows for a specific artist
     >> nugs list 1125
     
   • list <artist_id> shows "venue"    Filter shows by venue name
@@ -69,7 +69,7 @@
     >> nugs list ">100"
   
   ▸ nugs 12345                        Download show by ID
-    # NO CHANGE
+    >> nugs grab 12345
   
   ▸ nugs 461 latest                   Download latest shows from artist
     >> nugs grab 461 latest

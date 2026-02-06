@@ -35,11 +35,15 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("failed to create pipe: %v", err)
 	}
 	os.Stdout = w
+	defer func() {
+		os.Stdout = orig
+		_ = w.Close()
+		_ = r.Close()
+	}()
 
 	fn()
 
 	_ = w.Close()
-	os.Stdout = orig
 
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(r)

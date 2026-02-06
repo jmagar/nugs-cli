@@ -312,7 +312,7 @@ func printDivider() {
 }
 
 // printProgress displays a styled progress bar with percentage and transfer stats
-func printProgress(percentage int, speed, downloaded, total string) {
+func renderProgress(label string, percentage int, speed, downloaded, total, fillColor string) {
 	// Clamp percentage to 0-100
 	if percentage < 0 {
 		percentage = 0
@@ -329,11 +329,20 @@ func printProgress(percentage int, speed, downloaded, total string) {
 	// Build progress bar with filled/empty blocks
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
 
-	// Format: [████████████░░░░░░░░░░░░] 45% @ 2.5 MB/s, 120 MB/500 MB
-	fmt.Printf("\r%s[%s%s%s]%s %s%3d%%%s @ %s/s, %s/%s ",
-		colorCyan, colorGreen, bar, colorCyan, colorReset,
+	// Format: DL [████████████░░░░░░░░░░░░] 45% @ 2.5 MB/s, 120 MB/500 MB
+	fmt.Printf("\r%s%s%s %s[%s%s%s]%s %s%3d%%%s @ %s/s, %s/%s ",
+		colorBold, label, colorReset,
+		colorCyan, fillColor, bar, colorCyan, colorReset,
 		colorBold, percentage, colorReset,
 		speed, downloaded, total)
+}
+
+func printProgress(percentage int, speed, downloaded, total string) {
+	renderProgress("DL", percentage, speed, downloaded, total, colorGreen)
+}
+
+func printUploadProgress(percentage int, speed, uploaded, total string) {
+	renderProgress("UP", percentage, speed, uploaded, total, colorBlue)
 }
 
 // printBox prints text in a box

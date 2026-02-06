@@ -40,6 +40,7 @@ type WriteCounter struct {
 	Downloaded int64
 	Percentage int
 	StartTime  int64
+	OnProgress func(downloaded, total, speed int64)
 }
 
 type Config struct {
@@ -117,7 +118,7 @@ func (Args) Description() string {
   %s▸%s %snugs list 461 "Red Rocks"%s
   %s▸%s %snugs list 1125 latest 5%s
   %s▸%s %snugs list ">100"%s
-  %s▸%s %snugs 12345%s                        Download show by ID
+  %s▸%s %snugs grab 12345%s                   Download show by ID
   %s▸%s %snugs grab 461 latest%s              Download latest shows from artist
   %s▸%s %snugs update%s                       Update local catalog cache
   %s▸%s %snugs gaps 1125%s                    Find missing shows for artist

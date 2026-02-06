@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/alexflint/go-arg"
@@ -65,6 +66,8 @@ var (
 
 // loadedConfigPath tracks which config file was loaded so writeConfig can save to the same location
 var loadedConfigPath string
+var runErrorCount int
+var runWarningCount int
 
 var regexStrings = []string{
 	`^https://play.nugs.net/release/(\d+)$`,
@@ -119,14 +122,20 @@ func (wc *WriteCounter) Write(p []byte) (int, error) {
 	var speed int64 = 0
 	n := len(p)
 	wc.Downloaded += int64(n)
-	percentage := float64(wc.Downloaded) / float64(wc.Total) * float64(100)
-	wc.Percentage = int(percentage)
+	if wc.Total > 0 {
+		percentage := float64(wc.Downloaded) / float64(wc.Total) * float64(100)
+		wc.Percentage = int(percentage)
+	}
 	toDivideBy := time.Now().UnixMilli() - wc.StartTime
 	if toDivideBy != 0 {
 		speed = int64(wc.Downloaded) / toDivideBy * 1000
 	}
-	printProgress(wc.Percentage, humanize.Bytes(uint64(speed)),
-		humanize.Bytes(uint64(wc.Downloaded)), wc.TotalStr)
+	if wc.OnProgress != nil {
+		wc.OnProgress(wc.Downloaded, wc.Total, speed)
+	} else {
+		printProgress(wc.Percentage, humanize.Bytes(uint64(speed)),
+			humanize.Bytes(uint64(wc.Downloaded)), wc.TotalStr)
+	}
 	return n, nil
 }
 
@@ -227,6 +236,7 @@ func printSuccess(msg string) {
 }
 
 func printError(msg string) {
+	runErrorCount++
 	fmt.Printf("%s%s%s %s%s\n", colorRed, symbolCross, colorReset, msg, colorReset)
 }
 
@@ -235,6 +245,7 @@ func printInfo(msg string) {
 }
 
 func printWarning(msg string) {
+	runWarningCount++
 	fmt.Printf("%s%s%s %s%s\n", colorYellow, symbolWarning, colorReset, msg, colorReset)
 }
 
@@ -480,13 +491,11 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 	}
 
 	printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteFullPath, colorReset))
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	err = cmd.Run()
+	err = runRcloneWithProgress(cmd)
 	if err != nil {
 		return fmt.Errorf("rclone upload failed: %w", err)
 	}
+	fmt.Println("")
 
 	printSuccess("Upload complete!")
 
@@ -534,10 +543,106 @@ func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, trans
 	remoteFullPath := remoteParentPath + "/" + filepath.Base(localPath)
 
 	transfersFlag := fmt.Sprintf("--transfers=%d", transfers)
+	statsFlags := []string{"--progress", "--stats=1s", "--stats-one-line"}
 	if localInfo.IsDir() {
-		return exec.Command("rclone", "copy", localPath, remoteFullPath, "-P", transfersFlag), remoteFullPath, nil
+		args := []string{"copy", localPath, remoteFullPath, transfersFlag}
+		args = append(args, statsFlags...)
+		return exec.Command("rclone", args...), remoteFullPath, nil
 	}
-	return exec.Command("rclone", "copyto", localPath, remoteFullPath, "-P", transfersFlag), remoteFullPath, nil
+	args := []string{"copyto", localPath, remoteFullPath, transfersFlag}
+	args = append(args, statsFlags...)
+	return exec.Command("rclone", args...), remoteFullPath, nil
+}
+
+var rcloneTransferredRegex = regexp.MustCompile(`Transferred:\s*([^,]+),\s*(\d{1,3})%.*?,\s*([^,]+/s)`)
+
+func parseRcloneProgressLine(line string) (int, string, string, string, bool) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return 0, "", "", "", false
+	}
+	match := rcloneTransferredRegex.FindStringSubmatch(line)
+	if len(match) != 4 {
+		return 0, "", "", "", false
+	}
+	parts := strings.SplitN(strings.TrimSpace(match[1]), "/", 2)
+	if len(parts) != 2 {
+		return 0, "", "", "", false
+	}
+	percent, err := strconv.Atoi(strings.TrimSpace(match[2]))
+	if err != nil {
+		return 0, "", "", "", false
+	}
+	uploaded := strings.TrimSpace(parts[0])
+	total := strings.TrimSpace(parts[1])
+	speed := strings.TrimSpace(match[3])
+	return percent, speed, uploaded, total, true
+}
+
+func runRcloneWithProgress(cmd *exec.Cmd) error {
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	var (
+		parseMu     sync.Mutex
+		diagnostics bytes.Buffer
+	)
+
+	consume := func(r io.Reader, wg *sync.WaitGroup) {
+		defer wg.Done()
+		scanner := bufio.NewScanner(r)
+		scanner.Split(func(data []byte, atEOF bool) (advance int, token []byte, splitErr error) {
+			for i, b := range data {
+				if b == '\n' || b == '\r' {
+					return i + 1, bytes.TrimSpace(data[:i]), nil
+				}
+			}
+			if atEOF && len(data) > 0 {
+				return len(data), bytes.TrimSpace(data), nil
+			}
+			return 0, nil, nil
+		})
+		for scanner.Scan() {
+			line := scanner.Text()
+			parseMu.Lock()
+			percent, speed, uploaded, total, ok := parseRcloneProgressLine(line)
+			if ok {
+				printUploadProgress(percent, speed, uploaded, total)
+			} else if line != "" {
+				diagnostics.WriteString(line)
+				diagnostics.WriteString("\n")
+			}
+			parseMu.Unlock()
+		}
+		if scanErr := scanner.Err(); scanErr != nil {
+			parseMu.Lock()
+			diagnostics.WriteString(scanErr.Error())
+			diagnostics.WriteString("\n")
+			parseMu.Unlock()
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go consume(stdoutPipe, &wg)
+	go consume(stderrPipe, &wg)
+
+	waitErr := cmd.Wait()
+	wg.Wait()
+	if waitErr != nil && diagnostics.Len() > 0 {
+		return fmt.Errorf("%w\n%s", waitErr, strings.TrimSpace(diagnostics.String()))
+	}
+	return waitErr
 }
 
 func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
@@ -575,8 +680,10 @@ func remotePathExists(remotePath string, cfg *Config) (bool, error) {
 	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
 	fullPath := remoteDest + "/" + remotePath
 
-	cmd := exec.Command("rclone", "lsf", fullPath, "--dirs-only")
-	output, err := cmd.Output()
+	// A successful command means the directory exists, even if it's empty.
+	// Using --dirs-only with output length checks can misclassify empty dirs.
+	cmd := exec.Command("rclone", "lsf", fullPath)
+	err := cmd.Run()
 
 	if err != nil {
 		// Check exit code to distinguish "doesn't exist" from other errors
@@ -592,8 +699,30 @@ func remotePathExists(remotePath string, cfg *Config) (bool, error) {
 		return false, fmt.Errorf("failed to execute rclone: %w", err)
 	}
 
-	// If output is not empty, directory exists
-	return len(output) > 0, nil
+	return true, nil
+}
+
+func parsePaidLstreamShowID(query string) (string, error) {
+	q, err := url.ParseQuery(query)
+	if err != nil {
+		return "", err
+	}
+	showIDs := q["showID"]
+	if len(showIDs) == 0 {
+		return "", errors.New("url didn't contain a show id parameter")
+	}
+	showID := strings.TrimSpace(showIDs[0])
+	if showID == "" {
+		return "", errors.New("url didn't contain a show id parameter")
+	}
+	return showID, nil
+}
+
+func isLikelyLivestreamSegments(segURLs []string) (bool, error) {
+	if len(segURLs) == 0 {
+		return false, errors.New("video manifest returned no segments")
+	}
+	return len(segURLs) > 1 && segURLs[0] != segURLs[1], nil
 }
 
 // listRemoteArtistFolders returns show folder names under one artist folder on remote storage.
@@ -1267,7 +1396,7 @@ func queryQuality(streamUrl string) *Quality {
 	return nil
 }
 
-func downloadTrack(trackPath, _url string) error {
+func downloadTrack(trackPath, _url string, onProgress func(downloaded, total, speed int64), printNewline bool) error {
 	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0755)
 	if err != nil {
 		return err
@@ -1289,13 +1418,20 @@ func downloadTrack(trackPath, _url string) error {
 		return errors.New(do.Status)
 	}
 	totalBytes := do.ContentLength
+	totalStr := "unknown"
+	if totalBytes > 0 {
+		totalStr = humanize.Bytes(uint64(totalBytes))
+	}
 	counter := &WriteCounter{
 		Total:     totalBytes,
-		TotalStr:  humanize.Bytes(uint64(totalBytes)),
+		TotalStr:  totalStr,
 		StartTime: time.Now().UnixMilli(),
+		OnProgress: onProgress,
 	}
 	_, err = io.Copy(f, io.TeeReader(do.Body, counter))
-	fmt.Println("")
+	if printNewline {
+		fmt.Println("")
+	}
 	return err
 }
 
@@ -1433,7 +1569,7 @@ func tsToAac(decData []byte, outPath, ffmpegNameStr string) error {
 	return nil
 }
 
-func hlsOnly(trackPath, manUrl, ffmpegNameStr string) error {
+func hlsOnly(trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded, total, speed int64), printNewline bool) error {
 	req, err := client.Get(manUrl)
 	if err != nil {
 		return err
@@ -1465,7 +1601,7 @@ func hlsOnly(trackPath, manUrl, ffmpegNameStr string) error {
 		return err
 	}
 
-	err = downloadTrack("temp_enc.ts", tsUrl)
+	err = downloadTrack("temp_enc.ts", tsUrl, onProgress, printNewline)
 	if err != nil {
 		return err
 	}
@@ -1561,12 +1697,42 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 		printInfo(fmt.Sprintf("Track exists %s skipping", symbolArrow))
 		return nil
 	}
+	if trackNum > 1 {
+		fmt.Println("")
+	}
 	printDownload(fmt.Sprintf("Track %d/%d: %s%s%s - %s",
 		trackNum, trackTotal, colorBold, track.SongTitle, colorReset, chosenQual.Specs))
+	showProgress := func(downloaded, total, speed int64) {
+		trackPercentage := 0
+		trackTotalStr := "unknown"
+		if total > 0 {
+			trackPercentage = int((float64(downloaded) / float64(total)) * 100)
+			if trackPercentage > 100 {
+				trackPercentage = 100
+			}
+			trackTotalStr = humanize.Bytes(uint64(total))
+		}
+
+		trackProgress := 0.0
+		if total > 0 {
+			trackProgress = float64(downloaded) / float64(total)
+			if trackProgress > 1 {
+				trackProgress = 1
+			}
+		}
+		showPercentage := ((float64(trackNum-1) + trackProgress) / float64(trackTotal)) * 100
+		if showPercentage > 100 {
+			showPercentage = 100
+		}
+
+		downloadedLabel := fmt.Sprintf("%s | show %3.0f%% (%d/%d)",
+			humanize.Bytes(uint64(downloaded)), showPercentage, trackNum, trackTotal)
+		printProgress(trackPercentage, humanize.Bytes(uint64(speed)), downloadedLabel, trackTotalStr)
+	}
 	if isHlsOnly {
-		err = hlsOnly(trackPath, chosenQual.URL, cfg.FfmpegNameStr)
+		err = hlsOnly(trackPath, chosenQual.URL, cfg.FfmpegNameStr, showProgress, false)
 	} else {
-		err = downloadTrack(trackPath, chosenQual.URL)
+		err = downloadTrack(trackPath, chosenQual.URL, showProgress, false)
 	}
 	if err != nil {
 		printError("Failed to download track")
@@ -1662,6 +1828,9 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 		if err != nil {
 			handleErr("Track failed.", err, false)
 		}
+	}
+	if trackTotal > 0 {
+		fmt.Println("")
 	}
 
 	// Upload to rclone if enabled
@@ -1921,15 +2090,32 @@ func displayWelcome() error {
 
 	table.Print()
 	fmt.Println()
+
 	printSection("Quick Start")
 	quickStartCommands := []string{
-		fmt.Sprintf("%snugs list artists%s - Browse all artists", colorCyan, colorReset),
+		fmt.Sprintf("%snugs list%s - Browse all artists", colorCyan, colorReset),
 		fmt.Sprintf("%snugs list 1125%s - View Billy Strings shows", colorCyan, colorReset),
-		fmt.Sprintf("%snugs 1125 latest%s - Download latest shows", colorCyan, colorReset),
-		fmt.Sprintf("%snugs list artists --json standard | jq%s - Export to JSON", colorCyan, colorReset),
+		fmt.Sprintf("%snugs list 1125 \"Red Rocks\"%s - Filter by venue", colorCyan, colorReset),
+		fmt.Sprintf("%snugs list \">100\"%s - Filter artists by show count", colorCyan, colorReset),
+		fmt.Sprintf("%snugs grab 1125 latest%s - Download latest shows", colorCyan, colorReset),
+		fmt.Sprintf("%snugs list --json standard | jq%s - Export list output to JSON", colorCyan, colorReset),
+		fmt.Sprintf("%snugs gaps 1125 --ids-only | xargs -n1 nugs grab%s - Fill missing shows", colorCyan, colorReset),
 		fmt.Sprintf("%snugs help%s - View all commands", colorCyan, colorReset),
 	}
 	printList(quickStartCommands, colorGreen)
+
+	printSection("Catalog Workflow")
+	catalogWorkflowCommands := []string{
+		fmt.Sprintf("%snugs update%s - Refresh local catalog cache", colorCyan, colorReset),
+		fmt.Sprintf("%snugs cache%s - Inspect cache status and metadata", colorCyan, colorReset),
+		fmt.Sprintf("%snugs stats%s - See catalog-wide statistics", colorCyan, colorReset),
+		fmt.Sprintf("%snugs latest 10%s - Show most recent additions", colorCyan, colorReset),
+		fmt.Sprintf("%snugs coverage 1125 461%s - Check collection coverage", colorCyan, colorReset),
+		fmt.Sprintf("%snugs refresh set%s - Configure auto-refresh schedule", colorCyan, colorReset),
+	}
+	printList(catalogWorkflowCommands, colorGreen)
+	fmt.Println()
+	printInfo("Tip: Quote comparison filters (for example, \">100\") to avoid shell redirection.")
 	fmt.Println()
 
 	return nil
@@ -3193,9 +3379,11 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		printError("Failed to get video segment URLs")
 		return err
 	}
-
 	// Player album page videos aren't always only the first seg for the entire vid.
-	isLstream = segUrls[0] != segUrls[1]
+	isLstream, err = isLikelyLivestreamSegments(segUrls)
+	if err != nil {
+		return err
+	}
 
 	if !isLstream {
 		fmt.Printf("%.3f FPS, ", variant.FrameRate)
@@ -3288,13 +3476,9 @@ func catalogPlist(_plistId, legacyToken string, cfg *Config, streamParams *Strea
 }
 
 func paidLstream(query, uguID string, cfg *Config, streamParams *StreamParams) error {
-	q, err := url.ParseQuery(query)
+	showId, err := parsePaidLstreamShowID(query)
 	if err != nil {
 		return err
-	}
-	showId := q["showID"][0]
-	if showId == "" {
-		return errors.New("url didn't contain a show id parameter")
 	}
 	err = video(showId, uguID, cfg, streamParams, nil, true)
 	return err
@@ -3715,7 +3899,10 @@ func main() {
 
 	albumTotal := len(cfg.Urls)
 	var itemErr error
+	completedItems := 0
 	for albumNum, _url := range cfg.Urls {
+		errorsBefore := runErrorCount
+		warningsBefore := runWarningCount
 		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
 		itemId, mediaType := checkUrl(_url)
 		if itemId == "" {
@@ -3743,5 +3930,18 @@ func main() {
 		if itemErr != nil {
 			handleErr("Item failed.", itemErr, false)
 		}
+		completedItems++
+		itemErrors := runErrorCount - errorsBefore
+		itemWarnings := runWarningCount - warningsBefore
+		itemStatus := fmt.Sprintf("Item %d/%d complete", albumNum+1, albumTotal)
+		if itemErr != nil || itemErrors > 0 {
+			itemStatus = fmt.Sprintf("Item %d/%d completed with issues", albumNum+1, albumTotal)
+		}
+		printInfo(fmt.Sprintf("%s | health: errors=%d warnings=%d | run: %d/%d done",
+			itemStatus, itemErrors, itemWarnings, completedItems, albumTotal))
 	}
+	fmt.Println()
+	printSection("Run Summary")
+	printInfo(fmt.Sprintf("Completed %d/%d items", completedItems, albumTotal))
+	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", runErrorCount, runWarningCount))
 }
