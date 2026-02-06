@@ -1,5 +1,8 @@
 # Credentials and config
 config.json
+.env
+.env.*
+!.env.example
 
 # Build artifacts
 nugs_dl
@@ -30,3 +33,6 @@ Thumbs.db
 
 # Cache
 .cache/
+
+# Serena agent files
+.serena/
