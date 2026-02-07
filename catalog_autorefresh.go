@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -42,21 +43,33 @@ func shouldAutoRefresh(cfg *Config) (bool, error) {
 		return false, fmt.Errorf("invalid refresh time format: %s (expected HH:MM)", cfg.CatalogRefreshTime)
 	}
 
-	hour := 0
-	minute := 0
-	fmt.Sscanf(matches[1], "%d", &hour)
-	fmt.Sscanf(matches[2], "%d", &minute)
+	var hour, minute int
+	if _, err := fmt.Sscanf(matches[1], "%d", &hour); err != nil {
+		return false, fmt.Errorf("invalid hour in refresh time: %s", matches[1])
+	}
+	if _, err := fmt.Sscanf(matches[2], "%d", &minute); err != nil {
+		return false, fmt.Errorf("invalid minute in refresh time: %s", matches[2])
+	}
+
+	// Validate time ranges
+	if hour < 0 || hour > 23 {
+		return false, fmt.Errorf("hour must be 00-23, got %d", hour)
+	}
+	if minute < 0 || minute > 59 {
+		return false, fmt.Errorf("minute must be 00-59, got %d", minute)
+	}
 
 	// Create today's refresh time
 	todayRefreshTime := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 
 	// Check interval
-	if cfg.CatalogRefreshInterval == "daily" {
+	switch cfg.CatalogRefreshInterval {
+	case "daily":
 		// Daily: refresh if current time is past refresh time today AND cache is from before today's refresh time
 		if now.After(todayRefreshTime) && meta.LastUpdated.Before(todayRefreshTime) {
 			return true, nil
 		}
-	} else if cfg.CatalogRefreshInterval == "weekly" {
+	case "weekly":
 		// Weekly: refresh if current time is past refresh time today AND cache is more than 7 days old
 		weekAgo := now.Add(-7 * 24 * time.Hour)
 		if now.After(todayRefreshTime) && meta.LastUpdated.Before(weekAgo) {
@@ -204,18 +217,30 @@ func configureAutoRefresh(cfg *Config) error {
 	return nil
 }
 
-// writeConfig writes the config to config.json in the current directory
+// writeConfig writes the config back to the file it was loaded from
 func writeConfig(cfg *Config) error {
-	// Write to current directory, same as readConfig
 	configData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	// Write to file in current directory
-	err = os.WriteFile("config.json", configData, 0644)
+	// Write to the same file that was loaded by readConfig
+	targetPath := loadedConfigPath
+	if targetPath == "" {
+		targetPath = "config.json" // fallback to current directory
+	}
+
+	// Ensure parent directory exists
+	dir := filepath.Dir(targetPath)
+	if dir != "." {
+		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
+			return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
+		}
+	}
+
+	err = os.WriteFile(targetPath, configData, 0600)
 	if err != nil {
-		return fmt.Errorf("failed to write config: %w", err)
+		return fmt.Errorf("failed to write config to %s: %w", targetPath, err)
 	}
 
 	return nil

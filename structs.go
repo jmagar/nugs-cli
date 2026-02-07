@@ -2,23 +2,106 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
 // ANSI color codes
-const (
+var (
 	colorReset  = "\033[0m"
-	colorRed    = "\033[31m"
-	colorGreen  = "\033[32m"
-	colorYellow = "\033[33m"
-	colorBlue   = "\033[34m"
-	colorPurple = "\033[35m"
-	colorCyan   = "\033[36m"
+	colorRed    = "\033[91m"
+	colorGreen  = "\033[92m"
+	colorYellow = "\033[93m"
+	colorBlue   = "\033[94m"
+	colorPurple = "\033[95m"
+	colorCyan   = "\033[96m"
 	colorBold   = "\033[1m"
+	activeTheme = "nordonedark"
 )
 
+func init() {
+	initColorPalette()
+}
+
+func initColorPalette() {
+	theme := strings.ToLower(strings.TrimSpace(os.Getenv("NUGS_THEME")))
+	if theme != "" {
+		activeTheme = theme
+	}
+
+	if activeTheme == "vivid" {
+		initVividPalette()
+		return
+	}
+	initNordOneDarkPalette()
+}
+
+func initVividPalette() {
+	if supportsTruecolor() {
+		colorRed = "\033[1;38;2;255;76;102m"
+		colorGreen = "\033[1;38;2;80;250;123m"
+		colorYellow = "\033[1;38;2;255;221;87m"
+		colorBlue = "\033[1;38;2;110;196;255m"
+		colorPurple = "\033[1;38;2;215;130;255m"
+		colorCyan = "\033[1;38;2;0;245;255m"
+		return
+	}
+	if supports256Color() {
+		colorRed = "\033[1;38;5;203m"
+		colorGreen = "\033[1;38;5;84m"
+		colorYellow = "\033[1;38;5;227m"
+		colorBlue = "\033[1;38;5;81m"
+		colorPurple = "\033[1;38;5;177m"
+		colorCyan = "\033[1;38;5;51m"
+		return
+	}
+	// Basic ANSI fallback
+	colorRed = "\033[1;91m"
+	colorGreen = "\033[1;92m"
+	colorYellow = "\033[1;93m"
+	colorBlue = "\033[1;94m"
+	colorPurple = "\033[1;95m"
+	colorCyan = "\033[1;96m"
+}
+
+func initNordOneDarkPalette() {
+	if supportsTruecolor() {
+		// Vibrant nord + one-dark blend
+		colorRed = "\033[1;38;2;224;108;117m"    // one-dark red
+		colorGreen = "\033[1;38;2;152;195;121m"  // one-dark green
+		colorYellow = "\033[1;38;2;229;192;123m" // one-dark yellow
+		colorBlue = "\033[1;38;2;143;188;255m"   // brighter nord blue
+		colorPurple = "\033[1;38;2;180;142;255m" // nord-ish purple accent
+		colorCyan = "\033[1;38;2;136;220;255m"   // icy cyan
+		return
+	}
+	if supports256Color() {
+		colorRed = "\033[1;38;5;210m"
+		colorGreen = "\033[1;38;5;114m"
+		colorYellow = "\033[1;38;5;222m"
+		colorBlue = "\033[1;38;5;111m"
+		colorPurple = "\033[1;38;5;183m"
+		colorCyan = "\033[1;38;5;159m"
+	}
+}
+
+func supportsTruecolor() bool {
+	term := strings.ToLower(os.Getenv("TERM"))
+	colorTerm := strings.ToLower(os.Getenv("COLORTERM"))
+	return strings.Contains(colorTerm, "truecolor") ||
+		strings.Contains(colorTerm, "24bit") ||
+		strings.Contains(term, "truecolor") ||
+		strings.Contains(term, "24bit")
+}
+
+func supports256Color() bool {
+	term := strings.ToLower(os.Getenv("TERM"))
+	return strings.Contains(term, "256color")
+}
+
 // Unicode symbols
-const (
+var (
 	symbolCheck    = "✓"
 	symbolCross    = "✗"
 	symbolArrow    = "→"
@@ -32,6 +115,13 @@ const (
 	symbolRocket   = "🚀"
 )
 
+// Message priority constants for progress box messages
+const (
+	MessagePriorityStatus  = 1 // Info messages (cyan, ℹ symbol)
+	MessagePriorityWarning = 2 // Warning messages (yellow, ⚠ symbol)
+	MessagePriorityError   = 3 // Error messages (red, ✗ symbol)
+)
+
 type Transport struct{}
 
 type WriteCounter struct {
@@ -40,6 +130,7 @@ type WriteCounter struct {
 	Downloaded int64
 	Percentage int
 	StartTime  int64
+	OnProgress func(downloaded, total, speed int64)
 }
 
 type Config struct {
@@ -65,6 +156,7 @@ type Config struct {
 	CatalogRefreshTime     string   `json:"catalogRefreshTime,omitempty"`     // "05:00" (24-hour format)
 	CatalogRefreshTimezone string   `json:"catalogRefreshTimezone,omitempty"` // "America/New_York"
 	CatalogRefreshInterval string   `json:"catalogRefreshInterval,omitempty"` // "daily" or "weekly"
+	SkipSizePreCalculation bool     `json:"skipSizePreCalculation,omitempty"` // Skip pre-calculating total show size (faster start)
 }
 
 type Args struct {
@@ -83,24 +175,24 @@ func (Args) Description() string {
 
 %s◆ LIST COMMANDS%s
 %s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %slist artists%s                      List all available artists
-  %s•%s %slist artists shows >100%s           Filter artists by show count (>, <, >=, <=, =)
+  %s•%s %slist%s                              List all available artists
+  %s•%s %slist >100%s                         Filter artists by show count (>, <, >=, <=, =)
   %s•%s %slist <artist_id>%s                  List all shows for a specific artist
-  %s•%s %slist <artist_id> shows "venue"%s    Filter shows by venue name
+  %s•%s %slist <artist_id> "venue"%s          Filter shows by venue name
   %s•%s %slist <artist_id> latest <N>%s       Show latest N shows for an artist
-  %s•%s %s<artist_id> latest%s                Download latest shows from an artist
+  %s•%s %sgrab <artist_id> latest%s           Download latest shows from an artist
 
 %s◆ CATALOG COMMANDS%s
 %s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %scatalog update%s                    Fetch and cache latest catalog
-  %s•%s %scatalog cache%s                     Show cache status and metadata
-  %s•%s %scatalog stats%s                     Display catalog statistics
-  %s•%s %scatalog latest [limit]%s            Show latest additions (default 15)
-  %s•%s %scatalog gaps <id> [...]%s           Find missing shows (one or more artists)
-  %s•%s %scatalog gaps <id> --ids-only%s      Output just IDs for piping
-  %s•%s %scatalog gaps <id> fill%s            Auto-download all missing shows
-  %s•%s %scatalog coverage [ids...]%s         Show download coverage statistics
-  %s•%s %scatalog config enable|disable|set%s Configure auto-refresh
+  %s•%s %supdate%s                            Fetch and cache latest catalog
+  %s•%s %scache%s                             Show cache status and metadata
+  %s•%s %sstats%s                             Display catalog statistics
+  %s•%s %slatest [limit]%s                    Show latest additions (default 15)
+  %s•%s %sgaps <id> [...]%s                   List missing shows only (one or more artists)
+  %s•%s %sgaps <id> --ids-only%s              Output just IDs for piping
+  %s•%s %sgaps <id> fill%s                    Auto-download all missing shows
+  %s•%s %scoverage [ids...]%s                 Show download coverage statistics
+  %s•%s %srefresh enable|disable|set%s        Configure auto-refresh
 
 %s◆ JSON OUTPUT LEVELS%s %s(--json <level>)%s
 %s─────────────────────────────────────────────────────────────────────────────%s
@@ -112,17 +204,17 @@ func (Args) Description() string {
 %s◆ EXAMPLES%s
 %s─────────────────────────────────────────────────────────────────────────────%s
   %s▸%s %snugs help%s
-  %s▸%s %snugs list artists%s
+  %s▸%s %snugs list%s
   %s▸%s %snugs list 461%s
-  %s▸%s %snugs list 461 shows "Red Rocks"%s
+  %s▸%s %snugs list 461 "Red Rocks"%s
   %s▸%s %snugs list 1125 latest 5%s
-  %s▸%s %snugs list artists shows ">100"%s
+  %s▸%s %snugs list ">100"%s
   %s▸%s %snugs 12345%s                        Download show by ID
-  %s▸%s %snugs 461 latest%s                   Download latest shows from artist
-  %s▸%s %snugs catalog update%s               Update local catalog cache
-  %s▸%s %snugs catalog gaps 1125%s            Find missing shows for artist
-  %s▸%s %snugs catalog gaps 1125 fill%s       Auto-download all missing shows
-  %s▸%s %snugs catalog coverage 1125 461%s    Check download coverage
+  %s▸%s %snugs grab 461 latest%s              Download latest shows from artist
+  %s▸%s %snugs update%s                       Update local catalog cache
+  %s▸%s %snugs gaps 1125%s                    Find missing shows for artist
+  %s▸%s %snugs gaps 1125 fill%s               Auto-download all missing shows
+  %s▸%s %snugs coverage 1125 461%s            Check download coverage
 
   %s→%s Full URLs also work: %snugs https://play.nugs.net/release/12345%s
 `,
@@ -701,4 +793,88 @@ type ContainerIndexEntry struct {
 	ArtistName      string `json:"artistName"`
 	ContainerInfo   string `json:"containerInfo"`
 	PerformanceDate string `json:"performanceDate"`
+}
+
+// ArtistMetaCache stores cached artist metadata pages from catalog.containersAll.
+type ArtistMetaCache struct {
+	ArtistID string        `json:"artistID"`
+	CachedAt time.Time     `json:"cachedAt"`
+	Pages    []*ArtistMeta `json:"pages"`
+}
+
+// ShowStatus stores a show and whether it is already downloaded.
+type ShowStatus struct {
+	Show       *AlbArtResp `json:"show"`
+	Downloaded bool        `json:"downloaded"`
+}
+
+// ArtistCatalogAnalysis stores the computed status for all shows for one artist.
+type ArtistCatalogAnalysis struct {
+	ArtistID      string       `json:"artistID"`
+	ArtistName    string       `json:"artistName"`
+	TotalShows    int          `json:"totalShows"`
+	Downloaded    int          `json:"downloaded"`
+	Missing       int          `json:"missing"`
+	Shows         []ShowStatus `json:"shows"`
+	MissingShows  []ShowStatus `json:"missingShows"`
+	DownloadPct   float64      `json:"downloadedPct"`
+	MissingPct    float64      `json:"missingPct"`
+	CacheUsed     bool         `json:"cacheUsed"`
+	CacheStaleUse bool         `json:"cacheStaleUse"`
+}
+
+// BatchProgressState tracks progress across multiple albums/shows in a batch operation.
+// Used for artist catalog downloads or gap filling to show overall batch progress.
+type BatchProgressState struct {
+	CurrentAlbum  int       // Current album number being processed (1-based)
+	TotalAlbums   int       // Total number of albums in the batch
+	Complete      int       // Number of albums completed successfully
+	Failed        int       // Number of albums that failed
+	Skipped       int       // Number of albums skipped (already exist)
+	StartTime     time.Time // When the batch started
+	CurrentTitle  string    // Title of the current album being processed
+}
+
+// Validate ensures batch progress state fields are consistent and within valid bounds
+// Clamps values to prevent displaying incorrect progress (e.g., "5/3 albums")
+// Thread-safe: can be called without holding any locks (modifies own fields only)
+func (b *BatchProgressState) Validate() {
+	if b == nil {
+		return
+	}
+
+	// Ensure CurrentAlbum doesn't exceed TotalAlbums
+	if b.CurrentAlbum > b.TotalAlbums {
+		b.CurrentAlbum = b.TotalAlbums
+	}
+
+	// Ensure sum of completion states doesn't exceed total
+	total := b.Complete + b.Failed + b.Skipped
+	if total > b.TotalAlbums {
+		// Clamp to valid values - preserve Complete first, then Failed, then Skipped
+		if b.Complete > b.TotalAlbums {
+			b.Complete = b.TotalAlbums
+			b.Failed = 0
+			b.Skipped = 0
+		} else if b.Complete+b.Failed > b.TotalAlbums {
+			b.Failed = b.TotalAlbums - b.Complete
+			b.Skipped = 0
+		} else {
+			b.Skipped = b.TotalAlbums - b.Complete - b.Failed
+		}
+	}
+
+	// Ensure no negative values
+	if b.CurrentAlbum < 0 {
+		b.CurrentAlbum = 0
+	}
+	if b.Complete < 0 {
+		b.Complete = 0
+	}
+	if b.Failed < 0 {
+		b.Failed = 0
+	}
+	if b.Skipped < 0 {
+		b.Skipped = 0
+	}
 }

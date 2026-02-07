@@ -77,9 +77,6 @@ func (fl *FileLock) Release() error {
 		return fmt.Errorf("failed to close lock file: %w", err)
 	}
 
-	// Remove the lock file
-	os.Remove(fl.path)
-
 	fl.lockFile = nil
 	return nil
 }
@@ -99,7 +96,11 @@ func WithCacheLock(fn func() error) error {
 	if err != nil {
 		return fmt.Errorf("failed to acquire cache lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() {
+		if releaseErr := lock.Release(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to release lock: %v\n", releaseErr)
+		}
+	}()
 
 	// Execute the protected function
 	return fn()
