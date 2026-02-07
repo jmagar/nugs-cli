@@ -179,13 +179,13 @@ func TestIsLikelyLivestreamSegments(t *testing.T) {
 
 func TestParseRcloneProgressLine(t *testing.T) {
 	tests := []struct {
-		name       string
-		line       string
-		wantOK     bool
-		wantPct    int
-		wantSpeed  string
-		wantDone   string
-		wantTotal  string
+		name      string
+		line      string
+		wantOK    bool
+		wantPct   int
+		wantSpeed string
+		wantDone  string
+		wantTotal string
 	}{
 		{
 			name:      "valid line",

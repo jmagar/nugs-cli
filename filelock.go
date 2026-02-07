@@ -77,9 +77,6 @@ func (fl *FileLock) Release() error {
 		return fmt.Errorf("failed to close lock file: %w", err)
 	}
 
-	// Remove the lock file (ignore errors, best effort cleanup)
-	_ = os.Remove(fl.path)
-
 	fl.lockFile = nil
 	return nil
 }

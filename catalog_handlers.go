@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 // Catalog Command Handlers
@@ -29,6 +31,43 @@ func warnRemoteCheckError(err error) {
 	remoteCheckWarnOnce.Do(func() {
 		printWarning(fmt.Sprintf("Remote existence checks failed; treating as not found. First error: %v", err))
 	})
+}
+
+func listAllRemoteArtistFolders(cfg *Config) (map[string]struct{}, error) {
+	folders := make(map[string]struct{})
+	if !cfg.RcloneEnabled {
+		return folders, nil
+	}
+
+	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	cmd := exec.Command("rclone", "lsf", remoteDest, "--dirs-only")
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+			return folders, nil
+		}
+		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)
+	}
+
+	for _, line := range strings.Split(string(output), "\n") {
+		trimmed := strings.TrimSuffix(strings.TrimSpace(line), "/")
+		if trimmed == "" {
+			continue
+		}
+		folders[trimmed] = struct{}{}
+	}
+	return folders, nil
+}
+
+func normalizeArtistFolderKey(name string) string {
+	var b strings.Builder
+	b.Grow(len(name))
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 // showExists checks if a show has been downloaded locally or exists on remote storage
@@ -451,8 +490,11 @@ func catalogLatest(limit int, jsonLevel string) error {
 			if len(location) > 28 {
 				location = location[:25] + "..."
 			}
-			fmt.Printf("  %2d. %-26s %-12s %-42s %-30s\n",
+			fmt.Printf("  %2d. %s%-6d%s %-26s %-12s %-42s %-30s\n",
 				i+1,
+				colorPurple,
+				item.ArtistID,
+				colorReset,
 				artistName,
 				item.ShowDateFormattedShort,
 				title,
@@ -593,6 +635,21 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 	var failedShows []map[string]any
 	interrupted := false
 
+	// Create batch state for multi-show progress tracking (Tier 4 enhancement)
+	batchState := &BatchProgressState{
+		TotalAlbums: len(missingShows),
+		StartTime:   time.Now(),
+	}
+
+	// Create ONE progress box for the entire batch (reused across all shows)
+	sharedProgressBox := &ProgressBoxState{
+		RcloneEnabled: cfg.RcloneEnabled,
+		BatchState:    batchState,
+		StartTime:     time.Now(),
+	}
+	setCurrentProgressBox(sharedProgressBox)
+	defer setCurrentProgressBox(nil)
+
 	// Set up signal handling for graceful Ctrl+C
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt)
@@ -614,16 +671,15 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 			break
 		}
 
-		if jsonLevel == "" {
-			fmt.Printf("%s%s Downloading %d/%d:%s %s%s%s - %s\n",
-				colorBold, symbolDownload, i+1, len(missingShows), colorReset,
-				colorCyan, show.PerformanceDateShortYearFirst, colorReset,
-				show.ContainerInfo)
-		}
+		// Update batch state
+		batchState.CurrentAlbum = i + 1
+		batchState.CurrentTitle = show.ContainerInfo
 
-		err := album(fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil)
+		// Pass the shared progress box to reuse it (no new boxes created!)
+		err := album(fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
 		if err != nil {
 			failedCount++
+			batchState.Failed++
 			failedShows = append(failedShows, map[string]any{
 				"containerID": show.ContainerID,
 				"date":        show.PerformanceDateShortYearFirst,
@@ -635,6 +691,7 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 			}
 		} else {
 			successCount++
+			batchState.Complete++
 		}
 	}
 
@@ -702,16 +759,52 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 
 	// If no artist IDs provided, find all artists with downloads
 	if len(artistIds) == 0 {
-		// Get all artists from downloaded directories
+		if jsonLevel == "" {
+			printWarning("No artist IDs provided - scanning local and remote artist folders...")
+		}
+
+		discoveredArtistDirs := make(map[string]struct{})
+
+		// Local artist folders.
 		entries, err := os.ReadDir(cfg.OutPath)
-		if err != nil {
+		if err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				artistPath := filepath.Join(cfg.OutPath, entry.Name())
+				subEntries, readErr := os.ReadDir(artistPath)
+				if readErr == nil && len(subEntries) > 0 {
+					discoveredArtistDirs[entry.Name()] = struct{}{}
+				}
+			}
+		} else if !os.IsNotExist(err) {
 			return fmt.Errorf("failed to read output directory: %w", err)
 		}
 
-		// For each artist directory, we need to find their artist ID
-		// This requires checking the catalog or making API calls
-		if jsonLevel == "" {
-			printWarning("No artist IDs provided - scanning downloaded artists...")
+		// Remote artist folders (for delete-after-upload or remote-only collections).
+		remoteArtistDirs, err := listAllRemoteArtistFolders(cfg)
+		if err != nil && jsonLevel == "" {
+			printWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
+		}
+		for artistDir := range remoteArtistDirs {
+			discoveredArtistDirs[artistDir] = struct{}{}
+		}
+
+		if len(discoveredArtistDirs) == 0 {
+			if jsonLevel != "" {
+				output := map[string]any{
+					"artists": []map[string]any{},
+					"total":   0,
+					"message": "No downloaded artists found",
+				}
+				if err := printJSON(output); err != nil {
+					return err
+				}
+			} else {
+				fmt.Println("No downloaded artists found in local output or remote storage")
+			}
+			return nil
 		}
 
 		// Read catalog to get artist mappings
@@ -720,27 +813,37 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 			return fmt.Errorf("failed to read catalog cache (run 'nugs catalog update' first): %w", err)
 		}
 
-		// Build artist name -> ID mapping
+		// Build artist folder -> ID mapping
 		artistMapping := make(map[string]string)
+		artistMappingNormalized := make(map[string]string)
 		for _, item := range catalog.Response.RecentItems {
 			normalizedName := sanitise(item.ArtistName)
-			artistMapping[normalizedName] = fmt.Sprintf("%d", item.ArtistID)
+			artistID := fmt.Sprintf("%d", item.ArtistID)
+			artistMapping[normalizedName] = artistID
+			artistMappingNormalized[normalizeArtistFolderKey(normalizedName)] = artistID
 		}
 
-		// Check each directory
-		for _, entry := range entries {
-			if !entry.IsDir() {
+		artistIDSet := make(map[string]struct{})
+		unmatchedCount := 0
+		for artistDir := range discoveredArtistDirs {
+			if artistID, found := artistMapping[artistDir]; found {
+				artistIDSet[artistID] = struct{}{}
 				continue
 			}
-			artistDir := entry.Name()
-			if artistID, found := artistMapping[artistDir]; found {
-				// Check if there are any downloads
-				artistPath := filepath.Join(cfg.OutPath, artistDir)
-				subEntries, _ := os.ReadDir(artistPath)
-				if len(subEntries) > 0 {
-					artistIds = append(artistIds, artistID)
-				}
+			if artistID, found := artistMappingNormalized[normalizeArtistFolderKey(artistDir)]; found {
+				artistIDSet[artistID] = struct{}{}
+				continue
 			}
+			unmatchedCount++
+		}
+
+		for artistID := range artistIDSet {
+			artistIds = append(artistIds, artistID)
+		}
+		sort.Strings(artistIds)
+
+		if unmatchedCount > 0 && jsonLevel == "" {
+			printWarning(fmt.Sprintf("Skipped %d unmatched artist folder(s) not found in catalog mapping", unmatchedCount))
 		}
 
 		if len(artistIds) == 0 {
@@ -784,6 +887,17 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 		return allStats[i].coveragePct > allStats[j].coveragePct
 	})
 
+	totalShows := 0
+	totalDownloaded := 0
+	for _, stats := range allStats {
+		totalShows += stats.totalShows
+		totalDownloaded += stats.downloadedCount
+	}
+	totalCoveragePct := 0.0
+	if totalShows > 0 {
+		totalCoveragePct = (float64(totalDownloaded) / float64(totalShows)) * 100
+	}
+
 	// Output results
 	if jsonLevel != "" {
 		artistsData := make([]map[string]any, len(allStats))
@@ -800,12 +914,21 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 		output := map[string]any{
 			"artists": artistsData,
 			"total":   len(allStats),
+			"summary": map[string]any{
+				"downloaded": totalDownloaded,
+				"totalShows": totalShows,
+				"missing":    totalShows - totalDownloaded,
+				"coverage":   totalCoveragePct,
+			},
 		}
 		if err := printJSON(output); err != nil {
 			return err
 		}
 	} else {
 		printHeader("Download Coverage Statistics")
+		printKeyValue("Artists", fmt.Sprintf("%d", len(allStats)), colorCyan)
+		printKeyValue("Overall", fmt.Sprintf("%d/%d (%.1f%%)", totalDownloaded, totalShows, totalCoveragePct), colorGreen)
+		fmt.Println()
 
 		table := NewTable([]TableColumn{
 			{Header: "Artist ID", Width: 12, Align: "right"},

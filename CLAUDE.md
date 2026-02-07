@@ -58,6 +58,7 @@ Nugs CLI is a Go-based command-line tool for downloading and managing music from
 ### Build Commands
 
 **Using Make (recommended):**
+
 ```bash
 make build
 ```
@@ -65,6 +66,7 @@ make build
 This builds the binary and installs it to `~/.local/bin/nugs`.
 
 **Manual build:**
+
 ```bash
 # Build only
 go build -o nugs
@@ -80,6 +82,7 @@ GOOS=windows GOARCH=amd64 go build -o nugs-windows-amd64.exe
 ```
 
 **Clean build artifacts:**
+
 ```bash
 make clean
 ```
@@ -155,6 +158,7 @@ Config files are searched in this order:
 3. `~/.config/nugs/config.json` (XDG standard)
 
 **Reading Config:**
+
 ```go
 func readConfig() (*Config, error) {
     // Checks all three locations in order
@@ -170,6 +174,7 @@ func readConfig() (*Config, error) {
 - `catalogRefreshInterval`: `"daily"`
 
 **Writing Config:**
+
 ```go
 func writeConfig(cfg *Config) error {
     // Always writes to ./config.json
@@ -180,6 +185,7 @@ func writeConfig(cfg *Config) error {
 ### Cache Management
 
 **Cache Structure:**
+
 ```
 ~/.cache/nugs/
 ├── catalog.json           # Full show metadata (7-8 MB)
@@ -189,6 +195,7 @@ func writeConfig(cfg *Config) error {
 ```
 
 **Cache I/O:**
+
 ```go
 // Read cache with automatic fallback
 catalog, err := readCatalogCache()
@@ -207,6 +214,7 @@ os.Rename(tmpPath, cachePath)  // Atomic!
 **Why:** Prevents cache corruption when multiple `nugs` processes run concurrently.
 
 **Implementation:**
+
 ```go
 // Acquire lock (POSIX flock with retry)
 lock, err := AcquireLock(lockPath, 50)  // 50 retries = 5s timeout
@@ -232,6 +240,7 @@ err := WithCacheLock(func() error {
 - `raw` - Unmodified API response
 
 **Implementation:**
+
 ```go
 if jsonLevel != "" {
     // Suppress banner/headers
@@ -246,6 +255,7 @@ if jsonLevel != "" {
 ### API Integration
 
 **Authentication:**
+
 ```go
 // Login with email/password
 token, err := auth(email, password)
@@ -255,6 +265,7 @@ token := cfg.Token
 ```
 
 **Catalog API:**
+
 ```go
 // Fetch latest catalog
 resp, err := http.Get("https://play.nugs.net/api/v1/catalog.latest")
@@ -265,6 +276,7 @@ json.NewDecoder(resp.Body).Decode(&catalog)
 ### Rclone Integration
 
 **Upload after download:**
+
 ```go
 if cfg.RcloneEnabled {
     remotePath := cfg.RclonePath + "/" + albumFolder
@@ -279,6 +291,7 @@ if cfg.RcloneEnabled {
 ```
 
 **Gap detection with rclone:**
+
 ```go
 // Check local path first
 if sanitise(localPath) {
@@ -299,6 +312,7 @@ if cfg.RcloneEnabled && remotePathExists(remotePath, cfg) {
 ### Manual Testing
 
 **Build and test:**
+
 ```bash
 # Build
 make build
@@ -356,6 +370,7 @@ nugs refresh set
 - Handle errors explicitly
 
 **Example:**
+
 ```go
 // catalogUpdate fetches the latest catalog from Nugs.net API
 // and updates the local cache at ~/.cache/nugs/
@@ -385,6 +400,7 @@ func catalogUpdate(jsonLevel string) error {
 3. **Make your changes**
 4. **Test thoroughly** (see Testing section above)
 5. **Commit with clear messages:**
+
    ```
    Add gap detection for missing shows
 
@@ -392,6 +408,7 @@ func catalogUpdate(jsonLevel string) error {
    - Check both local and remote paths
    - Support --ids-only flag for piping
    ```
+
 6. **Push to your fork:** `git push origin feature/your-feature`
 7. **Open a Pull Request** with:
    - Clear description of changes
@@ -401,6 +418,7 @@ func catalogUpdate(jsonLevel string) error {
 ### Commit Guidelines
 
 **Format:**
+
 ```
 <type>: <short summary>
 
@@ -418,6 +436,7 @@ func catalogUpdate(jsonLevel string) error {
 - `chore:` - Build/tooling changes
 
 **Examples:**
+
 ```
 feat: Add catalog auto-refresh system
 
@@ -443,6 +462,55 @@ when multiple nugs processes run simultaneously.
 ---
 
 ## Recent Improvements
+
+### Shell Completions (2026-02-06)
+
+**Implemented:**
+- `nugs completion <shell>` - Generate shell-specific completion scripts
+- Support for bash, zsh, fish, and PowerShell
+- Comprehensive command, flag, and argument completions
+
+**Features:**
+- Auto-complete all commands: `list`, `catalog`, `status`, `cancel`, `completion`, `help`
+- Auto-complete catalog subcommands: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `config`
+- Auto-complete flags: `-f`, `-F`, `-o`, `--json`, `--force-video`, etc.
+- Context-aware completions (e.g., format values 1-5, JSON levels)
+- Shell-specific installation instructions included in output
+
+**Files Created:**
+- `completions.go` (430 lines) - Completion script generators for all supported shells
+
+**Files Modified:**
+- `main.go` - Added completion command dispatcher (line ~3885)
+- `detach_common.go` - Added "completion" to read-only commands list
+- `README.md` - Added Shell Completions section with installation instructions
+- `CLAUDE.md` - This documentation
+
+**Installation:**
+```bash
+# Bash
+nugs completion bash > ~/.bash_completion.d/nugs
+
+# Zsh (vanilla)
+nugs completion zsh > ~/.zsh/completion/_nugs
+
+# Zsh (oh-my-zsh) - most common setup
+mkdir -p ~/.oh-my-zsh/custom/completions
+nugs completion zsh > ~/.oh-my-zsh/custom/completions/_nugs
+# Add to .zshrc BEFORE oh-my-zsh.sh: fpath=($ZSH/custom/completions $fpath)
+
+# Fish
+nugs completion fish > ~/.config/fish/completions/nugs.fish
+
+# PowerShell
+nugs completion powershell >> $PROFILE
+```
+
+**Benefits:**
+- Faster command discovery and reduced typos
+- Tab-complete artist IDs, format codes, and flags
+- Shell-native completion behavior
+- Zero dependencies (pure Go string constants)
 
 ### Artist Catalog Shortcuts (2026-02-05)
 
@@ -509,6 +577,7 @@ The `rclonePath` configuration field in `config.json` specifies the **remote sto
 - **Artist folder structure:** Preserved in both local and remote locations
 
 **Example:**
+
 ```json
 {
   "outPath": "/home/user/Music",
@@ -533,6 +602,7 @@ Uploads to: `gdrive:/Music/Artist Name/Album/`
 **⚠️ BREAKING CHANGE:** The `rclonePath` field no longer affects local download paths.
 
 **Previous Behavior (before 2026-02-05):**
+
 ```go
 // rclonePath was used as a fallback for local base path
 basePath := cfg.OutPath
@@ -542,6 +612,7 @@ if cfg.RclonePath != "" {
 ```
 
 **New Behavior (after 2026-02-05):**
+
 ```go
 // rclonePath ONLY affects remote storage uploads
 basePath := cfg.OutPath  // Always use outPath for local downloads
@@ -557,6 +628,7 @@ If you previously set `rclonePath` expecting it to control local download locati
    - Keep `rclonePath` for the remote storage path only
 
 2. **Example migration:**
+
    ```json
    // OLD CONFIG (relied on rclonePath for local paths)
    {
@@ -609,6 +681,7 @@ See `.docs/catalog-future-enhancements-plan.md` for detailed roadmap including:
 ### Build Issues
 
 **"command not found: make"**
+
 ```bash
 # Install make
 sudo apt install make  # Linux
@@ -616,6 +689,7 @@ brew install make      # macOS
 ```
 
 **"package not found"**
+
 ```bash
 # Update Go modules
 go mod tidy
@@ -630,6 +704,7 @@ go mod download
 - Keep config in current directory during development
 
 **Cache permission errors:**
+
 ```bash
 # Fix cache directory permissions
 chmod -R 755 ~/.cache/nugs

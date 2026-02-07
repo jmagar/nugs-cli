@@ -30,6 +30,7 @@ Built for Deadheads, jam band fans, and anyone who wants their live music collec
   - [Watch Command](#watch-command)
 - [FFmpeg Setup](#ffmpeg-setup)
 - [Command Reference](#command-reference)
+  - [Shell Completions](#shell-completions)
 - [Examples](#examples)
 - [Troubleshooting](#troubleshooting)
 - [Disclaimer](#disclaimer)
@@ -92,6 +93,7 @@ The binary installs to `~/.local/bin/nugs` (already in your PATH).
 Alright, let's get you downloading shows in about 2 minutes.
 
 **Step 1: Run initial setup** (displays welcome screen and creates config):
+
 ```bash
 nugs
 ```
@@ -111,15 +113,16 @@ nugs
 ```
 
 > **🔒 Security:** After creating your config, set secure permissions: `chmod 600 ~/.nugs/config.json`
-
 > **💡 Tip:** Most folks use `format: 2` (FLAC) for the best quality-to-size ratio.
 
 **Step 3: Download your first show**:
+
 ```bash
 nugs grab 23329
 ```
 
 **Step 4: Browse the catalog**:
+
 ```bash
 nugs list
 nugs list 1125  # Billy Strings
@@ -185,6 +188,7 @@ On first run, you'll be prompted to create it.
 | `catalogRefreshInterval` | Refresh frequency | `"daily"` |
 
 Auto-refresh is **enabled by default** to keep your catalog up-to-date. Configure via commands:
+
 ```bash
 nugs refresh set      # Change schedule (time/timezone/interval)
 nugs refresh disable  # Disable auto-refresh
@@ -218,34 +222,40 @@ nugs refresh enable   # Re-enable with current settings
 Let's get to the good stuff - actually downloading music.
 
 **Download single album:**
+
 ```bash
 nugs grab 23329
 nugs grab https://play.nugs.net/release/23329
 ```
 
 **Download multiple albums:**
+
 ```bash
 nugs grab 23329 23790 24105
 ```
 
 **Download from text file:**
+
 ```bash
 nugs /path/to/urls.txt
 ```
 
 **Download artist's latest shows:**
+
 ```bash
 nugs grab 1125 latest  # Billy Strings
 nugs grab 461 latest   # Grateful Dead
 ```
 
 **Download entire artist catalog:**
+
 ```bash
 nugs 1125 full  # Billy Strings - all shows
 nugs 461 full   # Grateful Dead - complete catalog
 ```
 
 **Override quality settings:**
+
 ```bash
 nugs grab -f 3 23329               # MQA quality
 nugs -F 5 video-url                # 4K video
@@ -257,17 +267,20 @@ nugs grab -o /mnt/storage/music 23329  # Custom output path
 ### Browse & List
 
 **List all artists:**
+
 ```bash
 nugs list
 ```
 
 **View artist's shows:**
+
 ```bash
 nugs list 1125  # Billy Strings
 nugs list 461   # Grateful Dead
 ```
 
 **Filter and search shows:**
+
 ```bash
 # Filter shows by venue
 nugs list 461 "Red Rocks"
@@ -292,12 +305,14 @@ Want to browse Nugs.net's 13,000+ shows offline? The catalog system has you cove
 #### Update Catalog
 
 **Fetch latest catalog** (updates cache with current Nugs.net catalog):
+
 ```bash
 nugs update
 ```
 
 Output:
-```
+
+```text
 ✓ Catalog updated successfully
   Total shows: 13,253
   Update time: 1 seconds
@@ -307,12 +322,14 @@ Output:
 #### Cache Status
 
 **View cache information:**
+
 ```bash
 nugs cache
 ```
 
 Output:
-```
+
+```text
 Catalog Cache Status:
 
   Location:     /home/user/.cache/nugs
@@ -326,12 +343,14 @@ Catalog Cache Status:
 #### Statistics
 
 **View catalog statistics:**
+
 ```bash
 nugs stats
 ```
 
 Output:
-```
+
+```text
 Catalog Statistics:
 
   Total Shows:    13,253
@@ -351,13 +370,15 @@ Top 10 Artists by Show Count:
 #### Latest Additions
 
 **View recently added shows:**
+
 ```bash
 nugs latest       # Default: 15 shows
 nugs latest 50    # Show 50 most recent
 ```
 
 Output:
-```
+
+```text
 Latest 15 Shows in Catalog:
 
    1. Daniel Donato         02/03/26    02/03/26 Missoula, MT
@@ -369,13 +390,15 @@ Latest 15 Shows in Catalog:
 #### Gap Detection
 
 **Find missing shows in your collection:**
+
 ```bash
 nugs gaps 1125  # Billy Strings
 nugs gaps 1125 461 1045  # Multiple artists at once
 ```
 
 Output:
-```
+
+```text
   ID       Date         Title
   ────────────────────────────────────────────────────────────
   46385    12/14/25     12/14/25 ACL Live Austin, TX
@@ -384,6 +407,7 @@ Output:
 ```
 
 **Get IDs only for piping:**
+
 ```bash
 nugs gaps 1125 --ids-only
 # Output: 46385
@@ -398,12 +422,14 @@ nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs grab
 ```
 
 **Auto-download all missing shows:**
+
 ```bash
 nugs gaps 1045 fill
 ```
 
 Output:
-```
+
+```text
 Filling Gaps: Phish
 
   Total Missing:    234 shows
@@ -421,6 +447,7 @@ Download Summary:
 #### Coverage Statistics
 
 **Check download coverage for artists:**
+
 ```bash
 # Single artist
 nugs coverage 1125
@@ -433,7 +460,8 @@ nugs coverage
 ```
 
 Output:
-```
+
+```text
 Download Coverage Statistics
 
   Artist ID    Artist Name                              Downloaded    Total    Coverage
@@ -456,6 +484,7 @@ All catalog commands support `--json <level>` for machine-readable output. Advan
 - `raw` - Unmodified API response
 
 **Example:**
+
 ```bash
 # Get cache status as JSON
 nugs cache --json standard
@@ -473,6 +502,7 @@ nugs stats --json standard | jq '.topArtists[:3]'
 The catalog cache automatically updates on a schedule. **Auto-refresh is enabled by default** (5am EST, daily).
 
 **Configure custom schedule:**
+
 ```bash
 nugs refresh set
 # Enter refresh time: 03:00
@@ -481,11 +511,13 @@ nugs refresh set
 ```
 
 **Disable auto-refresh:**
+
 ```bash
 nugs refresh disable
 ```
 
 **Re-enable auto-refresh:**
+
 ```bash
 nugs refresh enable
 ```
@@ -500,11 +532,13 @@ nugs refresh enable
 Find shows you haven't downloaded yet:
 
 **Basic gap detection:**
+
 ```bash
 nugs gaps 1125  # Shows you're missing
 ```
 
 **Integration with downloads:**
+
 ```bash
 # Download all missing shows
 nugs gaps 1125 --ids-only | xargs -n1 nugs grab
@@ -520,6 +554,7 @@ nugs gaps 1125 --ids-only > billy-gaps.txt
 ```
 
 **Check multiple artists:**
+
 ```bash
 # All at once
 nugs gaps 1125 461 1045
@@ -536,6 +571,7 @@ done
 Automatically upload downloads to cloud storage (Google Drive, Dropbox, etc.):
 
 **1. Install and configure rclone:**
+
 ```bash
 # Install rclone
 curl https://rclone.org/install.sh | sudo bash
@@ -545,6 +581,7 @@ rclone config
 ```
 
 **2. Enable in Nugs config** (`~/.nugs/config.json`):
+
 ```json
 {
   "rcloneEnabled": true,
@@ -556,6 +593,7 @@ rclone config
 ```
 
 **3. Download and upload automatically:**
+
 ```bash
 nugs grab 23329  # Downloads and uploads to gdrive:/Music/Nugs/
 ```
@@ -578,6 +616,7 @@ The `nugs watch <artist_id>` command is in development and will provide automate
 - **Notification support**: Get notified when new shows are downloaded
 
 **Example usage:**
+
 ```bash
 # Watch Billy Strings for new shows
 nugs watch 1125
@@ -605,11 +644,13 @@ FFmpeg is required for:
 ### Installation
 
 **Linux:**
+
 ```bash
 sudo apt install ffmpeg
 ```
 
 **macOS:**
+
 ```bash
 brew install ffmpeg
 ```
@@ -619,6 +660,7 @@ brew install ffmpeg
 2. Extract and add to PATH, or place in Nugs directory
 
 **Termux (Android):**
+
 ```bash
 pkg install ffmpeg
 ```
@@ -626,6 +668,7 @@ pkg install ffmpeg
 ### Configuration
 
 **Use FFmpeg from PATH** (recommended):
+
 ```json
 {
   "useFfmpegEnvVar": true
@@ -633,11 +676,13 @@ pkg install ffmpeg
 ```
 
 **Use FFmpeg from script directory** (if you can't install system-wide):
+
 ```json
 {
   "useFfmpegEnvVar": false
 }
 ```
+
 Just drop the `ffmpeg` binary in the same directory as `nugs`.
 
 ---
@@ -669,6 +714,7 @@ nugs list <artist_id> --json <level>         # JSON output
 ```
 
 **Examples:**
+
 ```bash
 # List latest 5 shows from Billy Strings
 nugs list 1125 latest 5
@@ -709,11 +755,82 @@ nugs refresh set                   # Configure auto-refresh
 --help, -h           Show help
 ```
 
+### Shell Completions
+
+Enable tab completion for commands, flags, and arguments in your shell:
+
+**Bash:**
+```bash
+# Install system-wide
+sudo nugs completion bash > /etc/bash_completion.d/nugs
+
+# Or user-only
+nugs completion bash > ~/.bash_completion.d/nugs
+source ~/.bashrc
+```
+
+**Zsh (vanilla):**
+```bash
+# Create completion directory if needed
+mkdir -p ~/.zsh/completion
+
+# Install completion
+nugs completion zsh > ~/.zsh/completion/_nugs
+
+# Add to ~/.zshrc if not already present
+echo 'fpath=(~/.zsh/completion $fpath)' >> ~/.zshrc
+echo 'autoload -Uz compinit && compinit' >> ~/.zshrc
+
+# Reload shell
+source ~/.zshrc
+```
+
+**Zsh (oh-my-zsh):**
+```bash
+# Install to oh-my-zsh custom directory
+mkdir -p ~/.oh-my-zsh/custom/completions
+nugs completion zsh > ~/.oh-my-zsh/custom/completions/_nugs
+
+# Add to your .zshrc BEFORE oh-my-zsh.sh is sourced
+# (Add this line before the "source $ZSH/oh-my-zsh.sh" line)
+fpath=($ZSH/custom/completions $fpath)
+
+# Reload shell
+exec zsh
+```
+
+**Fish:**
+```bash
+# Install completion
+nugs completion fish > ~/.config/fish/completions/nugs.fish
+
+# Reload completions
+source ~/.config/fish/completions/nugs.fish
+```
+
+**PowerShell:**
+```powershell
+# Add to PowerShell profile
+nugs completion powershell >> $PROFILE
+
+# Reload profile
+. $PROFILE
+```
+
+**Completions include:**
+- Commands: `list`, `catalog`, `status`, `cancel`, `completion`, `help`
+- Catalog subcommands: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `config`
+- Flags: `-f`, `-F`, `-o`, `--json`, `--force-video`, etc.
+- Format values: `1-5` for audio/video formats
+- JSON levels: `minimal`, `standard`, `extended`, `raw`
+- Shell types: `bash`, `zsh`, `fish`, `powershell`
+
 ---
 
 ## Examples
 
 ### Example 1: Download Billy Strings Shows
+
 ```bash
 # Latest shows only
 nugs grab 1125 latest
@@ -726,6 +843,7 @@ nugs grab 23329
 ```
 
 ### Example 2: Find and Download Missing Dead & Company Shows
+
 ```bash
 # See what you're missing
 nugs gaps 1045
@@ -738,6 +856,7 @@ nugs gaps 1045 --ids-only | head -10 | xargs -n1 nugs grab
 ```
 
 ### Example 3: Batch Download from File
+
 ```bash
 # Create a file with show IDs
 cat > shows.txt << EOF
@@ -751,6 +870,7 @@ nugs shows.txt
 ```
 
 ### Example 4: Find All Red Rocks Shows
+
 ```bash
 # Filter shows by venue (case-insensitive)
 nugs list 1125 "Red Rocks"
@@ -762,6 +882,7 @@ nugs list 1125 --json standard | \
 ```
 
 ### Example 5: Daily Catalog Update Script
+
 ```bash
 #!/bin/bash
 # daily-catalog-update.sh
@@ -774,6 +895,7 @@ nugs stats
 ```
 
 ### Example 6: Check Collection Coverage
+
 ```bash
 # Get coverage stats for your favorite artists (coming soon)
 nugs coverage

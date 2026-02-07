@@ -1,0 +1,69 @@
+{
+  "description": "Complete hooks reference for nugs CLI - copy sections to .claude/settings.local.json as needed",
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(gofmt:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(rclone:*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "(Edit|Write)",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Check if the file path matches config.json, .env, .env.*, or anything in .cache/. If it does, respond with: DENY - Cannot edit config.json or .env files - these contain secrets. Edit config.example.json or .env.example instead. Otherwise respond with: ALLOW"
+          },
+          {
+            "type": "prompt",
+            "prompt": "If the file path is 'Makefile', respond with: ASK - Makefile contains production build logic. Confirm changes? Otherwise respond with: ALLOW"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "(Edit|Write)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [[ '{{file_path}}' == *.go ]]; then gofmt -w '{{file_path}}'; fi",
+            "statusMessage": "Formatting Go code..."
+          },
+          {
+            "type": "command",
+            "command": "if [[ '{{file_path}}' == *.go ]]; then go vet '{{file_path}}' 2>&1 | grep -v '^#' || true; fi",
+            "statusMessage": "Running go vet..."
+          },
+          {
+            "type": "command",
+            "command": "if [[ '{{file_path}}' == *.go && '{{file_path}}' != *_test.go ]]; then test_file=\"${{{file_path}}%.go}_test.go\"; if [ -f \"$test_file\" ]; then go test -run \"$(basename ${{{file_path}}%.go})\" -v 2>&1 || true; fi; fi",
+            "statusMessage": "Running related tests...",
+            "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "if [[ '{{file_path}}' == *.go ]]; then go mod tidy 2>&1 || true; fi",
+            "statusMessage": "Tidying go.mod...",
+            "async": true
+          }
+        ]
+      },
+      {
+        "matcher": "Bash(git commit:*)",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "mkdir -p .docs/sessions && echo \"[$(date '+%Y-%m-%d %H:%M:%S')] Commit: $1\" >> .docs/sessions/$(date '+%Y-%m-%d')-session.log",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

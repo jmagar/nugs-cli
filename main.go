@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"encoding/base64"
@@ -69,6 +70,7 @@ var loadedConfigPath string
 var runErrorCount int
 var runWarningCount int
 
+
 var regexStrings = []string{
 	`^https://play.nugs.net/release/(\d+)$`,
 	`^https://play.nugs.net/#/playlists/playlist/(\d+)$`,
@@ -119,6 +121,9 @@ var resFallback = map[string]string{
 }
 
 func (wc *WriteCounter) Write(p []byte) (int, error) {
+	if err := waitIfPausedOrCancelled(); err != nil {
+		return 0, err
+	}
 	var speed int64 = 0
 	n := len(p)
 	wc.Downloaded += int64(n)
@@ -278,6 +283,96 @@ func checkRcloneAvailable(quiet bool) error {
 	}
 
 	return nil
+}
+
+func describeAudioFormat(format int) string {
+	switch format {
+	case 1:
+		return "ALAC 16-bit/44.1kHz"
+	case 2:
+		return "FLAC 16-bit/44.1kHz"
+	case 3:
+		return "MQA 24-bit/48kHz"
+	case 4:
+		return "360 Reality Audio"
+	case 5:
+		return "AAC 150kbps"
+	default:
+		return fmt.Sprintf("Unknown (%d)", format)
+	}
+}
+
+func describeVideoFormat(videoFormat int) string {
+	switch videoFormat {
+	case 1:
+		return "480p"
+	case 2:
+		return "720p"
+	case 3:
+		return "1080p"
+	case 4:
+		return "1440p"
+	case 5:
+		return "4K / best"
+	default:
+		return fmt.Sprintf("Unknown (%d)", videoFormat)
+	}
+}
+
+func describeAuthStatus(cfg *Config) string {
+	if strings.TrimSpace(cfg.Token) != "" {
+		return "Configured (token)"
+	}
+	if strings.TrimSpace(cfg.Email) != "" && strings.TrimSpace(cfg.Password) != "" {
+		return "Configured (email/password)"
+	}
+	if strings.TrimSpace(cfg.Email) != "" {
+		return "Partial (email only)"
+	}
+	return "Not configured"
+}
+
+func checkRclonePathOnline(cfg *Config) string {
+	if !cfg.RcloneEnabled {
+		return "Disabled"
+	}
+	if strings.TrimSpace(cfg.RcloneRemote) == "" {
+		return "Offline (remote not configured)"
+	}
+	target := cfg.RcloneRemote + ":" + cfg.RclonePath
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "rclone", "lsf", target)
+	err := cmd.Run()
+	if err == nil {
+		return "Online"
+	}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "Offline (timeout)"
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+		// Path missing, but remote is reachable/authenticated.
+		return "Online (path missing)"
+	}
+	return "Offline"
+}
+
+func printStartupEnvironment(cfg *Config, jsonLevel string) {
+	if jsonLevel != "" {
+		return
+	}
+	printSection("Environment")
+	printKeyValue("Auth", describeAuthStatus(cfg), colorYellow)
+	printKeyValue("Audio Format", describeAudioFormat(cfg.Format), colorYellow)
+	printKeyValue("Video Format", describeVideoFormat(cfg.VideoFormat), colorYellow)
+	printKeyValue("Output", cfg.OutPath, colorCyan)
+	rclonePath := "Disabled"
+	if cfg.RcloneEnabled {
+		rclonePath = fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+	}
+	printKeyValue("Rclone Path", rclonePath, colorCyan)
+	printKeyValue("Rclone Status", checkRclonePathOnline(cfg), colorYellow)
+	fmt.Println("")
 }
 
 func promptForConfig() error {
@@ -453,6 +548,28 @@ func validatePath(path string) error {
 	return nil
 }
 
+// calculateLocalSize walks the directory tree and calculates total size in bytes (Tier 1 enhancement)
+// Returns the total size of all files in the directory, or 0 if an error occurs
+func calculateLocalSize(localPath string) int64 {
+	var totalSize int64
+	
+	err := filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors, continue walking
+		}
+		if !info.IsDir() {
+			totalSize += info.Size()
+		}
+		return nil
+	})
+	
+	if err != nil {
+		return 0
+	}
+	
+	return totalSize
+}
+
 // uploadToRclone uploads the local directory at localPath to the configured rclone remote.
 // If cfg.RcloneEnabled is false, the function returns immediately without error.
 // The function uses cfg.RcloneTransfers (default 4) for parallel transfers and can
@@ -462,7 +579,7 @@ func validatePath(path string) error {
 //   - rclone copy command fails
 //   - Upload verification fails (requires rclone check command)
 //   - Local file deletion fails after successful upload
-func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
+func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState) error {
 	if !cfg.RcloneEnabled {
 		return nil
 	}
@@ -490,18 +607,76 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 		return err
 	}
 
-	printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteFullPath, colorReset))
-	err = runRcloneWithProgress(cmd)
+	// Calculate local directory size for upload progress (Tier 1 enhancement)
+	if progressBox != nil {
+		totalBytes := calculateLocalSize(localPath)
+		if totalBytes > 0 {
+			// Convert bytes to human-readable format (GB, MB, etc.)
+			progressBox.UploadTotal = humanize.Bytes(uint64(totalBytes))
+			// Initialize upload progress to show "0/X GB" instead of "0/.../0%"
+			progressBox.Uploaded = "0 B"
+			progressBox.UploadPercent = 0
+		}
+	}
+
+	if progressBox != nil {
+		// Use progress box for upload progress with ETA
+		uploadProgress := func(percent int, speed, uploaded, total string) {
+			// Lock for atomic update of upload progress fields
+			progressBox.mu.Lock()
+			progressBox.UploadPercent = percent
+			progressBox.UploadSpeed = speed
+			progressBox.Uploaded = uploaded
+			// Only update UploadTotal if pre-calculated value isn't set or rclone provides a real value
+			if progressBox.UploadTotal == "" || (total != "" && total != "...") {
+				progressBox.UploadTotal = total
+			}
+
+			// Calculate upload ETA
+			if percent < 100 && percent > 0 {
+				// Parse speed string (e.g., "8.2 MB" -> bytes per second)
+				speedBytes := parseHumanizedBytes(speed)
+				if speedBytes > 0 {
+					// Thread-safe: now stored in ProgressBoxState (protected by mutex)
+					progressBox.UploadSpeedHistory = updateSpeedHistory(progressBox.UploadSpeedHistory, float64(speedBytes))
+
+					// Calculate remaining bytes
+					totalBytes := parseHumanizedBytes(total)
+					uploadedBytes := parseHumanizedBytes(uploaded)
+					if totalBytes > 0 && uploadedBytes > 0 {
+						remaining := totalBytes - uploadedBytes
+						progressBox.UploadETA = calculateETA(progressBox.UploadSpeedHistory, remaining)
+					}
+				}
+			} else {
+				progressBox.UploadETA = ""
+			}
+			progressBox.mu.Unlock()
+
+			// Render outside lock to avoid holding during I/O
+			renderProgressBox(progressBox)
+		}
+		err = runRcloneWithProgress(cmd, uploadProgress)
+	} else {
+		// Fallback to old style progress
+		printUpload(fmt.Sprintf("Uploading to %s%s%s...", colorBold, remoteFullPath, colorReset))
+		err = runRcloneWithProgress(cmd, nil)
+		fmt.Println("")
+	}
+
 	if err != nil {
 		return fmt.Errorf("rclone upload failed: %w", err)
 	}
-	fmt.Println("")
 
-	printSuccess("Upload complete!")
+	if progressBox == nil {
+		printSuccess("Upload complete!")
+	}
 
 	if cfg.DeleteAfterUpload {
 		// Verify upload before deleting local files
-		printInfo("Verifying upload integrity...")
+		if progressBox == nil {
+			printInfo("Verifying upload integrity...")
+		}
 		verifyCmd, err := buildRcloneVerifyCommand(localPath, remoteFullPath)
 		if err != nil {
 			return fmt.Errorf("failed to build upload verification command: %w", err)
@@ -516,13 +691,17 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config) error {
 				err, verifyOut.String(), verifyErr.String())
 		}
 
-		printSuccess("Upload verified successfully")
-		fmt.Printf("Deleting local files: %s\n", localPath)
+		if progressBox == nil {
+			printSuccess("Upload verified successfully")
+			fmt.Printf("Deleting local files: %s\n", localPath)
+		}
 		err = os.RemoveAll(localPath)
 		if err != nil {
 			return fmt.Errorf("failed to delete local files: %w", err)
 		}
-		printSuccess("Local files deleted")
+		if progressBox == nil {
+			printSuccess("Local files deleted")
+		}
 	}
 
 	return nil
@@ -554,32 +733,134 @@ func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, trans
 	return exec.Command("rclone", args...), remoteFullPath, nil
 }
 
-var rcloneTransferredRegex = regexp.MustCompile(`Transferred:\s*([^,]+),\s*(\d{1,3})%.*?,\s*([^,]+/s)`)
+
+// parseHumanizedBytes converts a human-readable byte string (e.g., "8.2 MB") back to bytes
+// Returns 0 if parsing fails
+func parseHumanizedBytes(s string) int64 {
+	// Remove "/s" suffix if present
+	s = strings.TrimSuffix(s, "/s")
+	s = strings.TrimSpace(s)
+	
+	// Try to parse using humanize library's reverse function
+	// Note: go-humanize doesn't have a built-in parser, so we'll do it manually
+	parts := strings.Fields(s)
+	if len(parts) != 2 {
+		return 0
+	}
+	
+	value := 0.0
+	if _, err := fmt.Sscanf(parts[0], "%f", &value); err != nil {
+		return 0
+	}
+	
+	unit := strings.ToUpper(parts[1])
+	multiplier := int64(1)
+	
+	switch unit {
+	case "B":
+		multiplier = 1
+	case "KB", "KIB":
+		multiplier = 1024
+	case "MB", "MIB":
+		multiplier = 1024 * 1024
+	case "GB", "GIB":
+		multiplier = 1024 * 1024 * 1024
+	case "TB", "TIB":
+		multiplier = 1024 * 1024 * 1024 * 1024
+	default:
+		return 0
+	}
+	
+	return int64(value * float64(multiplier))
+}
 
 func parseRcloneProgressLine(line string) (int, string, string, string, bool) {
-	line = strings.TrimSpace(line)
+	line = strings.TrimSpace(stripAnsiCodes(line))
 	if line == "" {
 		return 0, "", "", "", false
 	}
-	match := rcloneTransferredRegex.FindStringSubmatch(line)
-	if len(match) != 4 {
+	idx := strings.Index(line, "Transferred:")
+	if idx < 0 {
 		return 0, "", "", "", false
 	}
-	parts := strings.SplitN(strings.TrimSpace(match[1]), "/", 2)
-	if len(parts) != 2 {
+	segment := strings.TrimSpace(line[idx+len("Transferred:"):])
+	fields := strings.Split(segment, ",")
+	if len(fields) < 2 {
 		return 0, "", "", "", false
 	}
-	percent, err := strconv.Atoi(strings.TrimSpace(match[2]))
-	if err != nil {
+	transferredPart := strings.Join(strings.Fields(strings.TrimSpace(fields[0])), " ")
+	var uploaded string
+	var total string
+	if slashIdx := strings.Index(transferredPart, " / "); slashIdx >= 0 {
+		uploaded = strings.TrimSpace(transferredPart[:slashIdx])
+		total = strings.TrimSpace(transferredPart[slashIdx+3:])
+	} else {
+		parts := strings.SplitN(transferredPart, "/", 2)
+		if len(parts) != 2 {
+			return 0, "", "", "", false
+		}
+		uploaded = strings.TrimSpace(parts[0])
+		total = strings.TrimSpace(parts[1])
+	}
+	if uploaded == "" || total == "" {
 		return 0, "", "", "", false
 	}
-	uploaded := strings.TrimSpace(parts[0])
-	total := strings.TrimSpace(parts[1])
-	speed := strings.TrimSpace(match[3])
+
+	percent := -1
+	for _, field := range fields[1:] {
+		part := strings.TrimSpace(field)
+		if strings.HasSuffix(part, "%") {
+			num := strings.TrimSuffix(part, "%")
+			if parsed, err := strconv.Atoi(strings.TrimSpace(num)); err == nil {
+				percent = parsed
+				break
+			}
+		}
+	}
+	if percent < 0 {
+		if computed, ok := computeProgressPercent(uploaded, total); ok {
+			percent = computed
+		}
+	}
+	if percent < 0 {
+		if strings.EqualFold(uploaded, total) {
+			percent = 100
+		} else {
+			percent = 0
+		}
+	}
+
+	speed := "0 B"
+	for _, field := range fields[1:] {
+		part := strings.TrimSpace(field)
+		if strings.Contains(part, "/s") {
+			speed = part
+			break
+		}
+	}
+
 	return percent, speed, uploaded, total, true
 }
 
-func runRcloneWithProgress(cmd *exec.Cmd) error {
+func computeProgressPercent(uploaded, total string) (int, bool) {
+	upNorm := strings.ReplaceAll(strings.TrimSpace(uploaded), " ", "")
+	totalNorm := strings.ReplaceAll(strings.TrimSpace(total), " ", "")
+	upBytes, errUp := humanize.ParseBytes(upNorm)
+	totalBytes, errTotal := humanize.ParseBytes(totalNorm)
+	if errUp != nil || errTotal != nil || totalBytes == 0 {
+		return 0, false
+	}
+	pct := int((float64(upBytes) / float64(totalBytes)) * 100)
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	return pct, true
+}
+
+func runRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, uploaded, total string)) error {
 	stdoutPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -613,7 +894,11 @@ func runRcloneWithProgress(cmd *exec.Cmd) error {
 			parseMu.Lock()
 			percent, speed, uploaded, total, ok := parseRcloneProgressLine(line)
 			if ok {
-				printUploadProgress(percent, speed, uploaded, total)
+				if onProgress != nil {
+					onProgress(percent, speed, uploaded, total)
+				} else {
+					printUploadProgress(percent, speed, uploaded, total)
+				}
 			} else if line != "" {
 				diagnostics.WriteString(line)
 				diagnostics.WriteString("\n")
@@ -630,6 +915,11 @@ func runRcloneWithProgress(cmd *exec.Cmd) error {
 
 	if err := cmd.Start(); err != nil {
 		return err
+	}
+	if onProgress != nil {
+		onProgress(0, "0 B", "0", "...")
+	} else {
+		printUploadProgress(0, "0 B", "0", "...")
 	}
 
 	var wg sync.WaitGroup
@@ -833,11 +1123,13 @@ func normalizeCliAliases(urls []string) []string {
 			}
 		}
 	case "grab":
-		// nugs grab <artist_id> latest -> nugs <artist_id> latest
-		if len(urls) >= 3 {
-			if _, err := strconv.Atoi(urls[1]); err == nil && urls[2] == "latest" {
-				return append([]string{urls[1], "latest"}, urls[3:]...)
-			}
+		// nugs grab <args...> -> nugs <args...>
+		// This supports show IDs, URLs, and artist shortcuts like:
+		//   nugs grab 23329
+		//   nugs grab https://play.nugs.net/release/23329
+		//   nugs grab 1125 latest
+		if len(urls) >= 2 {
+			return urls[1:]
 		}
 	case "update", "cache", "stats", "latest", "gaps", "coverage":
 		// Top-level catalog aliases, e.g. nugs gaps 1125 -> nugs catalog gaps 1125
@@ -897,7 +1189,16 @@ func readConfig() (*Config, error) {
 			fmt.Fprintf(os.Stderr, "%s WARNING: Config file has insecure permissions (%04o)\n", colorYellow+symbolWarning+colorReset, mode.Perm())
 			fmt.Fprintf(os.Stderr, "   File: %s\n", configPath)
 			fmt.Fprintf(os.Stderr, "   Risk: Config contains credentials and should only be readable by you\n")
-			fmt.Fprintf(os.Stderr, "   Fix:  chmod 600 %s\n\n", configPath)
+			if runtime.GOOS != "windows" {
+				if chmodErr := os.Chmod(configPath, 0600); chmodErr != nil {
+					fmt.Fprintf(os.Stderr, "   Auto-fix failed: %v\n", chmodErr)
+					fmt.Fprintf(os.Stderr, "   Fix manually: chmod 600 %s\n\n", configPath)
+				} else {
+					fmt.Fprintf(os.Stderr, "   Auto-fix applied: chmod 600 %s\n\n", configPath)
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "   Windows ACLs in use; skipping chmod auto-fix\n\n")
+			}
 		}
 	}
 
@@ -1397,6 +1698,9 @@ func queryQuality(streamUrl string) *Quality {
 }
 
 func downloadTrack(trackPath, _url string, onProgress func(downloaded, total, speed int64), printNewline bool) error {
+	if err := waitIfPausedOrCancelled(); err != nil {
+		return err
+	}
 	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0755)
 	if err != nil {
 		return err
@@ -1423,9 +1727,9 @@ func downloadTrack(trackPath, _url string, onProgress func(downloaded, total, sp
 		totalStr = humanize.Bytes(uint64(totalBytes))
 	}
 	counter := &WriteCounter{
-		Total:     totalBytes,
-		TotalStr:  totalStr,
-		StartTime: time.Now().UnixMilli(),
+		Total:      totalBytes,
+		TotalStr:   totalStr,
+		StartTime:  time.Now().UnixMilli(),
 		OnProgress: onProgress,
 	}
 	_, err = io.Copy(f, io.TeeReader(do.Body, counter))
@@ -1626,7 +1930,10 @@ func checkIfHlsOnly(quals []*Quality) bool {
 	return true
 }
 
-func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *Track, streamParams *StreamParams) error {
+func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *Track, streamParams *StreamParams, progressBox *ProgressBoxState) error {
+	if err := waitIfPausedOrCancelled(); err != nil {
+		return err
+	}
 	origWantFmt := cfg.Format
 	wantFmt := origWantFmt
 	var (
@@ -1682,6 +1989,12 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 		// chosenQual is guaranteed non-nil after loop exit
 		if wantFmt != origWantFmt && origWantFmt != 4 {
 			printInfo("Unavailable in your chosen format")
+			// Tier 3: Set quality fallback warning in progress box
+			if progressBox != nil {
+				fallbackMsg := fmt.Sprintf("Using %s (requested %s unavailable)",
+					getQualityName(wantFmt), getQualityName(origWantFmt))
+				progressBox.SetMessage(MessagePriorityWarning, fallbackMsg, 5*time.Second)
+			}
 		}
 	}
 	trackFname := fmt.Sprintf(
@@ -1695,14 +2008,42 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 	}
 	if exists {
 		printInfo(fmt.Sprintf("Track exists %s skipping", symbolArrow))
+		if progressBox != nil {
+			progressBox.SkippedTracks++
+			// Tier 3: Set skip indicator message
+			skipMsg := fmt.Sprintf("Skipped track %d - already exists", trackNum)
+			progressBox.SetMessage(MessagePriorityStatus, skipMsg, 3*time.Second)
+		}
 		return nil
 	}
-	if trackNum > 1 {
-		fmt.Println("")
+	// Update progress box state
+	if progressBox != nil {
+		progressBox.TrackNumber = trackNum
+		progressBox.TrackTotal = trackTotal
+		progressBox.TrackName = track.SongTitle
+		progressBox.TrackFormat = chosenQual.Specs
+		progressBox.RcloneEnabled = cfg.RcloneEnabled
 	}
-	printDownload(fmt.Sprintf("Track %d/%d: %s%s%s - %s",
-		trackNum, trackTotal, colorBold, track.SongTitle, colorReset, chosenQual.Specs))
+
 	showProgress := func(downloaded, total, speed int64) {
+		if progressBox == nil {
+			// Fallback to old progress display if no box provided
+			trackPercentage := 0
+			trackTotalStr := "unknown"
+			if total > 0 {
+				trackPercentage = int((float64(downloaded) / float64(total)) * 100)
+				if trackPercentage > 100 {
+					trackPercentage = 100
+				}
+				trackTotalStr = humanize.Bytes(uint64(total))
+			}
+			downloadedLabel := fmt.Sprintf("T%02d/%02d %s",
+				trackNum, trackTotal, humanize.Bytes(uint64(downloaded)))
+			printProgress(trackPercentage, humanize.Bytes(uint64(speed)), downloadedLabel, trackTotalStr)
+			return
+		}
+
+		// Update progress box with download progress
 		trackPercentage := 0
 		trackTotalStr := "unknown"
 		if total > 0 {
@@ -1720,15 +2061,40 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 				trackProgress = 1
 			}
 		}
-		showPercentage := ((float64(trackNum-1) + trackProgress) / float64(trackTotal)) * 100
+		showPercentage := int(((float64(trackNum-1) + trackProgress) / float64(trackTotal)) * 100)
 		if showPercentage > 100 {
 			showPercentage = 100
 		}
 
-		downloadedLabel := fmt.Sprintf("%s | show %3.0f%% (%d/%d)",
-			humanize.Bytes(uint64(downloaded)), showPercentage, trackNum, trackTotal)
-		printProgress(trackPercentage, humanize.Bytes(uint64(speed)), downloadedLabel, trackTotalStr)
+		// Lock for atomic update of all progress fields
+		progressBox.mu.Lock()
+		progressBox.DownloadPercent = trackPercentage
+		progressBox.DownloadSpeed = humanize.Bytes(uint64(speed))
+		progressBox.Downloaded = humanize.Bytes(uint64(downloaded))
+		progressBox.DownloadTotal = trackTotalStr
+		progressBox.ShowPercent = showPercentage
+
+		// Calculate accumulated download (completed tracks + current track progress)
+		accumulatedBytes := progressBox.AccumulatedBytes + downloaded
+		progressBox.ShowDownloaded = humanize.Bytes(uint64(accumulatedBytes))
+
+		// Calculate ETA for current track
+		if speed > 0 && total > 0 && downloaded < total {
+			// Update speed history for smoothing
+			progressBox.SpeedHistory = updateSpeedHistory(progressBox.SpeedHistory, float64(speed))
+
+			// Calculate remaining bytes for current track
+			remaining := total - downloaded
+			progressBox.DownloadETA = calculateETA(progressBox.SpeedHistory, remaining)
+		} else {
+			progressBox.DownloadETA = ""
+		}
+		progressBox.mu.Unlock()
+
+		// Render the updated progress box (outside lock to avoid holding during I/O)
+		renderProgressBox(progressBox)
 	}
+	var trackSize int64
 	if isHlsOnly {
 		err = hlsOnly(trackPath, chosenQual.URL, cfg.FfmpegNameStr, showProgress, false)
 	} else {
@@ -1738,6 +2104,17 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 		printError("Failed to download track")
 		return err
 	}
+
+	// Update accumulated bytes after successful download
+	if progressBox != nil {
+		// Get the actual file size
+		if stat, err := os.Stat(trackPath); err == nil {
+			trackSize = stat.Size()
+		}
+		progressBox.AccumulatedBytes += trackSize
+		progressBox.AccumulatedTracks++
+	}
+
 	return nil
 }
 
@@ -1746,7 +2123,78 @@ func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *
 // The function creates artist and album directories, downloads all tracks, and optionally
 // uploads to rclone if configured. Skips download if the show already exists locally or on remote.
 // Returns an error if metadata fetching, directory creation, or any track download fails.
-func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *AlbArtResp) error {
+// preCalculateShowSize calculates the total size of all tracks in a show
+// Uses parallel HEAD requests with 8-concurrent semaphore and 5-second timeout per request
+// Returns total size in bytes and error. Gracefully degrades if calculation fails.
+func preCalculateShowSize(tracks []Track, streamParams *StreamParams, cfg *Config) (int64, error) {
+	if cfg.SkipSizePreCalculation {
+		return 0, nil
+	}
+	
+	var totalSize int64
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	
+	// Semaphore to limit concurrent requests to 8
+	sem := make(chan struct{}, 8)
+	
+	// Context with timeout for overall operation (tracks * 5 seconds, max 60 seconds)
+	timeout := time.Duration(len(tracks)) * 5 * time.Second
+	if timeout > 60*time.Second {
+		timeout = 60 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	
+	for _, track := range tracks {
+		wg.Add(1)
+		go func(t Track) {
+			defer wg.Done()
+			
+			// Acquire semaphore
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+			
+			// Try to get stream URL (using format 1 as a representative format)
+			streamUrl, err := getStreamMeta(t.TrackID, 0, 1, streamParams)
+			if err != nil || streamUrl == "" {
+				return
+			}
+			
+			// Create HEAD request with timeout
+			reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+			defer reqCancel()
+			
+			req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, streamUrl, nil)
+			if err != nil {
+				return
+			}
+			
+			resp, err := client.Do(req)
+			if err != nil {
+				return
+			}
+			defer resp.Body.Close()
+			
+			// Get content length
+			if resp.ContentLength > 0 {
+				mu.Lock()
+				totalSize += resp.ContentLength
+				mu.Unlock()
+			}
+		}(track)
+	}
+	
+	wg.Wait()
+	
+	return totalSize, nil
+}
+
+func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *AlbArtResp, batchState *BatchProgressState, progressBox *ProgressBoxState) error {
 	var (
 		meta   *AlbArtResp
 		tracks []Track
@@ -1778,7 +2226,8 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 			return nil
 		}
 		if cfg.ForceVideo || trackTotal < 1 {
-			return video(albumID, "", cfg, streamParams, meta, false)
+			// Video-only album - no track progress to show
+			return video(albumID, "", cfg, streamParams, meta, false, nil)
 		}
 	}
 	// Create artist directory
@@ -1821,24 +2270,95 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 		printError("Failed to make album folder")
 		return err
 	}
+
+	// Pre-calculate total show size (unless disabled)
+	totalShowSize := int64(0)
+	showTotalStr := "calculating..."
+	if !cfg.SkipSizePreCalculation {
+		printInfo("Pre-calculating total show size...")
+		calculatedSize, err := preCalculateShowSize(tracks, streamParams, cfg)
+		if err == nil && calculatedSize > 0 {
+			totalShowSize = calculatedSize
+			showTotalStr = humanize.Bytes(uint64(totalShowSize))
+		}
+	}
+	
+	// Reuse existing progress box (for batch operations) or create new one (for single downloads)
+	showNumStr := meta.PerformanceDateShort
+	if batchState != nil && batchState.TotalAlbums > 1 {
+		showNumStr = fmt.Sprintf("Show %d/%d: %s", batchState.CurrentAlbum, batchState.TotalAlbums, meta.PerformanceDateShort)
+	}
+
+	// Track if we created a new progress box (for cleanup)
+	createdNewProgressBox := progressBox == nil
+
+	if progressBox == nil {
+		// Single download - create new progress box
+		progressBox = &ProgressBoxState{
+			ShowTitle:      meta.ContainerInfo,
+			ShowNumber:     showNumStr,
+			RcloneEnabled:  cfg.RcloneEnabled,
+			ShowDownloaded: "0 B",
+			ShowTotal:      showTotalStr,
+			BatchState:     batchState,
+			StartTime:      time.Now(),
+			TrackTotal:     trackTotal,
+		}
+		// Tier 3: Register global progress box for crawl control access
+		setCurrentProgressBox(progressBox)
+		defer func() {
+			if createdNewProgressBox {
+				setCurrentProgressBox(nil)
+			}
+		}()
+	} else {
+		// Batch download - reuse existing progress box with clean reset
+		// Use ResetForNewAlbum to ensure all fields are properly cleared
+		progressBox.ResetForNewAlbum(meta.ContainerInfo, showNumStr, trackTotal, totalShowSize)
+
+		// Set show totals (not part of generic reset since they're album-specific)
+		progressBox.mu.Lock()
+		progressBox.ShowDownloaded = "0 B"
+		progressBox.ShowTotal = showTotalStr
+		progressBox.mu.Unlock()
+	}
+
 	for trackNum, track := range tracks {
+		if err := waitIfPausedOrCancelled(); err != nil {
+			return err
+		}
 		trackNum++
 		err := processTrack(
-			albumPath, trackNum, trackTotal, cfg, &track, streamParams)
+			albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox)
 		if err != nil {
+			if isCrawlCancelledErr(err) {
+				return err
+			}
+			// Track error count
+			progressBox.ErrorTracks++
 			handleErr("Track failed.", err, false)
 		}
 	}
+	
+	// Mark completion (but don't show summary yet if uploading)
 	if trackTotal > 0 {
-		fmt.Println("")
+		progressBox.IsComplete = true
+		progressBox.CompletionTime = time.Now()
+		progressBox.TotalDuration = time.Since(progressBox.StartTime)
 	}
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
-		err = uploadToRclone(albumPath, artistFolder, cfg)
+		err = uploadToRclone(albumPath, artistFolder, cfg, progressBox)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
+	}
+
+	// Show completion summary AFTER upload (or immediately if no upload)
+	if trackTotal > 0 {
+		renderCompletionSummary(progressBox)
+		fmt.Println("") // Final newline after completion summary
 	}
 
 	return nil
@@ -1864,17 +2384,48 @@ func artist(artistId string, cfg *Config, streamParams *StreamParams) error {
 	}
 	fmt.Println(meta[0].Response.Containers[0].ArtistName)
 	albumTotal := getAlbumTotal(meta)
+
+	// Create batch state for multi-album progress tracking (Tier 4 enhancement)
+	batchState := &BatchProgressState{
+		TotalAlbums: albumTotal,
+		StartTime:   time.Now(),
+	}
+
+	// Create ONE progress box for the entire batch (reused across all albums)
+	sharedProgressBox := &ProgressBoxState{
+		RcloneEnabled: cfg.RcloneEnabled,
+		BatchState:    batchState,
+		StartTime:     time.Now(),
+	}
+	setCurrentProgressBox(sharedProgressBox)
+	defer setCurrentProgressBox(nil)
+
+	albumCount := 0
 	for _, _meta := range meta {
-		for albumNum, container := range _meta.Response.Containers {
-			fmt.Printf("Item %d of %d:\n", albumNum+1, albumTotal)
+		for _, container := range _meta.Response.Containers {
+			if err := waitIfPausedOrCancelled(); err != nil {
+				return err
+			}
+
+			albumCount++
+			batchState.CurrentAlbum = albumCount
+			batchState.CurrentTitle = container.ContainerInfo
+
+			// Pass the shared progress box to reuse it (no new boxes created!)
 			if cfg.SkipVideos {
-				err = album("", cfg, streamParams, container)
+				err = album("", cfg, streamParams, container, batchState, sharedProgressBox)
 			} else {
 				// Can't re-use this metadata as it doesn't have any product info for videos.
-				err = album(strconv.Itoa(container.ContainerID), cfg, streamParams, nil)
+				err = album(strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
 			}
 			if err != nil {
+				batchState.Failed++
+				if isCrawlCancelledErr(err) {
+					return err
+				}
 				handleErr("Item failed.", err, false)
+			} else {
+				batchState.Complete++
 			}
 		}
 	}
@@ -2065,6 +2616,7 @@ func displayWelcome() error {
 	showCount := min(15, len(catalog.Response.RecentItems))
 
 	table := NewTable([]TableColumn{
+		{Header: "Artist ID", Width: 10, Align: "right"},
 		{Header: "Artist", Width: 25, Align: "left"},
 		{Header: "Date", Width: 12, Align: "left"},
 		{Header: "Title", Width: 40, Align: "left"},
@@ -2081,6 +2633,7 @@ func displayWelcome() error {
 		}
 
 		table.AddRow(
+			fmt.Sprintf("%s%d%s", colorPurple, item.ArtistID, colorReset),
 			fmt.Sprintf("%s%s%s", colorGreen, item.ArtistName, colorReset),
 			fmt.Sprintf("%s%s%s", colorYellow, item.ShowDateFormattedShort, colorReset),
 			fmt.Sprintf("%s%s%s", colorCyan, item.ContainerInfo, colorReset),
@@ -2098,8 +2651,9 @@ func displayWelcome() error {
 		fmt.Sprintf("%snugs list 1125 \"Red Rocks\"%s - Filter by venue", colorCyan, colorReset),
 		fmt.Sprintf("%snugs list \">100\"%s - Filter artists by show count", colorCyan, colorReset),
 		fmt.Sprintf("%snugs grab 1125 latest%s - Download latest shows", colorCyan, colorReset),
-		fmt.Sprintf("%snugs list --json standard | jq%s - Export list output to JSON", colorCyan, colorReset),
-		fmt.Sprintf("%snugs gaps 1125 --ids-only | xargs -n1 nugs grab%s - Fill missing shows", colorCyan, colorReset),
+		fmt.Sprintf("%snugs list artists --json standard | jq%s - Export artist list as JSON", colorCyan, colorReset),
+		fmt.Sprintf("%snugs gaps 1125 fill%s - Fill missing shows", colorCyan, colorReset),
+		fmt.Sprintf("%snugs completion bash%s - Generate shell completions", colorCyan, colorReset),
 		fmt.Sprintf("%snugs help%s - View all commands", colorCyan, colorReset),
 	}
 	printList(quickStartCommands, colorGreen)
@@ -2861,24 +3415,6 @@ func buildContainerIndex(catalog *LatestCatalogResp) error {
 	return nil
 }
 
-// formatDuration formats a duration in human-readable form
-func formatDuration(d time.Duration) string {
-	seconds := d.Seconds()
-	if seconds < 60 {
-		return fmt.Sprintf("%.0f seconds", seconds)
-	}
-	minutes := seconds / 60
-	if minutes < 60 {
-		return fmt.Sprintf("%.0f minutes", minutes)
-	}
-	hours := minutes / 60
-	if hours < 24 {
-		return fmt.Sprintf("%.1f hours", hours)
-	}
-	days := hours / 24
-	return fmt.Sprintf("%.1f days", days)
-}
-
 func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
 	_meta, err := getPlistMeta(plistId, cfg.Email, legacyToken, cat)
 	if err != nil {
@@ -2900,11 +3436,30 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 		return err
 	}
 	trackTotal := len(meta.Items)
+
+	// Initialize progress box for this playlist
+	progressBox := &ProgressBoxState{
+		ShowTitle:      plistName,
+		ShowNumber:     "Downloading Playlist",
+		RcloneEnabled:  cfg.RcloneEnabled,
+		ShowDownloaded: "0 B",
+		ShowTotal:      "calculating...",
+	}
+	// Tier 3: Register global progress box for crawl control access
+	setCurrentProgressBox(progressBox)
+	defer setCurrentProgressBox(nil)
+
 	for trackNum, track := range meta.Items {
+		if err := waitIfPausedOrCancelled(); err != nil {
+			return err
+		}
 		trackNum++
 		err := processTrack(
-			plistPath, trackNum, trackTotal, cfg, &track.Track, streamParams)
+			plistPath, trackNum, trackTotal, cfg, &track.Track, streamParams, progressBox)
 		if err != nil {
+			if isCrawlCancelledErr(err) {
+				return err
+			}
 			handleErr("Track failed.", err, false)
 		}
 	}
@@ -2912,7 +3467,7 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
 		// Playlists don't have artist folder structure
-		err = uploadToRclone(plistPath, "", cfg)
+		err = uploadToRclone(plistPath, "", cfg, progressBox)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -3290,7 +3845,7 @@ func parseLstreamMeta(_meta *ArtistMeta) *AlbumMeta {
 // Downloads video in the highest quality matching cfg.VideoFormat, processes chapters if available,
 // converts from TS to MP4 container, and optionally uploads to rclone if configured.
 // Returns an error if metadata fetching, download, conversion, or upload fails.
-func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta *AlbArtResp, isLstream bool) error {
+func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta *AlbArtResp, isLstream bool, progressBox *ProgressBoxState) error {
 	var (
 		chapsAvail  bool
 		skuID       int
@@ -3431,7 +3986,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
 		// Upload the video file to the artist folder on remote
-		err = uploadToRclone(vidPath, artistFolder, cfg)
+		err = uploadToRclone(vidPath, artistFolder, cfg, progressBox)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
@@ -3480,13 +4035,17 @@ func paidLstream(query, uguID string, cfg *Config, streamParams *StreamParams) e
 	if err != nil {
 		return err
 	}
-	err = video(showId, uguID, cfg, streamParams, nil, true)
+	err = video(showId, uguID, cfg, streamParams, nil, true, nil)
 	return err
 }
 
 func init() {
-	// Check if --json flag is present, if so, suppress banner
+	// Check if --json flag or completion command is present, if so, suppress banner
 	if slices.Contains(os.Args, "--json") {
+		return
+	}
+	// Suppress banner for completion command to avoid breaking shell completion parsing
+	if len(os.Args) > 1 && os.Args[1] == "completion" {
 		return
 	}
 	fmt.Println(`
@@ -3499,6 +4058,7 @@ func init() {
 
 func main() {
 	var token string
+	setupSessionPersistence()
 	scriptDir, err := getScriptDir()
 	if err != nil {
 		panic(err)
@@ -3564,6 +4124,63 @@ func main() {
 		handleErr("Failed to parse config/args.", err, true)
 	}
 	cfg.Urls = normalizeCliAliases(cfg.Urls)
+	printActiveRuntimeHint(os.Getpid(), cfg.Urls)
+
+	if maybeDetachAndExit(os.Args[1:], cfg.Urls) {
+		return
+	}
+
+	if len(cfg.Urls) == 1 && cfg.Urls[0] == "status" {
+		printRuntimeStatus()
+		return
+	}
+
+	if len(cfg.Urls) == 1 && cfg.Urls[0] == "cancel" {
+		status, err := readRuntimeStatus()
+		if err != nil {
+			printWarning("No active crawl status found")
+			return
+		}
+		if status.State != "running" {
+			printWarning(fmt.Sprintf("No running crawl found (state: %s)", status.State))
+			return
+		}
+		if err := requestRuntimeCancel(); err != nil {
+			handleErr("Failed to request crawl cancellation.", err, false)
+			return
+		}
+		// Best effort: signal the process for faster shutdown.
+		_ = cancelProcessByPID(status.PID)
+		printSuccess(fmt.Sprintf("Cancellation requested for crawl pid=%d", status.PID))
+		return
+	}
+
+	// Completion command - generate shell completion scripts
+	if len(cfg.Urls) > 0 && cfg.Urls[0] == "completion" {
+		err := completionCommand(cfg.Urls)
+		if err != nil {
+			handleErr("Completion command failed.", err, true)
+		}
+		return
+	}
+
+	trackRuntime := !isReadOnlyCommand(cfg.Urls)
+	if trackRuntime {
+		initRuntimeStatus()
+	}
+	runCancelled := false
+	defer func() {
+		if !trackRuntime {
+			return
+		}
+		if runCancelled {
+			finalizeRuntimeStatus("cancelled")
+			return
+		}
+		finalizeRuntimeStatus("completed")
+	}()
+	stopHotkeys := startCrawlHotkeysIfNeeded(cfg.Urls)
+	defer stopHotkeys()
 
 	// Auto-refresh catalog cache if needed
 	err = autoRefreshIfNeeded(cfg)
@@ -3579,6 +4196,7 @@ func main() {
 			handleErr("Rclone check failed.", err, true)
 		}
 	}
+	printStartupEnvironment(cfg, jsonLevel)
 
 	// Show welcome screen if no arguments provided
 	if len(cfg.Urls) == 0 {
@@ -3670,7 +4288,6 @@ func main() {
 		}
 		return
 	}
-
 	// Catalog commands (except "catalog gaps ... fill" which requires auth)
 	isCatalogGapsFill := len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill"
 	if len(cfg.Urls) > 0 && cfg.Urls[0] == "catalog" && !isCatalogGapsFill {
@@ -3901,6 +4518,13 @@ func main() {
 	var itemErr error
 	completedItems := 0
 	for albumNum, _url := range cfg.Urls {
+		if err := waitIfPausedOrCancelled(); err != nil {
+			if isCrawlCancelledErr(err) {
+				runCancelled = true
+				printWarning("Crawl cancelled")
+				break
+			}
+		}
 		errorsBefore := runErrorCount
 		warningsBefore := runWarningCount
 		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
@@ -3911,23 +4535,28 @@ func main() {
 		}
 		switch mediaType {
 		case 0:
-			itemErr = album(itemId, cfg, streamParams, nil)
+			itemErr = album(itemId, cfg, streamParams, nil, nil, nil)
 		case 1, 2:
 			itemErr = playlist(itemId, legacyToken, cfg, streamParams, false)
 		case 3:
 			itemErr = catalogPlist(itemId, legacyToken, cfg, streamParams)
 		case 4, 10:
-			itemErr = video(itemId, "", cfg, streamParams, nil, false)
+			itemErr = video(itemId, "", cfg, streamParams, nil, false, nil)
 		case 5:
 			itemErr = artist(itemId, cfg, streamParams)
 		case 6, 7, 8:
-			itemErr = video(itemId, "", cfg, streamParams, nil, true)
+			itemErr = video(itemId, "", cfg, streamParams, nil, true, nil)
 		case 9:
 			itemErr = paidLstream(itemId, uguID, cfg, streamParams)
 		case 11:
-			itemErr = album(itemId, cfg, streamParams, nil)
+			itemErr = album(itemId, cfg, streamParams, nil, nil, nil)
 		}
 		if itemErr != nil {
+			if isCrawlCancelledErr(itemErr) {
+				runCancelled = true
+				printWarning("Crawl cancelled")
+				break
+			}
 			handleErr("Item failed.", itemErr, false)
 		}
 		completedItems++
