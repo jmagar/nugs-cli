@@ -43,6 +43,11 @@ func PrintUpload(msg string) {
 	fmt.Printf("%s%s%s %s%s\n", ColorPurple, SymbolUpload, ColorReset, msg, ColorReset)
 }
 
+// PrintUploadProgress prints an upload progress bar.
+func PrintUploadProgress(percentage int, speed, uploaded, total string) {
+	RenderProgress("UP", percentage, speed, uploaded, total, ColorBlue, true, nil)
+}
+
 // PrintMusic prints a music message.
 func PrintMusic(msg string) {
 	fmt.Printf("%s%s%s %s%s\n", ColorGreen, SymbolMusic, ColorReset, msg, ColorReset)
