@@ -516,7 +516,7 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 		RenderInterval: model.DefaultProgressRenderInterval,
 	}
 
-	box.SetPhase("verify", ui.ColorYellow)
+	box.SetPhase(model.PhaseVerify)
 	if deps.SetCurrentProgressBox != nil {
 		deps.SetCurrentProgressBox(box)
 	}
@@ -657,7 +657,7 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 		progressBox.DownloadTotal = "Unknown"
 		progressBox.ShowDownloaded = "0 B"
 		progressBox.ShowTotal = "Unknown"
-		progressBox.SetPhase("download", ui.ColorGreen)
+		progressBox.SetPhaseLocked(model.PhaseDownload)
 		progressBox.Mu.Unlock()
 		progressBox.SetMessage(model.MessagePriorityStatus, "Downloading video stream", 5*time.Second)
 		if deps.RenderProgressBox != nil {
@@ -730,7 +730,7 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 	}
 	ui.PrintInfo("Putting into MP4 container...")
 	if progressBox != nil {
-		progressBox.SetPhase("verify", ui.ColorYellow)
+		progressBox.SetPhase(model.PhaseVerify)
 		progressBox.SetMessage(model.MessagePriorityStatus, "Converting TS to MP4", 5*time.Second)
 		if deps.RenderProgressBox != nil {
 			deps.RenderProgressBox(progressBox)
@@ -755,7 +755,7 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled && deps.UploadToRclone != nil {
 		if progressBox != nil {
-			progressBox.SetPhase("upload", ui.ColorBlue)
+			progressBox.SetPhase(model.PhaseUpload)
 			progressBox.SetMessage(model.MessagePriorityStatus, "Uploading video to rclone", 5*time.Second)
 			if deps.RenderProgressBox != nil {
 				deps.RenderProgressBox(progressBox)

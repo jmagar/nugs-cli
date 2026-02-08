@@ -201,7 +201,7 @@ func renderProgressBox(state *ProgressBoxState) {
 
 	// Track info line OR upload phase indicator
 	var infoLine string
-	if state.CurrentPhase == "upload" {
+	if state.CurrentPhase == model.PhaseUpload {
 		infoLine = fmt.Sprintf("  ⬆ Uploading to remote storage...")
 	} else {
 		infoLine = fmt.Sprintf("  %s Track %d/%d: %s - %s",
@@ -506,9 +506,10 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		stats = append(stats, "") // Empty line separator
 		stats = append(stats, fmt.Sprintf("  Upload Size:        %s", state.UploadTotal))
 		stats = append(stats, fmt.Sprintf("  Upload Duration:    %s", formatDuration(state.UploadDuration)))
-		if state.UploadDuration.Seconds() > 0 {
-			// Calculate upload average speed from total size and duration
+		// Only calculate speed if duration is at least 1ms (prevents division by zero and instant upload issues)
+		if state.UploadDuration.Seconds() >= 0.001 {
 			uploadBytes := parseHumanizedBytes(state.UploadTotal)
+			// Only show speed if we have valid size data
 			if uploadBytes > 0 {
 				uploadAvgSpeed := float64(uploadBytes) / state.UploadDuration.Seconds()
 				stats = append(stats, fmt.Sprintf("  Upload Avg Speed:   %s/s", humanize.Bytes(uint64(uploadAvgSpeed))))

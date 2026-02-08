@@ -9,6 +9,17 @@ import (
 // DefaultProgressRenderInterval is the minimum time between progress box redraws.
 const DefaultProgressRenderInterval = 100 * time.Millisecond
 
+// Phase constants for operation lifecycle tracking
+const (
+	PhaseIdle     = ""         // No operation in progress
+	PhaseDownload = "download" // Downloading tracks
+	PhaseUpload   = "upload"   // Uploading to remote storage
+	PhaseVerify   = "verify"   // Verifying upload integrity
+	PhaseComplete = "complete" // Operation completed successfully
+	PhaseError    = "error"    // Operation failed with error
+	PhasePaused   = "paused"   // Operation paused by user
+)
+
 // ProgressBoxState tracks the state of the dual progress box display.
 type ProgressBoxState struct {
 	Mu sync.Mutex // Protects all fields from concurrent access
@@ -27,6 +38,7 @@ type ProgressBoxState struct {
 	UploadSpeed       string
 	Uploaded          string
 	UploadTotal       string
+	UploadTotalSet    bool  // Flag to prevent overwriting calculated upload total
 	ShowPercent       int
 	ShowDownloaded    string
 	ShowTotal         string
@@ -81,16 +93,60 @@ type ProgressBoxState struct {
 	ForceRender                 bool
 }
 
-// SetPhase sets the current operation phase and corresponding color (Tier 1 enhancement).
-// The phaseColor should be an ANSI color code string for the given phase.
-func (s *ProgressBoxState) SetPhase(phase string, phaseColors ...string) {
-	s.CurrentPhase = phase
-	if len(phaseColors) > 0 {
-		s.StatusColor = phaseColors[0]
-		return
+// SetPhase sets the current operation phase with transition validation.
+// Returns an error if the phase transition is invalid.
+// Thread-safe: acquires mutex internally.
+func (s *ProgressBoxState) SetPhase(phase string) error {
+	s.Mu.Lock()
+	defer s.Mu.Unlock()
+
+	// Validate transition
+	if !s.isValidTransition(s.CurrentPhase, phase) {
+		return fmt.Errorf("invalid phase transition: %s -> %s", s.CurrentPhase, phase)
 	}
-	// Default: clear the status color; callers should provide it
-	s.StatusColor = ""
+
+	s.CurrentPhase = phase
+	s.ForceRender = true
+	return nil
+}
+
+// SetPhaseLocked sets the phase without validation (caller must hold Mu).
+// Use this when you've already validated the transition or need to bypass validation.
+func (s *ProgressBoxState) SetPhaseLocked(phase string) {
+	s.CurrentPhase = phase
+	s.ForceRender = true
+}
+
+// isValidTransition checks if a phase transition is allowed.
+// REQUIRES: Caller must hold s.Mu lock.
+func (s *ProgressBoxState) isValidTransition(from, to string) bool {
+	// Allow transitions to error from any state
+	if to == PhaseError {
+		return true
+	}
+
+	// Allow transitions to complete from any active state
+	if to == PhaseComplete && (from == PhaseDownload || from == PhaseUpload || from == PhaseVerify) {
+		return true
+	}
+
+	// Valid state machine transitions
+	switch from {
+	case PhaseIdle:
+		return to == PhaseDownload || to == PhaseUpload
+	case PhaseDownload:
+		return to == PhaseUpload || to == PhaseVerify || to == PhaseComplete || to == PhasePaused
+	case PhaseUpload:
+		return to == PhaseVerify || to == PhaseComplete || to == PhasePaused
+	case PhaseVerify:
+		return to == PhaseComplete || to == PhaseError
+	case PhasePaused:
+		return to == PhaseDownload || to == PhaseUpload || to == PhaseVerify
+	case PhaseComplete, PhaseError:
+		return to == PhaseIdle || to == PhaseDownload  // Can restart after completion/error
+	default:
+		return true  // Unknown phases allowed for backward compatibility
+	}
 }
 
 // GetRenderIntervalLocked returns the render interval (caller must hold Mu).
@@ -265,6 +321,7 @@ func (s *ProgressBoxState) ResetForNewAlbum(showTitle, showNumber string, trackT
 	// Reset size totals
 	s.DownloadTotal = ""
 	s.UploadTotal = ""
+	s.UploadTotalSet = false
 	s.ShowDownloaded = ""
 	s.ShowTotal = ""
 

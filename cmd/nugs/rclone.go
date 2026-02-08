@@ -13,16 +13,30 @@ import (
 	"github.com/jmagar/nugs-cli/internal/rclone"
 )
 
+const (
+	// uploadCompleteVisibilityDelay is how long to pause after upload reaches 100%
+	// before showing the completion summary. This ensures users see the final state.
+	uploadCompleteVisibilityDelay = 500 * time.Millisecond
+)
+
 func checkRcloneAvailable(quiet bool) error { return rclone.CheckRcloneAvailable(quiet) }
 func checkRclonePathOnline(cfg *Config) string { return rclone.CheckRclonePathOnline(cfg) }
 
 func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
 	if progressBox != nil {
+		return uploadWithProgressBox(localPath, artistFolder, cfg, progressBox, isVideo)
+	}
+	return rclone.UploadToRclone(localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
+}
+
+// uploadWithProgressBox handles upload with progress box updates and phase tracking.
+// Separated from uploadToRclone for better testability and maintainability.
+func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
+	{
 		// Set upload phase and start time
 		progressBox.Mu.Lock()
-		progressBox.CurrentPhase = "upload"
+		progressBox.SetPhaseLocked(model.PhaseUpload)
 		progressBox.UploadStartTime = time.Now()
-		progressBox.ForceRender = true
 		progressBox.Mu.Unlock()
 		renderProgressBox(progressBox)
 
@@ -32,7 +46,8 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 			progressBox.UploadPercent = percent
 			progressBox.UploadSpeed = speed
 			progressBox.Uploaded = uploaded
-			if progressBox.UploadTotal == "" || (total != "" && total != "...") {
+			// Only update UploadTotal if not already set by onPreUpload (calculated from directory size)
+			if !progressBox.UploadTotalSet && total != "" && total != "..." {
 				progressBox.UploadTotal = total
 			}
 
@@ -60,6 +75,7 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 		onPreUpload := func(totalBytes int64) {
 			progressBox.Mu.Lock()
 			progressBox.UploadTotal = humanize.Bytes(uint64(totalBytes))
+			progressBox.UploadTotalSet = true  // Prevent rclone from overwriting calculated total
 			progressBox.Uploaded = "0 B"
 			progressBox.UploadPercent = 0
 			progressBox.Mu.Unlock()
@@ -75,26 +91,28 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 		if err == nil {
 			progressBox.UploadDuration = time.Since(progressBox.UploadStartTime)
 			progressBox.UploadPercent = 100
-			progressBox.CurrentPhase = "complete"
+			progressBox.SetPhaseLocked(model.PhaseComplete)
 		} else {
 			// Calculate duration even on error for stats
 			if !progressBox.UploadStartTime.IsZero() {
 				progressBox.UploadDuration = time.Since(progressBox.UploadStartTime)
 			}
-			progressBox.CurrentPhase = "error"
-			progressBox.SetMessage(model.MessagePriorityError, fmt.Sprintf("Upload failed: %v", err), 5*time.Second)
+			progressBox.SetPhaseLocked(model.PhaseError)
 		}
 		progressBox.ForceRender = true
 		progressBox.Mu.Unlock()
 
-		// Force final render with pause for visibility
+		// Show error message if upload failed (SetMessage locks internally)
+		if err != nil {
+			progressBox.SetMessage(model.MessagePriorityError, fmt.Sprintf("Upload failed: %v", err), 5*time.Second)
+		}
+
+		// Force final render with pause for visibility (allows user to see 100% or error state)
 		renderProgressBox(progressBox)
-		time.Sleep(500 * time.Millisecond)
+		time.Sleep(uploadCompleteVisibilityDelay)
 
 		return err
 	}
-
-	return rclone.UploadToRclone(localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
 }
 
 func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
