@@ -2,25 +2,9 @@
 
 package main
 
-import (
-	"fmt"
+// Hotkey input unix wrappers delegating to internal/runtime during migration.
+// These will be removed in Phase 12 when all callers move to internal packages.
 
-	"golang.org/x/sys/unix"
-)
+import "github.com/jmagar/nugs-cli/internal/runtime"
 
-func enableHotkeyInput(fd int) (func(), error) {
-	orig, err := unix.IoctlGetTermios(fd, unix.TCGETS)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get terminal attributes: %w", err)
-	}
-	newState := *orig
-	newState.Lflag &^= unix.ICANON | unix.ECHO
-	newState.Cc[unix.VMIN] = 1
-	newState.Cc[unix.VTIME] = 0
-	if err := unix.IoctlSetTermios(fd, unix.TCSETS, &newState); err != nil {
-		return nil, fmt.Errorf("failed to set terminal attributes: %w", err)
-	}
-	return func() {
-		_ = unix.IoctlSetTermios(fd, unix.TCSETS, orig)
-	}, nil
-}
+func enableHotkeyInput(fd int) (func(), error) { return runtime.EnableHotkeyInput(fd) }

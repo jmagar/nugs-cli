@@ -2,12 +2,9 @@
 
 package main
 
-import "syscall"
+// Process alive unix wrappers delegating to internal/runtime during migration.
+// These will be removed in Phase 12 when all callers move to internal packages.
 
-func isProcessAlive(pid int) bool {
-	if pid <= 0 {
-		return false
-	}
-	err := syscall.Kill(pid, 0)
-	return err == nil || err == syscall.EPERM
-}
+import "github.com/jmagar/nugs-cli/internal/runtime"
+
+func isProcessAlive(pid int) bool { return runtime.IsProcessAlive(pid) }
