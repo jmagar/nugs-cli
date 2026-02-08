@@ -26,13 +26,13 @@ func completionCommand(args []string) error {
 	shell := strings.ToLower(args[1])
 	switch shell {
 	case "bash":
-		fmt.Println(bashCompletion)
+		fmt.Print(bashCompletion)
 	case "zsh":
-		fmt.Println(zshCompletion)
+		fmt.Print(zshCompletion)
 	case "fish":
-		fmt.Println(fishCompletion)
+		fmt.Print(fishCompletion)
 	case "powershell", "pwsh":
-		fmt.Println(powershellCompletion)
+		fmt.Print(powershellCompletion)
 	default:
 		return fmt.Errorf("unsupported shell: %s (supported: bash, zsh, fish, powershell)", shell)
 	}

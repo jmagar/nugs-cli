@@ -2,10 +2,8 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -218,30 +216,3 @@ func configureAutoRefresh(cfg *Config) error {
 }
 
 // writeConfig writes the config back to the file it was loaded from
-func writeConfig(cfg *Config) error {
-	configData, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal config: %w", err)
-	}
-
-	// Write to the same file that was loaded by readConfig
-	targetPath := loadedConfigPath
-	if targetPath == "" {
-		targetPath = "config.json" // fallback to current directory
-	}
-
-	// Ensure parent directory exists
-	dir := filepath.Dir(targetPath)
-	if dir != "." {
-		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
-			return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
-		}
-	}
-
-	err = os.WriteFile(targetPath, configData, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to write config to %s: %w", targetPath, err)
-	}
-
-	return nil
-}
