@@ -2,20 +2,20 @@ package main
 
 // Format wrappers delegating to internal/ui during migration.
 // These will be removed in Phase 12 when all callers move to internal packages.
-// ProgressBoxState and related rendering code remain here because they depend on
+// renderProgressBox and renderCompletionSummary remain here because they depend on
 // root-level runtime functions (updateRuntimeProgress) and color variables.
 
 import (
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-const defaultProgressRenderInterval = 100 * time.Millisecond
+const defaultProgressRenderInterval = model.DefaultProgressRenderInterval
 
 // Box drawing character wrappers
 var (
@@ -46,18 +46,18 @@ var (
 // ansiRegex delegates to ui.AnsiRegex
 var ansiRegex = ui.AnsiRegex
 
-func getTermWidth() int                          { return ui.GetTermWidth() }
-func stripAnsiCodes(s string) string             { return ui.StripAnsiCodes(s) }
-func visibleLength(s string) int                 { return ui.VisibleLength(s) }
+func getTermWidth() int                                { return ui.GetTermWidth() }
+func stripAnsiCodes(s string) string                   { return ui.StripAnsiCodes(s) }
+func visibleLength(s string) int                       { return ui.VisibleLength(s) }
 func truncateWithEllipsis(s string, maxLen int) string { return ui.TruncateWithEllipsis(s, maxLen) }
-func padRight(s string, width int) string        { return ui.PadRight(s, width) }
-func padCenter(s string, width int) string       { return ui.PadCenter(s, width) }
-func printHeader(title string)                   { ui.PrintHeader(title) }
-func printSection(title string)                  { ui.PrintSection(title) }
-func printList(items []string, color string)      { ui.PrintList(items, color) }
-func printKeyValue(key, value, valueColor string) { ui.PrintKeyValue(key, value, valueColor) }
-func printDivider()                              { ui.PrintDivider() }
-func printBox(text string, borderColor string)   { ui.PrintBox(text, borderColor) }
+func padRight(s string, width int) string              { return ui.PadRight(s, width) }
+func padCenter(s string, width int) string             { return ui.PadCenter(s, width) }
+func printHeader(title string)                         { ui.PrintHeader(title) }
+func printSection(title string)                        { ui.PrintSection(title) }
+func printList(items []string, color string)            { ui.PrintList(items, color) }
+func printKeyValue(key, value, valueColor string)       { ui.PrintKeyValue(key, value, valueColor) }
+func printDivider()                                    { ui.PrintDivider() }
+func printBox(text string, borderColor string)         { ui.PrintBox(text, borderColor) }
 
 // Table type aliases
 type TableColumn = ui.TableColumn
@@ -81,130 +81,9 @@ func printUploadProgress(percentage int, speed, uploaded, total string) {
 	renderProgress("UP", percentage, speed, uploaded, total, colorBlue, true)
 }
 
-// ProgressBoxState tracks the state of the dual progress box display
-type ProgressBoxState struct {
-	mu sync.Mutex // Protects all fields from concurrent access
-
-	ShowTitle         string
-	ShowNumber        string
-	TrackNumber       int
-	TrackTotal        int
-	TrackName         string
-	TrackFormat       string
-	DownloadPercent   int
-	DownloadSpeed     string
-	Downloaded        string
-	DownloadTotal     string
-	UploadPercent     int
-	UploadSpeed       string
-	Uploaded          string
-	UploadTotal       string
-	ShowPercent       int
-	ShowDownloaded    string
-	ShowTotal         string
-	AccumulatedBytes  int64 // Accumulated download across all tracks
-	AccumulatedTracks int   // Number of completed tracks
-	RcloneEnabled     bool
-	LinesDrawn        int
-
-	// ETA tracking
-	DownloadETA        string        // Estimated time remaining for download
-	UploadETA          string        // Estimated time remaining for upload
-	SpeedHistory       []float64     // Last 10 download speed samples for smoothing
-	UploadSpeedHistory []float64     // Last 10 upload speed samples for smoothing (thread-safe)
-	LastUpdateTime     time.Time     // Last time the progress box was rendered
-	RenderInterval     time.Duration // Minimum interval between redraws (defaults to 100ms)
-
-	// Completion tracking
-	IsComplete     bool          // Whether all tracks have completed
-	CompletionTime time.Time     // When the download completed
-	TotalDuration  time.Duration // Total time taken for the show
-	SkippedTracks  int           // Number of tracks skipped (already exist)
-	ErrorTracks    int           // Number of tracks that failed
-	StartTime      time.Time     // When the download started
-
-	// Phase tracking (Tier 1 enhancement)
-	CurrentPhase string // Current operation phase (download, upload, verify, paused, error)
-	StatusColor  string // ANSI color code for current phase
-
-	// Message display (Tier 3 enhancement)
-	ErrorMessage    string    // Current error message to display
-	WarningMessage  string    // Current warning message to display
-	StatusMessage   string    // Current status message to display
-	MessageExpiry   time.Time // When the current message should expire
-	MessagePriority int       // Priority of current message (1=status, 2=warning, 3=error)
-
-	// State indicators (Tier 3 enhancement)
-	IsPaused    bool // Whether the download/upload is paused
-	IsCancelled bool // Whether the operation was cancelled
-
-	// Batch progress (Tier 4 enhancement)
-	BatchState *BatchProgressState // Optional batch context for multi-album operations
-
-	// Render-state tracking for smart redraw decisions
-	LastRenderedTrackNumber     int
-	LastRenderedMessagePriority int
-	LastRenderedPaused          bool
-	LastRenderedCancelled       bool
-	forceRender                 bool
-}
-
-// SetPhase sets the current operation phase and corresponding color (Tier 1 enhancement)
-func (s *ProgressBoxState) SetPhase(phase string) {
-	s.CurrentPhase = phase
-	switch phase {
-	case "download":
-		s.StatusColor = colorGreen
-	case "upload":
-		s.StatusColor = colorBlue
-	case "verify":
-		s.StatusColor = colorYellow
-	case "paused":
-		s.StatusColor = colorYellow
-	case "error":
-		s.StatusColor = colorRed
-	default:
-		s.StatusColor = colorReset
-	}
-}
-
-func (s *ProgressBoxState) getRenderIntervalLocked() time.Duration {
-	if s.RenderInterval <= 0 {
-		return defaultProgressRenderInterval
-	}
-	return s.RenderInterval
-}
-
-func (s *ProgressBoxState) hasCriticalRenderChangeLocked() bool {
-	return s.TrackNumber != s.LastRenderedTrackNumber ||
-		s.MessagePriority != s.LastRenderedMessagePriority ||
-		s.IsPaused != s.LastRenderedPaused ||
-		s.IsCancelled != s.LastRenderedCancelled
-}
-
-func (s *ProgressBoxState) shouldRenderLocked(now time.Time) bool {
-	force := s.forceRender || s.hasCriticalRenderChangeLocked()
-	if !force && !s.LastUpdateTime.IsZero() &&
-		now.Sub(s.LastUpdateTime) < s.getRenderIntervalLocked() {
-		return false
-	}
-
-	s.LastUpdateTime = now
-	s.forceRender = false
-	s.LastRenderedTrackNumber = s.TrackNumber
-	s.LastRenderedMessagePriority = s.MessagePriority
-	s.LastRenderedPaused = s.IsPaused
-	s.LastRenderedCancelled = s.IsCancelled
-	return true
-}
-
-func (s *ProgressBoxState) shouldRender(now time.Time) bool {
-	if s == nil {
-		return false
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.shouldRenderLocked(now)
+// getQualityName delegates to model.GetQualityName.
+func getQualityName(format int) string {
+	return model.GetQualityName(format)
 }
 
 // calculateBoxWidth determines optimal box width based on terminal size (Tier 1 enhancement)
@@ -238,9 +117,9 @@ func renderProgressBox(state *ProgressBoxState) {
 	}
 
 	// Lock for reading state (released after we copy all values we need)
-	state.mu.Lock()
-	if !state.shouldRenderLocked(time.Now()) {
-		state.mu.Unlock()
+	state.Mu.Lock()
+	if !state.ShouldRenderLocked(time.Now()) {
+		state.Mu.Unlock()
 		return
 	}
 
@@ -248,7 +127,7 @@ func renderProgressBox(state *ProgressBoxState) {
 
 	// Clear previous box (move up and clear lines)
 	linesToClear := state.LinesDrawn
-	state.mu.Unlock() // Release lock before I/O operations
+	state.Mu.Unlock() // Release lock before I/O operations
 
 	if linesToClear > 0 {
 		for i := 0; i < linesToClear; i++ {
@@ -257,8 +136,8 @@ func renderProgressBox(state *ProgressBoxState) {
 	}
 
 	// Re-acquire lock to read all state for rendering
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state.Mu.Lock()
+	defer state.Mu.Unlock()
 
 	lineCount := 0
 
@@ -364,7 +243,6 @@ func renderProgressBox(state *ProgressBoxState) {
 	lineCount++
 
 	// Upload progress bar (only if rclone enabled) with ETA
-	// Note: sparkline not shown for upload as it would show stale download speeds
 	if state.RcloneEnabled {
 		ulBar := buildProgressBar(state.UploadPercent, 30, colorBlue)
 		ulLine := ""
@@ -390,7 +268,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	lineCount++
 
 	// Message line (errors, warnings, status) - Tier 3 enhancement
-	if msg := state.GetDisplayMessage(); msg != "" {
+	if msg := state.GetDisplayMessage(colorRed, colorYellow, colorCyan, colorReset, symbolCross, symbolWarning, symbolInfo); msg != "" {
 		msgLine := fmt.Sprintf("  %s", msg)
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
@@ -451,58 +329,39 @@ func buildProgressBar(percentage int, width int, fillColor string) string {
 }
 
 // calculateETA calculates estimated time remaining based on speed history and remaining bytes
-// Returns formatted ETA string (e.g., "2m 34s", "calculating...")
-// Returns empty string for invalid/edge cases to avoid showing misleading ETAs
 func calculateETA(speedHistory []float64, remaining int64) string {
-	// Guard against negative remaining (progress calculation errors)
 	if remaining <= 0 {
-		return "" // Already complete or invalid state
+		return ""
 	}
-
-	// Show ETA even with just 1 speed sample (don't require full history)
 	if len(speedHistory) == 0 {
-		return "" // No data yet
+		return ""
 	}
-
-	// Calculate average speed from available samples
 	var totalSpeed float64
 	for _, speed := range speedHistory {
 		totalSpeed += speed
 	}
 	avgSpeed := totalSpeed / float64(len(speedHistory))
-
-	// Avoid division by zero - use threshold for float precision
-	if avgSpeed < 0.001 { // Effectively zero (< 1 byte/sec)
+	if avgSpeed < 0.001 {
 		return ""
 	}
-
-	// Calculate ETA in seconds
 	etaSeconds := float64(remaining) / avgSpeed
-
-	// Sanity check: don't show ETA > 24 hours (likely calculation error)
 	if etaSeconds > 86400 {
 		return ""
 	}
-
-	// Don't show ETA for very small remaining amounts (< 1 second)
 	if etaSeconds < 1 {
 		return ""
 	}
-
 	return formatDuration(time.Duration(etaSeconds * float64(time.Second)))
 }
 
 // formatDuration formats a duration into a human-readable string
-// Examples: "2m 34s", "1h 23m", "45s"
 func formatDuration(d time.Duration) string {
 	if d < time.Second {
 		return "0s"
 	}
-
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-
 	if hours > 0 {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
@@ -522,18 +381,13 @@ func updateSpeedHistory(history []float64, newSpeed float64) []float64 {
 }
 
 // generateSparkline creates an ASCII sparkline from speed history
-// Uses Unicode block characters: ▁▂▃▄▅▆▇█
 func generateSparkline(values []float64, maxWidth int) string {
 	if len(values) == 0 {
 		return ""
 	}
-
-	// Limit to maxWidth samples (use most recent)
 	if len(values) > maxWidth {
 		values = values[len(values)-maxWidth:]
 	}
-
-	// Find min/max for normalization
 	minVal, maxVal := values[0], values[0]
 	for _, v := range values {
 		if v < minVal {
@@ -543,23 +397,15 @@ func generateSparkline(values []float64, maxWidth int) string {
 			maxVal = v
 		}
 	}
-
-	// Handle edge case: all values the same
 	if maxVal == minVal {
 		if maxVal == 0 {
-			// All zeros - show lowest blocks
 			return strings.Repeat("▁", len(values))
 		}
-		// Constant non-zero speed - show full blocks
 		return strings.Repeat("█", len(values))
 	}
-
-	// Unicode blocks from lowest to highest
 	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
-
 	var sparkline strings.Builder
 	for _, v := range values {
-		// Normalize to 0-7 range
 		normalized := ((v - minVal) / (maxVal - minVal)) * 7
 		index := int(normalized)
 		if index > 7 {
@@ -567,15 +413,14 @@ func generateSparkline(values []float64, maxWidth int) string {
 		}
 		sparkline.WriteRune(blocks[index])
 	}
-
 	return sparkline.String()
 }
 
 // renderCompletionSummary displays final summary when all tracks complete
 func renderCompletionSummary(state *ProgressBoxState) {
 	// Lock to read final state
-	state.mu.Lock()
-	defer state.mu.Unlock()
+	state.Mu.Lock()
+	defer state.Mu.Unlock()
 
 	width := calculateBoxWidth() // Match progress box width
 

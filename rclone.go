@@ -17,7 +17,7 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 	if progressBox != nil {
 		// Wire up progress callback to update the ProgressBoxState
 		progressFn := func(percent int, speed, uploaded, total string) {
-			progressBox.mu.Lock()
+			progressBox.Mu.Lock()
 			progressBox.UploadPercent = percent
 			progressBox.UploadSpeed = speed
 			progressBox.Uploaded = uploaded
@@ -39,7 +39,7 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 			} else {
 				progressBox.UploadETA = ""
 			}
-			progressBox.mu.Unlock()
+			progressBox.Mu.Unlock()
 			renderProgressBox(progressBox)
 		}
 

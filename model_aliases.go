@@ -10,7 +10,6 @@ import (
 )
 
 // Type aliases for model types.
-// WriteCounter and ProgressBoxState stay in root (have methods defined here).
 type (
 	Config                = model.Config
 	Args                  = model.Args
@@ -21,6 +20,8 @@ type (
 	ContainerWithDate     = model.ContainerWithDate
 	ShowStatus            = model.ShowStatus
 	ArtistCatalogAnalysis = model.ArtistCatalogAnalysis
+	ProgressBoxState      = model.ProgressBoxState
+	WriteCounter          = model.WriteCounter
 
 	Auth              = model.Auth
 	Payload           = model.Payload

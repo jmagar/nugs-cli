@@ -68,14 +68,3 @@ func syncFromUI() {
 	symbolVideo = ui.SymbolVideo
 	symbolBoth = ui.SymbolBoth
 }
-
-// WriteCounter tracks download progress.
-// Kept in root package because it has a Write() method defined in download.go.
-type WriteCounter struct {
-	Total      int64
-	TotalStr   string
-	Downloaded int64
-	Percentage int
-	StartTime  int64
-	OnProgress func(downloaded, total, speed int64)
-}
