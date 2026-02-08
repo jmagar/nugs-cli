@@ -58,8 +58,10 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 			progressBox.UploadTotal = humanize.Bytes(uint64(totalBytes))
 			progressBox.Uploaded = "0 B"
 			progressBox.UploadPercent = 0
-			progressBox.SetMessage(model.MessagePriorityStatus, "Uploading to remote...", 0)
 			progressBox.Mu.Unlock()
+
+			// SetMessage locks internally, so call it outside our lock
+			progressBox.SetMessage(model.MessagePriorityStatus, "Uploading to remote...", 0)
 		}
 
 		err := rclone.UploadToRclone(localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
