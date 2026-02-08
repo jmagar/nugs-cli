@@ -42,7 +42,7 @@ func printStartupEnvironment(cfg *Config, jsonLevel string) {
 		return
 	}
 	printSection("Environment")
-	configPath := loadedConfigPath
+	configPath := getLoadedConfigPath()
 	if strings.TrimSpace(configPath) == "" {
 		configPath = "(unknown)"
 	}
