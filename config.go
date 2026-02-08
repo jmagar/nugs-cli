@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -102,6 +103,14 @@ func promptForConfig() error {
 		outPath = "Nugs downloads"
 	}
 
+	// Video Output Path
+	fmt.Printf("%s%s%s Enter video download directory (default: same as download directory): ", colorCyan, bulletArrow, colorReset)
+	scanner.Scan()
+	videoOutPath := strings.TrimSpace(scanner.Text())
+	if videoOutPath == "" {
+		videoOutPath = outPath
+	}
+
 	// FFmpeg
 	fmt.Printf("\n%s%s%s Use FFmpeg from system PATH? [y/N] (default: N): ", colorCyan, bulletArrow, colorReset)
 	scanner.Scan()
@@ -114,7 +123,7 @@ func promptForConfig() error {
 	rcloneEnabledStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
 	rcloneEnabled := rcloneEnabledStr == "y" || rcloneEnabledStr == "yes"
 
-	var rcloneRemote, rclonePath string
+	var rcloneRemote, rclonePath, rcloneVideoPath string
 	var deleteAfterUpload bool
 	var rcloneTransfers int
 
@@ -131,6 +140,13 @@ func promptForConfig() error {
 		rclonePath = strings.TrimSpace(scanner.Text())
 		if rclonePath == "" {
 			return errors.New("rclone remote path is required")
+		}
+
+		fmt.Print("Enter remote video path (default: same as remote path): ")
+		scanner.Scan()
+		rcloneVideoPath = strings.TrimSpace(scanner.Text())
+		if rcloneVideoPath == "" {
+			rcloneVideoPath = rclonePath
 		}
 
 		fmt.Print("Enter number of parallel transfers (default: 4): ")
@@ -159,11 +175,13 @@ func promptForConfig() error {
 		Format:                 format,
 		VideoFormat:            videoFormat,
 		OutPath:                outPath,
+		VideoOutPath:           videoOutPath,
 		Token:                  "",
 		UseFfmpegEnvVar:        useFfmpegEnvVar,
 		RcloneEnabled:          rcloneEnabled,
 		RcloneRemote:           rcloneRemote,
 		RclonePath:             rclonePath,
+		RcloneVideoPath:        rcloneVideoPath,
 		DeleteAfterUpload:      deleteAfterUpload,
 		RcloneTransfers:        rcloneTransfers,
 		CatalogAutoRefresh:     true,
@@ -208,21 +226,41 @@ func parseCfg() (*Config, error) {
 	if cfg.VideoFormat < 1 || cfg.VideoFormat > 5 {
 		return nil, errors.New("video format must be between 1 and 5")
 	}
+	
+	// Validate and set defaultOutputs
+	if cfg.DefaultOutputs == "" {
+		cfg.DefaultOutputs = "audio"
+	}
+	validOutputs := map[string]bool{"audio": true, "video": true, "both": true}
+	if !validOutputs[cfg.DefaultOutputs] {
+		return nil, fmt.Errorf("invalid defaultOutputs: %q (must be audio, video, or both)", cfg.DefaultOutputs)
+	}
+	
 	cfg.WantRes = resolveRes[cfg.VideoFormat]
+	cfg.OutPath = strings.TrimSpace(cfg.OutPath)
+	cfg.VideoOutPath = strings.TrimSpace(cfg.VideoOutPath)
+	cfg.RclonePath = strings.TrimSpace(cfg.RclonePath)
+	cfg.RcloneVideoPath = strings.TrimSpace(cfg.RcloneVideoPath)
 	if args.OutPath != "" {
 		cfg.OutPath = args.OutPath
 	}
 	if cfg.OutPath == "" {
 		cfg.OutPath = "Nugs downloads"
 	}
+	if strings.TrimSpace(cfg.VideoOutPath) == "" {
+		cfg.VideoOutPath = cfg.OutPath
+	}
+	if strings.TrimSpace(cfg.RcloneVideoPath) == "" {
+		cfg.RcloneVideoPath = cfg.RclonePath
+	}
 	if cfg.Token != "" {
 		cfg.Token = strings.TrimPrefix(cfg.Token, "Bearer ")
 	}
-	if cfg.UseFfmpegEnvVar {
-		cfg.FfmpegNameStr = "ffmpeg"
-	} else {
-		cfg.FfmpegNameStr = "./ffmpeg"
+	ffmpegName, err := resolveFfmpegBinary(cfg)
+	if err != nil {
+		return nil, err
 	}
+	cfg.FfmpegNameStr = ffmpegName
 	cfg.Urls, err = processUrls(args.Urls)
 	if err != nil {
 		printError("Failed to process URLs")
@@ -232,6 +270,50 @@ func parseCfg() (*Config, error) {
 	cfg.SkipVideos = args.SkipVideos
 	cfg.SkipChapters = args.SkipChapters
 	return cfg, nil
+}
+
+func resolveFfmpegBinary(cfg *Config) (string, error) {
+	preferred := strings.TrimSpace(cfg.FfmpegNameStr)
+
+	// Respect explicit non-default binary names/paths from config.
+	if preferred != "" && preferred != "./ffmpeg" && preferred != "ffmpeg" {
+		if resolved, err := exec.LookPath(preferred); err == nil {
+			return resolved, nil
+		}
+		if info, err := os.Stat(preferred); err == nil && !info.IsDir() {
+			return preferred, nil
+		}
+		return "", fmt.Errorf("configured ffmpeg binary not found: %s", preferred)
+	}
+
+	if cfg.UseFfmpegEnvVar || preferred == "ffmpeg" {
+		if resolved, err := exec.LookPath("ffmpeg"); err == nil {
+			return resolved, nil
+		}
+		return "", errors.New("ffmpeg not found in PATH (install ffmpeg or set ffmpegNameStr to an absolute/local binary path)")
+	}
+
+	// Backward-compatible default: local ./ffmpeg first.
+	candidates := []string{"./ffmpeg"}
+	if exePath, err := os.Executable(); err == nil {
+		exeDir := filepath.Dir(exePath)
+		exeLocal := filepath.Join(exeDir, "ffmpeg")
+		if exeLocal != "./ffmpeg" {
+			candidates = append(candidates, exeLocal)
+		}
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate, nil
+		}
+	}
+
+	// Fallback: use system ffmpeg if available.
+	if resolved, err := exec.LookPath("ffmpeg"); err == nil {
+		return resolved, nil
+	}
+
+	return "", errors.New("ffmpeg binary not found (checked ./ffmpeg and PATH)")
 }
 
 func isShowCountFilterToken(s string) bool {

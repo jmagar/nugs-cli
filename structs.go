@@ -113,6 +113,10 @@ var (
 	symbolGear     = "⚙"
 	symbolPackage  = "📦"
 	symbolRocket   = "🚀"
+
+	symbolAudio = "🎵" // audio only
+	symbolVideo = "🎬" // video only
+	symbolBoth  = "📹" // both available
 )
 
 // Message priority constants for progress box messages
@@ -121,6 +125,54 @@ const (
 	MessagePriorityWarning = 2 // Warning messages (yellow, ⚠ symbol)
 	MessagePriorityError   = 3 // Error messages (red, ✗ symbol)
 )
+
+// MediaType represents the type of media content (audio, video, or both)
+type MediaType int
+
+const (
+	MediaTypeUnknown MediaType = 0
+	MediaTypeAudio   MediaType = 1
+	MediaTypeVideo   MediaType = 2
+	MediaTypeBoth    MediaType = 3
+)
+
+// String returns the string representation of the MediaType
+func (m MediaType) String() string {
+	switch m {
+	case MediaTypeAudio:
+		return "audio"
+	case MediaTypeVideo:
+		return "video"
+	case MediaTypeBoth:
+		return "both"
+	default:
+		return "unknown"
+	}
+}
+
+// ParseMediaType converts a string to a MediaType
+func ParseMediaType(s string) MediaType {
+	switch strings.ToLower(s) {
+	case "audio":
+		return MediaTypeAudio
+	case "video":
+		return MediaTypeVideo
+	case "both":
+		return MediaTypeBoth
+	default:
+		return MediaTypeUnknown
+	}
+}
+
+// HasAudio returns true if the media type includes audio
+func (m MediaType) HasAudio() bool {
+	return m == MediaTypeAudio || m == MediaTypeBoth
+}
+
+// HasVideo returns true if the media type includes video
+func (m MediaType) HasVideo() bool {
+	return m == MediaTypeVideo || m == MediaTypeBoth
+}
 
 type Transport struct{}
 
@@ -139,7 +191,9 @@ type Config struct {
 	Urls                   []string `json:"urls,omitempty"`
 	Format                 int      `json:"format"`
 	OutPath                string   `json:"outPath"`
+	VideoOutPath           string   `json:"videoOutPath,omitempty"` // Local base path for videos (defaults to OutPath)
 	VideoFormat            int      `json:"videoFormat"`
+	DefaultOutputs         string   `json:"defaultOutputs,omitempty"` // "audio", "video", "both"
 	WantRes                string   `json:"wantRes,omitempty"`
 	Token                  string   `json:"token"`
 	UseFfmpegEnvVar        bool     `json:"useFfmpegEnvVar"`
@@ -149,7 +203,8 @@ type Config struct {
 	SkipChapters           bool     `json:"skipChapters,omitempty"`
 	RcloneEnabled          bool     `json:"rcloneEnabled,omitempty"`
 	RcloneRemote           string   `json:"rcloneRemote,omitempty"`
-	RclonePath             string   `json:"rclonePath,omitempty"` // Path on remote storage (NOT local base path)
+	RclonePath             string   `json:"rclonePath,omitempty"`      // Path on remote storage (NOT local base path)
+	RcloneVideoPath        string   `json:"rcloneVideoPath,omitempty"` // Remote base path for videos (defaults to RclonePath)
 	DeleteAfterUpload      bool     `json:"deleteAfterUpload,omitempty"`
 	RcloneTransfers        int      `json:"rcloneTransfers,omitempty"`
 	CatalogAutoRefresh     bool     `json:"catalogAutoRefresh,omitempty"`
@@ -806,6 +861,7 @@ type ArtistMetaCache struct {
 type ShowStatus struct {
 	Show       *AlbArtResp `json:"show"`
 	Downloaded bool        `json:"downloaded"`
+	MediaType  MediaType   `json:"mediaType"`
 }
 
 // ArtistCatalogAnalysis stores the computed status for all shows for one artist.
@@ -821,18 +877,19 @@ type ArtistCatalogAnalysis struct {
 	MissingPct    float64      `json:"missingPct"`
 	CacheUsed     bool         `json:"cacheUsed"`
 	CacheStaleUse bool         `json:"cacheStaleUse"`
+	MediaFilter   MediaType    `json:"mediaFilter"`
 }
 
 // BatchProgressState tracks progress across multiple albums/shows in a batch operation.
 // Used for artist catalog downloads or gap filling to show overall batch progress.
 type BatchProgressState struct {
-	CurrentAlbum  int       // Current album number being processed (1-based)
-	TotalAlbums   int       // Total number of albums in the batch
-	Complete      int       // Number of albums completed successfully
-	Failed        int       // Number of albums that failed
-	Skipped       int       // Number of albums skipped (already exist)
-	StartTime     time.Time // When the batch started
-	CurrentTitle  string    // Title of the current album being processed
+	CurrentAlbum int       // Current album number being processed (1-based)
+	TotalAlbums  int       // Total number of albums in the batch
+	Complete     int       // Number of albums completed successfully
+	Failed       int       // Number of albums that failed
+	Skipped      int       // Number of albums skipped (already exist)
+	StartTime    time.Time // When the batch started
+	CurrentTitle string    // Title of the current album being processed
 }
 
 // Validate ensures batch progress state fields are consistent and within valid bounds
