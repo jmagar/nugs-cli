@@ -324,6 +324,21 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 
 // handleCatalogCommand routes pre-auth "catalog" subcommands. Returns true if handled.
 // Note: "catalog gaps ... fill" requires auth and is handled separately in run().
+// parseMediaModifier scans args for media type modifiers (audio/video/both)
+// and returns the MediaType along with remaining args (with modifier removed).
+func parseMediaModifier(args []string) (MediaType, []string) {
+	for i, arg := range args {
+		mediaType := ParseMediaType(arg)
+		if mediaType != MediaTypeUnknown {
+			// Remove this arg and return rest
+			remaining := append([]string{}, args[:i]...)
+			remaining = append(remaining, args[i+1:]...)
+			return mediaType, remaining
+		}
+	}
+	return MediaTypeUnknown, args
+}
+
 func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "catalog" {
 		return false
@@ -366,8 +381,17 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 		}
 	case "latest":
 		limit := 15
+		argsAfterLatest := []string{}
 		if len(cfg.Urls) > 2 {
-			if parsedLimit, err := strconv.Atoi(cfg.Urls[2]); err == nil {
+			argsAfterLatest = cfg.Urls[2:]
+		}
+		
+		// Extract media modifier
+		mediaFilter, remainingArgs := parseMediaModifier(argsAfterLatest)
+		
+		// Parse limit from remaining args
+		if len(remainingArgs) > 0 {
+			if parsedLimit, err := strconv.Atoi(remainingArgs[0]); err == nil {
 				if parsedLimit < 1 {
 					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
 					return true
@@ -375,49 +399,64 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 				limit = parsedLimit
 			}
 		}
-		err := catalogLatest(limit, jsonLevel)
+		err := catalogLatest(limit, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog latest failed.", err, true)
 		}
 	case "gaps":
 		if len(cfg.Urls) < 3 {
-			printInfo("Usage: nugs catalog gaps <artist_id> [...] [fill]")
-			fmt.Println("       catalog gaps <artist_id> [...] --ids-only")
+			printInfo("Usage: nugs catalog gaps <artist_id> [...] [audio|video|both] [fill]")
+			fmt.Println("       catalog gaps <artist_id> [...] [audio|video|both] --ids-only")
 			return true
 		}
+		
+		// Extract media modifier from args after "catalog gaps"
+		argsAfterGaps := cfg.Urls[2:]
+		mediaFilter, argsAfterGaps := parseMediaModifier(argsAfterGaps)
+		
+		// Handle --ids-only flag
 		idsOnly := false
 		artistIds := []string{}
-		for i := 2; i < len(cfg.Urls); i++ {
-			if cfg.Urls[i] == "--ids-only" {
+		for _, arg := range argsAfterGaps {
+			if arg == "--ids-only" {
 				idsOnly = true
 				continue
 			}
-			artistIds = append(artistIds, cfg.Urls[i])
+			artistIds = append(artistIds, arg)
 		}
+		
 		if len(artistIds) == 0 {
 			fmt.Println("Error: No artist IDs provided")
 			return true
 		}
-		err := catalogGaps(artistIds, cfg, jsonLevel, idsOnly)
+		err := catalogGaps(artistIds, cfg, jsonLevel, idsOnly, mediaFilter)
 		if err != nil {
 			handleErr("Catalog gaps failed.", err, true)
 		}
 	case "list":
 		if len(cfg.Urls) < 3 {
-			printInfo("Usage: nugs catalog coverage <artist_id> [...]")
+			printInfo("Usage: nugs catalog list <artist_id> [...] [audio|video|both]")
 			return true
 		}
-		artistIds := cfg.Urls[2:]
-		err := catalogList(artistIds, cfg, jsonLevel)
+		
+		// Extract media modifier from args after "catalog list"
+		argsAfterList := cfg.Urls[2:]
+		mediaFilter, artistIds := parseMediaModifier(argsAfterList)
+		
+		err := catalogList(artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog list failed.", err, true)
 		}
 	case "coverage":
-		artistIds := []string{}
+		argsAfterCoverage := []string{}
 		if len(cfg.Urls) > 2 {
-			artistIds = cfg.Urls[2:]
+			argsAfterCoverage = cfg.Urls[2:]
 		}
-		err := catalogCoverage(artistIds, cfg, jsonLevel)
+		
+		// Extract media modifier
+		mediaFilter, artistIds := parseMediaModifier(argsAfterCoverage)
+		
+		err := catalogCoverage(artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog coverage failed.", err, true)
 		}

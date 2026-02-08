@@ -142,7 +142,7 @@ func TestCatalogGapsForArtist_DefaultOutputIsMissingListOnly(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := catalogGapsForArtist("3344", cfg, "", false); err != nil {
+		if err := catalogGapsForArtist("3344", cfg, "", false, MediaTypeUnknown); err != nil {
 			t.Fatalf("catalogGapsForArtist failed: %v", err)
 		}
 	})

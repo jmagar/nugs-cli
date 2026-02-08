@@ -162,9 +162,9 @@ func isShowDownloaded(show *AlbArtResp, idx artistPresenceIndex, cfg *Config) bo
 }
 
 // analyzeArtistCatalog analyzes an artist's catalog with optional media type filtering.
-// Delegates to analyzeArtistCatalogMediaAware with MediaTypeUnknown (defaults to cfg.DefaultOutputs).
-func analyzeArtistCatalog(artistID string, cfg *Config, jsonLevel string) (*ArtistCatalogAnalysis, error) {
-	return analyzeArtistCatalogMediaAware(artistID, cfg, jsonLevel, MediaTypeUnknown)
+// Delegates to analyzeArtistCatalogMediaAware.
+func analyzeArtistCatalog(artistID string, cfg *Config, jsonLevel string, mediaFilter MediaType) (*ArtistCatalogAnalysis, error) {
+	return analyzeArtistCatalogMediaAware(artistID, cfg, jsonLevel, mediaFilter)
 }
 
 // printJSON marshals data to JSON and prints it, handling errors properly
@@ -388,7 +388,7 @@ func catalogStats(jsonLevel string) error {
 }
 
 // catalogLatest shows latest additions to catalog
-func catalogLatest(limit int, jsonLevel string) error {
+func catalogLatest(limit int, jsonLevel string, mediaFilter MediaType) error {
 	catalog, err := readCatalogCache()
 	if err != nil {
 		return err
@@ -455,8 +455,8 @@ func catalogLatest(limit int, jsonLevel string) error {
 
 // catalogGapsForArtist finds missing shows for a single artist.
 // Returns structured gap data for aggregation by the caller.
-func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnly bool) error {
-	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
+func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnly bool, mediaFilter MediaType) error {
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter)
 	if err != nil {
 		return err
 	}
@@ -524,7 +524,7 @@ func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnl
 }
 
 // catalogGaps finds missing shows for one or more artists
-func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool) error {
+func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool, mediaFilter MediaType) error {
 	// Process each artist
 	for i, artistId := range artistIds {
 		// Add separator between artists (except before first)
@@ -534,7 +534,7 @@ func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool
 			fmt.Println()
 		}
 
-		err := catalogGapsForArtist(artistId, cfg, jsonLevel, idsOnly)
+		err := catalogGapsForArtist(artistId, cfg, jsonLevel, idsOnly, mediaFilter)
 		if err != nil {
 			// For multiple artists, continue on error but print warning
 			if len(artistIds) > 1 {
@@ -552,7 +552,8 @@ func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool
 
 // catalogGapsFill downloads all missing shows for an artist
 func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, jsonLevel string) error {
-	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
+	// Use Unknown to default to cfg.DefaultOutputs
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, MediaTypeUnknown)
 	if err != nil {
 		return err
 	}
@@ -702,7 +703,7 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 }
 
 // catalogCoverage shows download coverage statistics for artists
-func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
+func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {
 	type coverageStats struct {
 		artistID        string
 		artistName      string
@@ -821,7 +822,7 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 
 	// Get coverage stats for each artist
 	for _, artistId := range artistIds {
-		analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
+		analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			if jsonLevel == "" {
 				printWarning(fmt.Sprintf("Failed to get metadata for artist %s: %v", artistId, err))
@@ -920,7 +921,7 @@ func catalogCoverage(artistIds []string, cfg *Config, jsonLevel string) error {
 }
 
 // catalogList displays all shows for an artist with status indicators
-func catalogList(artistIds []string, cfg *Config, jsonLevel string) error {
+func catalogList(artistIds []string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {
 	// Process each artist
 	for i, artistId := range artistIds {
 		// Add separator between artists (except before first)
@@ -930,7 +931,7 @@ func catalogList(artistIds []string, cfg *Config, jsonLevel string) error {
 			fmt.Println()
 		}
 
-		err := catalogListForArtist(artistId, cfg, jsonLevel)
+		err := catalogListForArtist(artistId, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			// For multiple artists, continue on error but print warning
 			if len(artistIds) > 1 {
@@ -947,8 +948,8 @@ func catalogList(artistIds []string, cfg *Config, jsonLevel string) error {
 }
 
 // catalogListForArtist displays all shows for a single artist with status indicators
-func catalogListForArtist(artistId string, cfg *Config, jsonLevel string) error {
-	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel)
+func catalogListForArtist(artistId string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter)
 	if err != nil {
 		return err
 	}
