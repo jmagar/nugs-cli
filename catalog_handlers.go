@@ -84,7 +84,7 @@ func showExists(show *AlbArtResp, cfg *Config) bool {
 	// Check remote if rclone enabled
 	if cfg.RcloneEnabled {
 		remotePath := filepath.Join(sanitise(show.ArtistName), albumFolder)
-		remoteExists, err := remotePathExists(remotePath, cfg)
+		remoteExists, err := remotePathExists(remotePath, cfg, false)
 		if err != nil {
 			warnRemoteCheckError(err)
 			return false
@@ -150,7 +150,7 @@ func isShowDownloaded(show *AlbArtResp, idx artistPresenceIndex, cfg *Config) bo
 	// Fallback for remote-list failures to preserve correctness.
 	if cfg.RcloneEnabled && idx.remoteListErr != nil {
 		remotePath := filepath.Join(idx.artistFolder, albumFolder)
-		remoteExists, err := remotePathExists(remotePath, cfg)
+		remoteExists, err := remotePathExists(remotePath, cfg, false)
 		if err != nil {
 			warnRemoteCheckError(err)
 			return false
@@ -550,20 +550,26 @@ func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnl
 		}
 
 		table := NewTable([]TableColumn{
-			{Header: "ID", Width: 10, Align: "right"},
-			{Header: "Date", Width: 14, Align: "left"},
-			{Header: "Title", Width: 60, Align: "left"},
-		})
+		{Header: "Type", Width: 6, Align: "center"},
+		{Header: "ID", Width: 10, Align: "right"},
+		{Header: "Date", Width: 14, Align: "left"},
+		{Header: "Title", Width: 55, Align: "left"},
+	})
 
-		for _, status := range analysis.MissingShows {
-			show := status.Show
-			table.AddRow(
-				fmt.Sprintf("%d", show.ContainerID),
-				show.PerformanceDateShortYearFirst,
-				show.ContainerInfo,
-			)
-		}
-		table.Print()
+	for _, status := range analysis.MissingShows {
+		show := status.Show
+		mediaIndicator := getMediaTypeIndicator(status.MediaType)
+		table.AddRow(
+			mediaIndicator,
+			fmt.Sprintf("%d", show.ContainerID),
+			show.PerformanceDateShortYearFirst,
+			show.ContainerInfo,
+		)
+	}
+	table.Print()
+
+	fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
+		colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth)
 	}
 	return nil
 }
@@ -643,9 +649,10 @@ func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, j
 
 	// Create ONE progress box for the entire batch (reused across all shows)
 	sharedProgressBox := &ProgressBoxState{
-		RcloneEnabled: cfg.RcloneEnabled,
-		BatchState:    batchState,
-		StartTime:     time.Now(),
+		RcloneEnabled:  cfg.RcloneEnabled,
+		BatchState:     batchState,
+		StartTime:      time.Now(),
+		RenderInterval: defaultProgressRenderInterval,
 	}
 	setCurrentProgressBox(sharedProgressBox)
 	defer setCurrentProgressBox(nil)
@@ -1035,30 +1042,37 @@ func catalogListForArtist(artistId string, cfg *Config, jsonLevel string) error 
 		printSection("All Shows")
 
 		table := NewTable([]TableColumn{
-			{Header: "Status", Width: 8, Align: "center"},
-			{Header: "ID", Width: 10, Align: "right"},
-			{Header: "Date", Width: 14, Align: "left"},
-			{Header: "Title", Width: 55, Align: "left"},
-		})
+		{Header: "Type", Width: 6, Align: "center"},
+		{Header: "Status", Width: 8, Align: "center"},
+		{Header: "ID", Width: 10, Align: "right"},
+		{Header: "Date", Width: 14, Align: "left"},
+		{Header: "Title", Width: 50, Align: "left"},
+	})
 
-		for _, item := range analysis.Shows {
-			show := item.Show
-			status := ""
-			if item.Downloaded {
-				status = fmt.Sprintf("%s%s%s", colorGreen, symbolCheck, colorReset)
-			} else {
-				status = fmt.Sprintf("%s%s%s", colorRed, symbolCross, colorReset)
-			}
-
-			table.AddRow(
-				status,
-				fmt.Sprintf("%d", show.ContainerID),
-				show.PerformanceDateShortYearFirst,
-				show.ContainerInfo,
-			)
+	for _, item := range analysis.Shows {
+		show := item.Show
+		mediaIndicator := getMediaTypeIndicator(item.MediaType)
+		status := ""
+		if item.Downloaded {
+			status = fmt.Sprintf("%s%s%s", colorGreen, symbolCheck, colorReset)
+		} else {
+			status = fmt.Sprintf("%s%s%s", colorRed, symbolCross, colorReset)
 		}
 
-		table.Print()
+		table.AddRow(
+			mediaIndicator,
+			status,
+			fmt.Sprintf("%d", show.ContainerID),
+			show.PerformanceDateShortYearFirst,
+			show.ContainerInfo,
+		)
+	}
+
+	table.Print()
+
+	fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both  |  %s%s%s Downloaded  %s%s%s Missing\n",
+		colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth,
+		colorGreen, symbolCheck, colorReset, colorRed, symbolCross, colorReset)
 
 		fmt.Printf("\n%s%s%s Legend: %s%s%s Downloaded  %s%s%s Missing\n",
 			colorCyan, symbolInfo, colorReset,

@@ -39,6 +39,20 @@ func printMusic(msg string) {
 	fmt.Printf("%s%s%s %s%s\n", colorGreen, symbolMusic, colorReset, msg, colorReset)
 }
 
+// getMediaTypeIndicator returns the emoji symbol for a media type
+func getMediaTypeIndicator(mediaType MediaType) string {
+	switch mediaType {
+	case MediaTypeAudio:
+		return symbolAudio // 🎵
+	case MediaTypeVideo:
+		return symbolVideo // 🎬
+	case MediaTypeBoth:
+		return symbolBoth // 📹
+	default:
+		return ""
+	}
+}
+
 func describeAudioFormat(format int) string {
 	switch format {
 	case 1:
@@ -91,15 +105,25 @@ func printStartupEnvironment(cfg *Config, jsonLevel string) {
 		return
 	}
 	printSection("Environment")
+	configPath := loadedConfigPath
+	if strings.TrimSpace(configPath) == "" {
+		configPath = "(unknown)"
+	}
+	printKeyValue("Config File", configPath, colorCyan)
 	printKeyValue("Auth", describeAuthStatus(cfg), colorYellow)
 	printKeyValue("Audio Format", describeAudioFormat(cfg.Format), colorYellow)
 	printKeyValue("Video Format", describeVideoFormat(cfg.VideoFormat), colorYellow)
-	printKeyValue("Output", cfg.OutPath, colorCyan)
-	rclonePath := "Disabled"
+	printKeyValue("FFmpeg Binary", cfg.FfmpegNameStr, colorCyan)
+	printKeyValue("Audio Output", cfg.OutPath, colorCyan)
+	printKeyValue("Video Output", getVideoOutPath(cfg), colorCyan)
+	rcloneAudioPath := "Disabled"
+	rcloneVideoPath := "Disabled"
 	if cfg.RcloneEnabled {
-		rclonePath = fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+		rcloneAudioPath = fmt.Sprintf("%s:%s", cfg.RcloneRemote, cfg.RclonePath)
+		rcloneVideoPath = fmt.Sprintf("%s:%s", cfg.RcloneRemote, getRcloneBasePath(cfg, true))
 	}
-	printKeyValue("Rclone Path", rclonePath, colorCyan)
+	printKeyValue("Rclone Audio Path", rcloneAudioPath, colorCyan)
+	printKeyValue("Rclone Video Path", rcloneVideoPath, colorCyan)
 	printKeyValue("Rclone Status", checkRclonePathOnline(cfg), colorYellow)
 	fmt.Println("")
 }
