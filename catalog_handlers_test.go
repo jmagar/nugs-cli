@@ -89,7 +89,7 @@ func TestAnalyzeArtistCatalog_UsesCacheAndComputesCounts(t *testing.T) {
 		RcloneTransfers: 0,
 	}
 
-	analysis, err := analyzeArtistCatalog("1125", cfg, "")
+	analysis, err := analyzeArtistCatalog("1125", cfg, "", MediaTypeBoth)
 	if err != nil {
 		t.Fatalf("analyzeArtistCatalog failed: %v", err)
 	}
