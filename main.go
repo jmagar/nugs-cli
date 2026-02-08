@@ -9,14 +9,6 @@ import (
 	"strings"
 )
 
-// JSON output levels
-const (
-	JSONLevelMinimal  = "minimal"
-	JSONLevelStandard = "standard"
-	JSONLevelExtended = "extended"
-	JSONLevelRaw      = "raw"
-)
-
 func init() {
 	// Check if --json flag or completion command is present, if so, suppress banner
 	if slices.Contains(os.Args, "--json") {

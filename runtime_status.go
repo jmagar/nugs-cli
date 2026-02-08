@@ -9,25 +9,8 @@ import (
 	"time"
 )
 
-type RuntimeStatus struct {
-	PID        int    `json:"pid"`
-	State      string `json:"state"`
-	StartedAt  string `json:"startedAt"`
-	UpdatedAt  string `json:"updatedAt"`
-	Label      string `json:"label,omitempty"`
-	Percentage int    `json:"percentage,omitempty"`
-	Speed      string `json:"speed,omitempty"`
-	Current    string `json:"current,omitempty"`
-	Total      string `json:"total,omitempty"`
-	Errors     int    `json:"errors"`
-	Warnings   int    `json:"warnings"`
-}
-
-type RuntimeControl struct {
-	Pause     bool   `json:"pause"`
-	Cancel    bool   `json:"cancel"`
-	UpdatedAt string `json:"updatedAt"`
-}
+// RuntimeStatus and RuntimeControl types are defined in internal/model
+// and aliased in model_aliases.go. Only runtime functions remain here.
 
 var (
 	runtimeStatusMu        sync.Mutex
