@@ -51,6 +51,10 @@ type ProgressBoxState struct {
 	ErrorTracks    int           // Number of tracks that failed
 	StartTime      time.Time     // When the download started
 
+	// Upload timing tracking
+	UploadStartTime time.Time     // When the upload started
+	UploadDuration  time.Duration // Total time taken for upload
+
 	// Phase tracking (Tier 1 enhancement)
 	CurrentPhase string // Current operation phase (download, upload, verify, paused, error)
 	StatusColor  string // ANSI color code for current phase
