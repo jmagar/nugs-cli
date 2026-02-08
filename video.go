@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -40,6 +41,35 @@ func getVideoSku(products []Product) int {
 		}
 	}
 	return 0
+}
+
+// getShowMediaType determines what media types a show offers (audio/video/both).
+// Uses getVideoSku to check for video products and checks for audio products.
+// Returns MediaTypeBoth if both video and audio, MediaTypeVideo if video only,
+// MediaTypeAudio if audio only, or MediaTypeUnknown if neither.
+func getShowMediaType(show *AlbArtResp) MediaType {
+	hasVideo := getVideoSku(show.Products) != 0
+	hasAudio := false
+
+	// Check for audio products (non-video formats)
+	for _, product := range show.Products {
+		if product.FormatStr != "VIDEO ON DEMAND" &&
+			product.FormatStr != "LIVE HD VIDEO" {
+			hasAudio = true
+			break
+		}
+	}
+
+	if hasVideo && hasAudio {
+		return MediaTypeBoth
+	}
+	if hasVideo {
+		return MediaTypeVideo
+	}
+	if hasAudio {
+		return MediaTypeAudio
+	}
+	return MediaTypeUnknown
 }
 
 func getLstreamSku(products []*ProductFormatList) int {
@@ -144,7 +174,7 @@ func getSegUrls(manifestUrl, query string) ([]string, error) {
 	return segUrls, nil
 }
 
-func downloadVideo(videoPath, _url string) error {
+func downloadVideo(videoPath, _url string, onProgress func(downloaded, total, speed int64)) error {
 	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_WRONLY, 0755)
 	if err != nil {
 		return err
@@ -182,13 +212,16 @@ func downloadVideo(videoPath, _url string) error {
 		TotalStr:   humanize.Bytes(uint64(totalBytes)),
 		StartTime:  time.Now().UnixMilli(),
 		Downloaded: startByte,
+		OnProgress: onProgress,
 	}
 	_, err = io.Copy(f, io.TeeReader(do.Body, counter))
-	fmt.Println("")
+	if onProgress == nil {
+		fmt.Println("")
+	}
 	return err
 }
 
-func downloadLstream(videoPath, baseUrl string, segUrls []string) error {
+func downloadLstream(videoPath, baseUrl string, segUrls []string, onProgress func(segNum, segTotal int)) error {
 	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
 	if err != nil {
 		return err
@@ -197,7 +230,11 @@ func downloadLstream(videoPath, baseUrl string, segUrls []string) error {
 	segTotal := len(segUrls)
 	for segNum, segUrl := range segUrls {
 		segNum++
-		fmt.Printf("\rSegment %d of %d.", segNum, segTotal)
+		if onProgress != nil {
+			onProgress(segNum, segTotal)
+		} else {
+			fmt.Printf("\rSegment %d of %d.", segNum, segTotal)
+		}
 		req, err := http.NewRequest(http.MethodGet, baseUrl+segUrl, nil)
 		if err != nil {
 			return err
@@ -216,7 +253,9 @@ func downloadLstream(videoPath, baseUrl string, segUrls []string) error {
 			return err
 		}
 	}
-	fmt.Println("")
+	if onProgress == nil {
+		fmt.Println("")
+	}
 	return err
 }
 
@@ -395,6 +434,36 @@ func parseLstreamMeta(_meta *ArtistMeta) *AlbumMeta {
 	return parsed
 }
 
+func prepareVideoProgressBox(meta *AlbArtResp, cfg *Config, progressBox *ProgressBoxState) (*ProgressBoxState, bool) {
+	if progressBox != nil {
+		return progressBox, false
+	}
+
+	showNumber := "Video"
+	if meta.PerformanceDateShort != "" {
+		showNumber = meta.PerformanceDateShort
+	}
+
+	box := &ProgressBoxState{
+		ShowTitle:      meta.ContainerInfo,
+		ShowNumber:     showNumber,
+		TrackNumber:    1,
+		TrackTotal:     1,
+		TrackName:      "Video Stream",
+		ShowDownloaded: "0 B",
+		ShowTotal:      "Unknown",
+		RcloneEnabled:  cfg.RcloneEnabled,
+		StartTime:      time.Now(),
+		RenderInterval: defaultProgressRenderInterval,
+	}
+
+	box.SetPhase("verify")
+	setCurrentProgressBox(box)
+	renderProgressBox(box)
+
+	return box, true
+}
+
 // video downloads a video from Nugs.net using the provided videoID.
 // If _meta is provided, uses it instead of fetching metadata. uguID is used for purchased videos.
 // The isLstream parameter indicates whether this is a livestream video.
@@ -419,6 +488,11 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 			return err
 		}
 		meta = m.Response
+	}
+
+	progressBox, createdProgressBox := prepareVideoProgressBox(meta, cfg, progressBox)
+	if createdProgressBox {
+		defer setCurrentProgressBox(nil)
 	}
 
 	if !cfg.SkipChapters {
@@ -460,7 +534,7 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 
 	// Create artist directory
 	artistFolder := sanitise(meta.ArtistName)
-	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	artistPath := filepath.Join(getVideoOutPath(cfg), artistFolder)
 	err = makeDirs(artistPath)
 	if err != nil {
 		printError("Failed to make artist folder")
@@ -478,6 +552,17 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	if exists {
 		printInfo(fmt.Sprintf("Video exists %s skipping", symbolArrow))
 		return nil
+	}
+	if cfg.RcloneEnabled {
+		remoteVideoPath := path.Join(artistFolder, filepath.Base(vidPath))
+		printInfo(fmt.Sprintf("Checking remote for video: %s%s%s", colorCyan, filepath.Base(vidPath), colorReset))
+		remoteExists, checkErr := remotePathExists(remoteVideoPath, cfg, true)
+		if checkErr != nil {
+			printWarning(fmt.Sprintf("Failed to check remote video path: %v", checkErr))
+		} else if remoteExists {
+			printSuccess(fmt.Sprintf("Video found on remote %s skipping", symbolArrow))
+			return nil
+		}
 	}
 	manBaseUrl, query, err := getManifestBase(manifestUrl)
 	if err != nil {
@@ -501,10 +586,63 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 	}
 	fmt.Printf("%d Kbps, %s (%s)\n",
 		variant.Bandwidth/1000, retRes, variant.Resolution)
+
+	if progressBox != nil {
+		progressBox.mu.Lock()
+		progressBox.TrackName = filepath.Base(vidPath)
+		progressBox.TrackFormat = fmt.Sprintf("%d Kbps, %s (%s)", variant.Bandwidth/1000, retRes, variant.Resolution)
+		progressBox.Downloaded = "0 B"
+		progressBox.DownloadTotal = "Unknown"
+		progressBox.ShowDownloaded = "0 B"
+		progressBox.ShowTotal = "Unknown"
+		progressBox.SetPhase("download")
+		progressBox.mu.Unlock()
+		progressBox.SetMessage(MessagePriorityStatus, "Downloading video stream", 5*time.Second)
+		renderProgressBox(progressBox)
+	}
+
 	if isLstream {
-		err = downloadLstream(VidPathTs, manBaseUrl, segUrls)
+		err = downloadLstream(VidPathTs, manBaseUrl, segUrls, func(segNum, segTotal int) {
+			if progressBox == nil {
+				return
+			}
+			percent := 0
+			if segTotal > 0 {
+				percent = int(float64(segNum) / float64(segTotal) * 100)
+			}
+			progressBox.mu.Lock()
+			progressBox.DownloadPercent = percent
+			progressBox.Downloaded = fmt.Sprintf("%d segments", segNum)
+			progressBox.DownloadTotal = fmt.Sprintf("%d segments", segTotal)
+			progressBox.ShowPercent = percent
+			progressBox.ShowDownloaded = progressBox.Downloaded
+			progressBox.ShowTotal = progressBox.DownloadTotal
+			progressBox.mu.Unlock()
+			renderProgressBox(progressBox)
+		})
 	} else {
-		err = downloadVideo(VidPathTs, manBaseUrl+segUrls[0])
+		err = downloadVideo(VidPathTs, manBaseUrl+segUrls[0], func(downloaded, total, speed int64) {
+			if progressBox == nil {
+				return
+			}
+			totalStr := "Unknown"
+			percent := 0
+			if total > 0 {
+				totalStr = humanize.Bytes(uint64(total))
+				percent = int(float64(downloaded) / float64(total) * 100)
+			}
+
+			progressBox.mu.Lock()
+			progressBox.DownloadPercent = percent
+			progressBox.DownloadSpeed = humanize.Bytes(uint64(speed))
+			progressBox.Downloaded = humanize.Bytes(uint64(downloaded))
+			progressBox.DownloadTotal = totalStr
+			progressBox.ShowPercent = percent
+			progressBox.ShowDownloaded = progressBox.Downloaded
+			progressBox.ShowTotal = progressBox.DownloadTotal
+			progressBox.mu.Unlock()
+			renderProgressBox(progressBox)
+		})
 	}
 	if err != nil {
 		printError("Failed to download video segments")
@@ -523,6 +661,11 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 		}
 	}
 	printInfo("Putting into MP4 container...")
+	if progressBox != nil {
+		progressBox.SetPhase("verify")
+		progressBox.SetMessage(MessagePriorityStatus, "Converting TS to MP4", 5*time.Second)
+		renderProgressBox(progressBox)
+	}
 	err = tsToMp4(VidPathTs, vidPath, cfg.FfmpegNameStr, chapsAvail)
 	if err != nil {
 		printError("Failed to put TS into MP4 container")
@@ -541,11 +684,29 @@ func video(videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta
 
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
+		if progressBox != nil {
+			progressBox.SetPhase("upload")
+			progressBox.SetMessage(MessagePriorityStatus, "Uploading video to rclone", 5*time.Second)
+			renderProgressBox(progressBox)
+		}
 		// Upload the video file to the artist folder on remote
-		err = uploadToRclone(vidPath, artistFolder, cfg, progressBox)
+		err = uploadToRclone(vidPath, artistFolder, cfg, progressBox, true)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}
+	}
+
+	if progressBox != nil {
+		progressBox.mu.Lock()
+		progressBox.IsComplete = true
+		progressBox.CompletionTime = time.Now()
+		progressBox.TotalDuration = time.Since(progressBox.StartTime)
+		progressBox.mu.Unlock()
+	}
+
+	if createdProgressBox {
+		renderCompletionSummary(progressBox)
+		fmt.Println("")
 	}
 
 	return nil

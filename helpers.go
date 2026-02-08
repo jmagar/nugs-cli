@@ -150,6 +150,26 @@ func validatePath(path string) error {
 	return nil
 }
 
+func getVideoOutPath(cfg *Config) string {
+	if cfg == nil {
+		return ""
+	}
+	if strings.TrimSpace(cfg.VideoOutPath) != "" {
+		return cfg.VideoOutPath
+	}
+	return cfg.OutPath
+}
+
+func getRcloneBasePath(cfg *Config, isVideo bool) string {
+	if cfg == nil {
+		return ""
+	}
+	if isVideo && strings.TrimSpace(cfg.RcloneVideoPath) != "" {
+		return cfg.RcloneVideoPath
+	}
+	return cfg.RclonePath
+}
+
 // calculateLocalSize walks the directory tree and calculates total size in bytes (Tier 1 enhancement)
 // Returns the total size of all files in the directory, or 0 if an error occurs
 func calculateLocalSize(localPath string) int64 {
@@ -170,4 +190,22 @@ func calculateLocalSize(localPath string) int64 {
 	}
 
 	return totalSize
+}
+
+// getOutPathForMedia returns the correct local output path based on media type.
+// Uses VideoOutPath for video content, falls back to OutPath for audio or if VideoOutPath is empty.
+func getOutPathForMedia(cfg *Config, mediaType MediaType) string {
+	if mediaType.HasVideo() && cfg.VideoOutPath != "" {
+		return cfg.VideoOutPath
+	}
+	return cfg.OutPath
+}
+
+// getRclonePathForMedia returns the correct remote path based on media type.
+// Uses RcloneVideoPath for video content, falls back to RclonePath for audio or if RcloneVideoPath is empty.
+func getRclonePathForMedia(cfg *Config, mediaType MediaType) string {
+	if mediaType.HasVideo() && cfg.RcloneVideoPath != "" {
+		return cfg.RcloneVideoPath
+	}
+	return cfg.RclonePath
 }
