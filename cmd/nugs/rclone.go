@@ -4,6 +4,7 @@ package main
 // These will be removed in Phase 12 when all callers move to internal packages.
 
 import (
+	"fmt"
 	"os/exec"
 	"time"
 
@@ -69,16 +70,26 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 
 		err := rclone.UploadToRclone(localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
 
-		// Set upload duration and force final render with pause for visibility
+		// Set upload duration and final state (success or error)
+		progressBox.Mu.Lock()
 		if err == nil {
-			progressBox.Mu.Lock()
 			progressBox.UploadDuration = time.Since(progressBox.UploadStartTime)
 			progressBox.UploadPercent = 100
-			progressBox.ForceRender = true
-			progressBox.Mu.Unlock()
-			renderProgressBox(progressBox)
-			time.Sleep(500 * time.Millisecond) // Pause so user sees 100% upload
+			progressBox.CurrentPhase = "complete"
+		} else {
+			// Calculate duration even on error for stats
+			if !progressBox.UploadStartTime.IsZero() {
+				progressBox.UploadDuration = time.Since(progressBox.UploadStartTime)
+			}
+			progressBox.CurrentPhase = "error"
+			progressBox.SetMessage(model.MessagePriorityError, fmt.Sprintf("Upload failed: %v", err), 5*time.Second)
 		}
+		progressBox.ForceRender = true
+		progressBox.Mu.Unlock()
+
+		// Force final render with pause for visibility
+		renderProgressBox(progressBox)
+		time.Sleep(500 * time.Millisecond)
 
 		return err
 	}
