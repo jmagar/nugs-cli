@@ -1,121 +1,73 @@
 package main
 
-import (
-	"os"
-	"strings"
+// Theme wrappers delegating to internal/ui during migration.
+// These will be removed in Phase 12 when all callers move to internal packages.
+// The ui package init() runs first (Go import ordering), setting colors before
+// these vars are initialized.
+
+import "github.com/jmagar/nugs-cli/internal/ui"
+
+// Color variable wrappers - these are value copies from ui after its init runs.
+var (
+	colorReset  string
+	colorRed    string
+	colorGreen  string
+	colorYellow string
+	colorBlue   string
+	colorPurple string
+	colorCyan   string
+	colorBold   string
+	activeTheme string
 )
 
-// ANSI color codes
+// Symbol variable wrappers
 var (
-	colorReset  = "\033[0m"
-	colorRed    = "\033[91m"
-	colorGreen  = "\033[92m"
-	colorYellow = "\033[93m"
-	colorBlue   = "\033[94m"
-	colorPurple = "\033[95m"
-	colorCyan   = "\033[96m"
-	colorBold   = "\033[1m"
-	activeTheme = "nordonedark"
+	symbolCheck    string
+	symbolCross    string
+	symbolArrow    string
+	symbolMusic    string
+	symbolUpload   string
+	symbolDownload string
+	symbolInfo     string
+	symbolWarning  string
+	symbolGear     string
+	symbolPackage  string
+	symbolRocket   string
+	symbolAudio    string
+	symbolVideo    string
+	symbolBoth     string
 )
 
 func init() {
-	initColorPalette()
+	syncFromUI()
 }
 
-func initColorPalette() {
-	theme := strings.ToLower(strings.TrimSpace(os.Getenv("NUGS_THEME")))
-	if theme != "" {
-		activeTheme = theme
-	}
+func syncFromUI() {
+	colorReset = ui.ColorReset
+	colorRed = ui.ColorRed
+	colorGreen = ui.ColorGreen
+	colorYellow = ui.ColorYellow
+	colorBlue = ui.ColorBlue
+	colorPurple = ui.ColorPurple
+	colorCyan = ui.ColorCyan
+	colorBold = ui.ColorBold
+	activeTheme = ui.ActiveTheme
 
-	if activeTheme == "vivid" {
-		initVividPalette()
-		return
-	}
-	initNordOneDarkPalette()
+	symbolCheck = ui.SymbolCheck
+	symbolCross = ui.SymbolCross
+	symbolArrow = ui.SymbolArrow
+	symbolMusic = ui.SymbolMusic
+	symbolUpload = ui.SymbolUpload
+	symbolDownload = ui.SymbolDownload
+	symbolInfo = ui.SymbolInfo
+	symbolWarning = ui.SymbolWarning
+	symbolGear = ui.SymbolGear
+	symbolPackage = ui.SymbolPackage
+	symbolRocket = ui.SymbolRocket
+	symbolAudio = ui.SymbolAudio
+	symbolVideo = ui.SymbolVideo
+	symbolBoth = ui.SymbolBoth
 }
-
-func initVividPalette() {
-	if supportsTruecolor() {
-		colorRed = "\033[1;38;2;255;76;102m"
-		colorGreen = "\033[1;38;2;80;250;123m"
-		colorYellow = "\033[1;38;2;255;221;87m"
-		colorBlue = "\033[1;38;2;110;196;255m"
-		colorPurple = "\033[1;38;2;215;130;255m"
-		colorCyan = "\033[1;38;2;0;245;255m"
-		return
-	}
-	if supports256Color() {
-		colorRed = "\033[1;38;5;203m"
-		colorGreen = "\033[1;38;5;84m"
-		colorYellow = "\033[1;38;5;227m"
-		colorBlue = "\033[1;38;5;81m"
-		colorPurple = "\033[1;38;5;177m"
-		colorCyan = "\033[1;38;5;51m"
-		return
-	}
-	// Basic ANSI fallback
-	colorRed = "\033[1;91m"
-	colorGreen = "\033[1;92m"
-	colorYellow = "\033[1;93m"
-	colorBlue = "\033[1;94m"
-	colorPurple = "\033[1;95m"
-	colorCyan = "\033[1;96m"
-}
-
-func initNordOneDarkPalette() {
-	if supportsTruecolor() {
-		// Vibrant nord + one-dark blend
-		colorRed = "\033[1;38;2;224;108;117m"    // one-dark red
-		colorGreen = "\033[1;38;2;152;195;121m"  // one-dark green
-		colorYellow = "\033[1;38;2;229;192;123m" // one-dark yellow
-		colorBlue = "\033[1;38;2;143;188;255m"   // brighter nord blue
-		colorPurple = "\033[1;38;2;180;142;255m" // nord-ish purple accent
-		colorCyan = "\033[1;38;2;136;220;255m"   // icy cyan
-		return
-	}
-	if supports256Color() {
-		colorRed = "\033[1;38;5;210m"
-		colorGreen = "\033[1;38;5;114m"
-		colorYellow = "\033[1;38;5;222m"
-		colorBlue = "\033[1;38;5;111m"
-		colorPurple = "\033[1;38;5;183m"
-		colorCyan = "\033[1;38;5;159m"
-	}
-}
-
-func supportsTruecolor() bool {
-	term := strings.ToLower(os.Getenv("TERM"))
-	colorTerm := strings.ToLower(os.Getenv("COLORTERM"))
-	return strings.Contains(colorTerm, "truecolor") ||
-		strings.Contains(colorTerm, "24bit") ||
-		strings.Contains(term, "truecolor") ||
-		strings.Contains(term, "24bit")
-}
-
-func supports256Color() bool {
-	term := strings.ToLower(os.Getenv("TERM"))
-	return strings.Contains(term, "256color")
-}
-
-// Unicode symbols
-var (
-	symbolCheck    = "✓"
-	symbolCross    = "✗"
-	symbolArrow    = "→"
-	symbolMusic    = "♪"
-	symbolUpload   = "⬆"
-	symbolDownload = "⬇"
-	symbolInfo     = "ℹ"
-	symbolWarning  = "⚠"
-	symbolGear     = "⚙"
-	symbolPackage  = "📦"
-	symbolRocket   = "🚀"
-
-	symbolAudio = "🎵" // audio only
-	symbolVideo = "🎬" // video only
-	symbolBoth  = "📹" // both available
-)
 
 // WriteCounter tracks download progress.
 // Kept in root package because it has a Write() method defined in download.go.
