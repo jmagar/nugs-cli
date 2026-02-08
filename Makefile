@@ -4,7 +4,7 @@
 build:
 	@mkdir -p ~/.local/bin
 	@echo "Building nugs..."
-	@go build -o ~/.local/bin/nugs .
+	@go build -o ~/.local/bin/nugs ./cmd/nugs
 	@echo "done: ~/.local/bin/nugs"
 
 # Clean removes binary from ~/.local/bin
