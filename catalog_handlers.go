@@ -387,8 +387,10 @@ func catalogStats(jsonLevel string) error {
 	return nil
 }
 
-// catalogLatest shows latest additions to catalog
-func catalogLatest(limit int, jsonLevel string, mediaFilter MediaType) error {
+// catalogLatest shows latest additions to catalog.
+// Note: media filtering is not supported for latest because the LatestCatalogResp
+// RecentItems don't include Products data needed for media type detection.
+func catalogLatest(limit int, jsonLevel string) error {
 	catalog, err := readCatalogCache()
 	if err != nil {
 		return err
@@ -499,26 +501,26 @@ func catalogGapsForArtist(artistId string, cfg *Config, jsonLevel string, idsOnl
 		}
 
 		table := NewTable([]TableColumn{
-		{Header: "Type", Width: 6, Align: "center"},
-		{Header: "ID", Width: 10, Align: "right"},
-		{Header: "Date", Width: 14, Align: "left"},
-		{Header: "Title", Width: 55, Align: "left"},
-	})
+			{Header: "Type", Width: 6, Align: "center"},
+			{Header: "ID", Width: 10, Align: "right"},
+			{Header: "Date", Width: 14, Align: "left"},
+			{Header: "Title", Width: 55, Align: "left"},
+		})
 
-	for _, status := range analysis.MissingShows {
-		show := status.Show
-		mediaIndicator := getMediaTypeIndicator(status.MediaType)
-		table.AddRow(
-			mediaIndicator,
-			fmt.Sprintf("%d", show.ContainerID),
-			show.PerformanceDateShortYearFirst,
-			show.ContainerInfo,
-		)
-	}
-	table.Print()
+		for _, status := range analysis.MissingShows {
+			show := status.Show
+			mediaIndicator := getMediaTypeIndicator(status.MediaType)
+			table.AddRow(
+				mediaIndicator,
+				fmt.Sprintf("%d", show.ContainerID),
+				show.PerformanceDateShortYearFirst,
+				show.ContainerInfo,
+			)
+		}
+		table.Print()
 
-	fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
-		colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth)
+		fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
+			colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth)
 	}
 	return nil
 }
@@ -551,9 +553,9 @@ func catalogGaps(artistIds []string, cfg *Config, jsonLevel string, idsOnly bool
 }
 
 // catalogGapsFill downloads all missing shows for an artist
-func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, jsonLevel string) error {
-	// Use Unknown to default to cfg.DefaultOutputs
-	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, MediaTypeUnknown)
+func catalogGapsFill(artistId string, cfg *Config, streamParams *StreamParams, jsonLevel string, mediaFilter MediaType) error {
+	// Use provided mediaFilter (or Unknown to default to cfg.DefaultOutputs if not specified)
+	analysis, err := analyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter)
 	if err != nil {
 		return err
 	}
@@ -992,42 +994,37 @@ func catalogListForArtist(artistId string, cfg *Config, jsonLevel string, mediaF
 		printSection("All Shows")
 
 		table := NewTable([]TableColumn{
-		{Header: "Type", Width: 6, Align: "center"},
-		{Header: "Status", Width: 8, Align: "center"},
-		{Header: "ID", Width: 10, Align: "right"},
-		{Header: "Date", Width: 14, Align: "left"},
-		{Header: "Title", Width: 50, Align: "left"},
-	})
+			{Header: "Type", Width: 6, Align: "center"},
+			{Header: "Status", Width: 8, Align: "center"},
+			{Header: "ID", Width: 10, Align: "right"},
+			{Header: "Date", Width: 14, Align: "left"},
+			{Header: "Title", Width: 50, Align: "left"},
+		})
 
-	for _, item := range analysis.Shows {
-		show := item.Show
-		mediaIndicator := getMediaTypeIndicator(item.MediaType)
-		status := ""
-		if item.Downloaded {
-			status = fmt.Sprintf("%s%s%s", colorGreen, symbolCheck, colorReset)
-		} else {
-			status = fmt.Sprintf("%s%s%s", colorRed, symbolCross, colorReset)
+		for _, item := range analysis.Shows {
+			show := item.Show
+			mediaIndicator := getMediaTypeIndicator(item.MediaType)
+			status := ""
+			if item.Downloaded {
+				status = fmt.Sprintf("%s%s%s", colorGreen, symbolCheck, colorReset)
+			} else {
+				status = fmt.Sprintf("%s%s%s", colorRed, symbolCross, colorReset)
+			}
+
+			table.AddRow(
+				mediaIndicator,
+				status,
+				fmt.Sprintf("%d", show.ContainerID),
+				show.PerformanceDateShortYearFirst,
+				show.ContainerInfo,
+			)
 		}
 
-		table.AddRow(
-			mediaIndicator,
-			status,
-			fmt.Sprintf("%d", show.ContainerID),
-			show.PerformanceDateShortYearFirst,
-			show.ContainerInfo,
-		)
-	}
+		table.Print()
 
-	table.Print()
-
-	fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both  |  %s%s%s Downloaded  %s%s%s Missing\n",
-		colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth,
-		colorGreen, symbolCheck, colorReset, colorRed, symbolCross, colorReset)
-
-		fmt.Printf("\n%s%s%s Legend: %s%s%s Downloaded  %s%s%s Missing\n",
-			colorCyan, symbolInfo, colorReset,
-			colorGreen, symbolCheck, colorReset,
-			colorRed, symbolCross, colorReset)
+		fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both  |  %s%s%s Downloaded  %s%s%s Missing\n",
+			colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth,
+			colorGreen, symbolCheck, colorReset, colorRed, symbolCross, colorReset)
 		fmt.Printf("  To download: %snugs <container_id>%s\n\n",
 			colorBold, colorReset)
 	}

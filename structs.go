@@ -219,8 +219,8 @@ type Args struct {
 	Format       int      `arg:"-f" default:"-1" help:"Track download format.\n			 1 = 16-bit / 44.1 kHz ALAC\n			 2 = 16-bit / 44.1 kHz FLAC\n			 3 = 24-bit / 48 kHz MQA\n			 4 = 360 Reality Audio / best available\n			 5 = 150 Kbps AAC"`
 	VideoFormat  int      `arg:"-F" default:"-1" help:"Video download format.\n			 1 = 480p\n			 2 = 720p\n			 3 = 1080p\n			 4 = 1440p\n			 5 = 4K / best available"`
 	OutPath      string   `arg:"-o" help:"Where to download to. Path will be made if it doesn't already exist."`
-	ForceVideo   bool     `arg:"--force-video" help:"Forces video when it co-exists with audio in release URLs."`
-	SkipVideos   bool     `arg:"--skip-videos" help:"Skips videos in artist URLs."`
+	ForceVideo   bool     `arg:"--force-video" help:"[Deprecated] Use 'nugs grab <id> video' or set defaultOutputs in config."`
+	SkipVideos   bool     `arg:"--skip-videos" help:"[Deprecated] Use 'nugs grab <id> audio' or set defaultOutputs in config."`
 	SkipChapters bool     `arg:"--skip-chapters" help:"Skips chapters for videos."`
 }
 
@@ -233,6 +233,7 @@ func (Args) Description() string {
   %s•%s %slist%s                              List all available artists
   %s•%s %slist >100%s                         Filter artists by show count (>, <, >=, <=, =)
   %s•%s %slist <artist_id>%s                  List all shows for a specific artist
+  %s•%s %slist <artist_id> video%s            List shows filtered by media type (audio/video/both)
   %s•%s %slist <artist_id> "venue"%s          Filter shows by venue name
   %s•%s %slist <artist_id> latest <N>%s       Show latest N shows for an artist
   %s•%s %sgrab <artist_id> latest%s           Download latest shows from an artist
@@ -244,6 +245,7 @@ func (Args) Description() string {
   %s•%s %sstats%s                             Display catalog statistics
   %s•%s %slatest [limit]%s                    Show latest additions (default 15)
   %s•%s %sgaps <id> [...]%s                   List missing shows only (one or more artists)
+  %s•%s %sgaps <id> video%s                   Filter gaps by media type (audio/video/both)
   %s•%s %sgaps <id> --ids-only%s              Output just IDs for piping
   %s•%s %sgaps <id> fill%s                    Auto-download all missing shows
   %s•%s %scoverage [ids...]%s                 Show download coverage statistics
@@ -276,23 +278,25 @@ func (Args) Description() string {
 		colorBold, colorReset,
 		colorBold, colorReset,
 		colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset, // list
+		colorGreen, colorReset, colorCyan, colorReset, // list >100
+		colorGreen, colorReset, colorCyan, colorReset, // list <artist_id>
+		colorGreen, colorReset, colorCyan, colorReset, // list <artist_id> video
+		colorGreen, colorReset, colorCyan, colorReset, // list <artist_id> "venue"
+		colorGreen, colorReset, colorCyan, colorReset, // list <artist_id> latest
+		colorGreen, colorReset, colorCyan, colorReset, // grab <artist_id> latest
 		colorBold, colorReset,
 		colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
+		colorGreen, colorReset, colorCyan, colorReset, // update
+		colorGreen, colorReset, colorCyan, colorReset, // cache
+		colorGreen, colorReset, colorCyan, colorReset, // stats
+		colorGreen, colorReset, colorCyan, colorReset, // latest
+		colorGreen, colorReset, colorCyan, colorReset, // gaps <id>
+		colorGreen, colorReset, colorCyan, colorReset, // gaps <id> video
+		colorGreen, colorReset, colorCyan, colorReset, // gaps <id> --ids-only
+		colorGreen, colorReset, colorCyan, colorReset, // gaps <id> fill
+		colorGreen, colorReset, colorCyan, colorReset, // coverage
+		colorGreen, colorReset, colorCyan, colorReset, // refresh
 		colorBold, colorReset, colorCyan, colorReset,
 		colorCyan, colorReset,
 		colorGreen, colorReset, colorCyan, colorReset,
@@ -850,8 +854,16 @@ type ContainerIndexEntry struct {
 	PerformanceDate string `json:"performanceDate"`
 }
 
+// ContainerWithDate pairs a show container with its date string and optional media type.
+// Used across multiple list functions to collect and sort shows chronologically.
+type ContainerWithDate struct {
+	Container *AlbArtResp
+	DateStr   string
+	MediaType MediaType // Optional, set to MediaTypeUnknown if not needed
+}
+
 // ArtistMetaCache stores cached artist metadata pages from catalog.containersAll.
-type ArtistMetaCache struct {
+type ArtistMetaCache struct{
 	ArtistID string        `json:"artistID"`
 	CachedAt time.Time     `json:"cachedAt"`
 	Pages    []*ArtistMeta `json:"pages"`

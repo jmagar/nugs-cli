@@ -268,6 +268,12 @@ func parseCfg() (*Config, error) {
 	}
 	cfg.ForceVideo = args.ForceVideo
 	cfg.SkipVideos = args.SkipVideos
+	if cfg.ForceVideo {
+		printWarning("--force-video is deprecated. Use 'nugs grab <id> video' or set defaultOutputs: \"video\" in config.json")
+	}
+	if cfg.SkipVideos {
+		printWarning("--skip-videos is deprecated. Use 'nugs grab <id> audio' or set defaultOutputs: \"audio\" in config.json")
+	}
 	cfg.SkipChapters = args.SkipChapters
 	return cfg, nil
 }
@@ -321,6 +327,15 @@ func isShowCountFilterToken(s string) bool {
 	return re.MatchString(s)
 }
 
+// isMediaModifier returns true if the string is a media type modifier keyword.
+func isMediaModifier(s string) bool {
+	switch strings.ToLower(s) {
+	case "audio", "video", "both":
+		return true
+	}
+	return false
+}
+
 // normalizeCliAliases maps the updated short command syntax to internal command routing.
 func normalizeCliAliases(urls []string) []string {
 	if len(urls) == 0 {
@@ -333,13 +348,23 @@ func normalizeCliAliases(urls []string) []string {
 		if len(urls) == 1 {
 			return []string{"list", "artists"}
 		}
+		// nugs list audio/video/both -> nugs list artists (media modifier preserved)
+		if len(urls) == 2 && isMediaModifier(urls[1]) {
+			return []string{"list", "artists", urls[1]}
+		}
 		// nugs list >100 -> nugs list artists shows >100
 		if len(urls) == 2 && isShowCountFilterToken(urls[1]) {
 			return []string{"list", "artists", "shows", urls[1]}
 		}
-		// nugs list <artist_id> "Venue Name" -> nugs list <artist_id> shows "Venue Name"
+		// nugs list <artist_id> ... -> handle media modifiers before venue rewrite
 		if len(urls) >= 3 {
 			if _, err := strconv.Atoi(urls[1]); err == nil && urls[2] != "shows" && urls[2] != "latest" {
+				// Check if urls[2] is a media modifier — don't treat as venue
+				if isMediaModifier(urls[2]) {
+					// nugs list 1125 video -> list 1125 video (no rewrite needed)
+					return urls
+				}
+				// nugs list 1125 "Red Rocks" -> nugs list 1125 shows "Red Rocks"
 				normalized := []string{"list", urls[1], "shows"}
 				normalized = append(normalized, urls[2:]...)
 				return normalized

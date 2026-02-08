@@ -46,8 +46,16 @@ func getVideoSku(products []Product) int {
 // getShowMediaType determines what media types a show offers (audio/video/both).
 // Uses getVideoSku to check for video products and checks for audio products.
 // Returns MediaTypeBoth if both video and audio, MediaTypeVideo if video only,
-// MediaTypeAudio if audio only, or MediaTypeUnknown if neither.
+// MediaTypeAudio if audio only. When Products is empty (e.g. from the
+// catalog.containersAll API which may omit product details), defaults to
+// MediaTypeAudio since every Nugs.net show has audio content.
 func getShowMediaType(show *AlbArtResp) MediaType {
+	// When Products is empty, the API didn't return product details.
+	// Default to audio since every show on Nugs.net has audio.
+	if len(show.Products) == 0 {
+		return MediaTypeAudio
+	}
+
 	hasVideo := getVideoSku(show.Products) != 0
 	hasAudio := false
 
@@ -66,10 +74,7 @@ func getShowMediaType(show *AlbArtResp) MediaType {
 	if hasVideo {
 		return MediaTypeVideo
 	}
-	if hasAudio {
-		return MediaTypeAudio
-	}
-	return MediaTypeUnknown
+	return MediaTypeAudio
 }
 
 func getLstreamSku(products []*ProductFormatList) int {
@@ -123,15 +128,31 @@ func chooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 		varRes = formatRes(varRes)
 		return variant, varRes, nil
 	}
-	for {
+	// Guard against infinite loop: max 10 fallback attempts
+	maxFallbacks := 10
+	for i := 0; i < maxFallbacks; i++ {
 		wantVariant = getVidVariant(master.Variants, wantRes)
 		if wantVariant != nil {
 			break
-		} else {
-			wantRes = resFallback[wantRes]
 		}
+		nextRes := resFallback[wantRes]
+		// Guard: if no fallback exists or fallback doesn't progress, use highest available
+		if nextRes == "" || nextRes == wantRes {
+			if len(master.Variants) > 0 {
+				wantVariant = master.Variants[0] // Highest bandwidth variant
+				wantRes = strings.SplitN(wantVariant.Resolution, "x", 2)[1]
+				wantRes = formatRes(wantRes)
+			}
+			break
+		}
+		wantRes = nextRes
 	}
-	// wantVariant is guaranteed non-nil after loop exit
+	// Final fallback: if still no variant after max attempts, use highest available
+	if wantVariant == nil && len(master.Variants) > 0 {
+		wantVariant = master.Variants[0]
+		wantRes = strings.SplitN(wantVariant.Resolution, "x", 2)[1]
+		wantRes = formatRes(wantRes)
+	}
 	if wantRes != origWantRes {
 		printInfo("Unavailable in your chosen format")
 	}

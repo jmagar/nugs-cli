@@ -22,6 +22,13 @@ func TestNormalizeCliAliases(t *testing.T) {
 		{name: "catalog short gaps", in: []string{"gaps", "1125"}, want: []string{"catalog", "gaps", "1125"}},
 		{name: "refresh short", in: []string{"refresh", "enable"}, want: []string{"catalog", "config", "enable"}},
 		{name: "unchanged old catalog", in: []string{"catalog", "gaps", "1125"}, want: []string{"catalog", "gaps", "1125"}},
+		// Media modifier cases
+		{name: "list audio modifier", in: []string{"list", "audio"}, want: []string{"list", "artists", "audio"}},
+		{name: "list video modifier", in: []string{"list", "video"}, want: []string{"list", "artists", "video"}},
+		{name: "list both modifier", in: []string{"list", "both"}, want: []string{"list", "artists", "both"}},
+		{name: "list artist video", in: []string{"list", "1125", "video"}, want: []string{"list", "1125", "video"}},
+		{name: "list artist audio", in: []string{"list", "1125", "audio"}, want: []string{"list", "1125", "audio"}},
+		{name: "list artist venue not media", in: []string{"list", "1125", "Red Rocks"}, want: []string{"list", "1125", "shows", "Red Rocks"}},
 	}
 
 	for _, tc := range tests {

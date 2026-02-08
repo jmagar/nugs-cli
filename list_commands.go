@@ -258,8 +258,13 @@ func displayWelcome() error {
 // listArtistShows fetches and displays all shows for a specific artist identified by artistId.
 // The output is sorted by date in reverse chronological order (newest first) and includes
 // container ID, date, title, and venue for each show.
+// Optional mediaFilter filters shows by media type (audio/video/both). Use MediaTypeUnknown for no filter.
 // Returns an error if the artist metadata cannot be fetched from the API.
-func listArtistShows(artistId string, jsonLevel string) error {
+func listArtistShows(artistId string, jsonLevel string, mediaFilter ...MediaType) error {
+	mf := MediaTypeUnknown
+	if len(mediaFilter) > 0 {
+		mf = mediaFilter[0]
+	}
 	if jsonLevel == "" {
 		printInfo("Fetching artist shows...")
 	}
@@ -281,21 +286,26 @@ func listArtistShows(artistId string, jsonLevel string) error {
 	}
 
 	// Collect all containers from all paginated responses
-	type containerWithDate struct {
-		container *AlbArtResp
-		dateStr   string
-	}
-	var allContainers []containerWithDate
+	var allContainers []ContainerWithDate
 
 	for _, meta := range allMeta {
 		for _, container := range meta.Response.Containers {
+			// Detect media type for this show
+			showMedia := getShowMediaType(container)
+
+			// Apply media filter if specified
+			if mf != MediaTypeUnknown && !matchesMediaFilter(showMedia, mf) {
+				continue
+			}
+
 			dateStr := container.PerformanceDateShortYearFirst
 			if dateStr == "" {
 				dateStr = container.PerformanceDate
 			}
-			allContainers = append(allContainers, containerWithDate{
-				container: container,
-				dateStr:   dateStr,
+			allContainers = append(allContainers, ContainerWithDate{
+				Container: container,
+				DateStr:   dateStr,
+				MediaType: showMedia,
 			})
 		}
 	}
@@ -315,7 +325,11 @@ func listArtistShows(artistId string, jsonLevel string) error {
 			}
 			fmt.Println(string(jsonData))
 		} else {
-			printWarning(fmt.Sprintf("No shows found for %s", artistName))
+			if mf != MediaTypeUnknown {
+				printWarning(fmt.Sprintf("No %s shows found for %s", mf, artistName))
+			} else {
+				printWarning(fmt.Sprintf("No shows found for %s", artistName))
+			}
 		}
 		return nil
 	}
@@ -323,8 +337,8 @@ func listArtistShows(artistId string, jsonLevel string) error {
 	// Sort by date in reverse chronological order (newest first)
 	// Empty dates go to the end
 	sort.Slice(allContainers, func(i, j int) bool {
-		dateI := allContainers[i].dateStr
-		dateJ := allContainers[j].dateStr
+		dateI := allContainers[i].DateStr
+		dateJ := allContainers[j].DateStr
 
 		// Push empty dates to end
 		if dateI == "" && dateJ != "" {
@@ -359,7 +373,7 @@ func listArtistShows(artistId string, jsonLevel string) error {
 			// Extended: output full container structs with all fields
 			shows := make([]*AlbArtResp, len(allContainers))
 			for i, item := range allContainers {
-				shows[i] = item.container
+				shows[i] = item.Container
 			}
 			output := map[string]any{
 				"artistID":   artistIdInt,
@@ -383,16 +397,16 @@ func listArtistShows(artistId string, jsonLevel string) error {
 
 			for i, item := range allContainers {
 				show := ShowOutput{
-					ContainerID: item.container.ContainerID,
-					Date:        item.dateStr,
-					Title:       item.container.ContainerInfo,
-					Venue:       item.container.VenueName,
+					ContainerID: item.Container.ContainerID,
+					Date:        item.DateStr,
+					Title:       item.Container.ContainerInfo,
+					Venue:       item.Container.VenueName,
 				}
 
 				// Standard level includes location details
 				if jsonLevel == JSONLevelStandard {
-					show.VenueCity = item.container.VenueCity
-					show.VenueState = item.container.VenueState
+					show.VenueCity = item.Container.VenueCity
+					show.VenueState = item.Container.VenueState
 				}
 
 				output.Shows[i] = show
@@ -406,26 +420,35 @@ func listArtistShows(artistId string, jsonLevel string) error {
 		}
 	} else {
 		// Table output
-		printSection(fmt.Sprintf("%s - %d shows", artistName, len(allContainers)))
+		filterLabel := ""
+		if mf != MediaTypeUnknown {
+			filterLabel = fmt.Sprintf(" (%s)", mf)
+		}
+		printSection(fmt.Sprintf("%s - %d shows%s", artistName, len(allContainers), filterLabel))
 
 		table := NewTable([]TableColumn{
+			{Header: "Type", Width: 6, Align: "center"},
 			{Header: "ID", Width: 10, Align: "left"},
 			{Header: "Date", Width: 12, Align: "left"},
-			{Header: "Title", Width: 45, Align: "left"},
-			{Header: "Venue", Width: 30, Align: "left"},
+			{Header: "Title", Width: 42, Align: "left"},
+			{Header: "Venue", Width: 25, Align: "left"},
 		})
 
 		for _, item := range allContainers {
-			container := item.container
+			container := item.Container
+			mediaIndicator := getMediaTypeIndicator(item.MediaType)
 			table.AddRow(
+				mediaIndicator,
 				strconv.Itoa(container.ContainerID),
-				item.dateStr,
+				item.DateStr,
 				container.ContainerInfo,
 				container.VenueName,
 			)
 		}
 
 		table.Print()
+		fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
+			colorCyan, colorReset, symbolAudio, symbolVideo, symbolBoth)
 		printInfo("To download a show, use: nugs <container_id>")
 	}
 	return nil
@@ -462,11 +485,7 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 
 	// Collect and filter containers by venue (case-insensitive substring match)
 	// Checks both VenueName and Venue fields since API may populate either
-	type containerWithDate struct {
-		container *AlbArtResp
-		dateStr   string
-	}
-	var filteredContainers []containerWithDate
+	var filteredContainers []ContainerWithDate
 	venueFilterLower := strings.ToLower(venueFilter)
 
 	for _, meta := range allMeta {
@@ -478,9 +497,10 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 				if dateStr == "" {
 					dateStr = container.PerformanceDate
 				}
-				filteredContainers = append(filteredContainers, containerWithDate{
-					container: container,
-					dateStr:   dateStr,
+				filteredContainers = append(filteredContainers, ContainerWithDate{
+					Container: container,
+					DateStr:   dateStr,
+					MediaType: MediaTypeUnknown, // Not used for venue filtering
 				})
 			}
 		}
@@ -508,8 +528,8 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 
 	// Sort by date in reverse chronological order (newest first)
 	sort.Slice(filteredContainers, func(i, j int) bool {
-		dateI := filteredContainers[i].dateStr
-		dateJ := filteredContainers[j].dateStr
+		dateI := filteredContainers[i].DateStr
+		dateJ := filteredContainers[j].DateStr
 
 		// Push empty dates to end
 		if dateI == "" && dateJ != "" {
@@ -534,7 +554,7 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 			// Extended: output full container structs with all fields
 			shows := make([]*AlbArtResp, len(filteredContainers))
 			for i, item := range filteredContainers {
-				shows[i] = item.container
+				shows[i] = item.Container
 			}
 			output := map[string]any{
 				"artistID":    artistIdInt,
@@ -559,16 +579,16 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 
 			for i, item := range filteredContainers {
 				show := ShowOutput{
-					ContainerID: item.container.ContainerID,
-					Date:        item.dateStr,
-					Title:       item.container.ContainerInfo,
-					Venue:       item.container.VenueName,
+					ContainerID: item.Container.ContainerID,
+					Date:        item.DateStr,
+					Title:       item.Container.ContainerInfo,
+					Venue:       item.Container.VenueName,
 				}
 
 				// Standard level includes location details
 				if jsonLevel == JSONLevelStandard {
-					show.VenueCity = item.container.VenueCity
-					show.VenueState = item.container.VenueState
+					show.VenueCity = item.Container.VenueCity
+					show.VenueState = item.Container.VenueState
 				}
 
 				output.Shows[i] = show
@@ -592,10 +612,10 @@ func listArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 		})
 
 		for _, item := range filteredContainers {
-			container := item.container
+			container := item.Container
 			table.AddRow(
 				strconv.Itoa(container.ContainerID),
-				item.dateStr,
+				item.DateStr,
 				container.ContainerInfo,
 				container.VenueName,
 			)
@@ -631,11 +651,7 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 	}
 
 	// Collect all containers from all paginated responses
-	type containerWithDate struct {
-		container *AlbArtResp
-		dateStr   string
-	}
-	var allContainers []containerWithDate
+	var allContainers []ContainerWithDate
 
 	for _, meta := range allMeta {
 		for _, container := range meta.Response.Containers {
@@ -643,9 +659,10 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 			if dateStr == "" {
 				dateStr = container.PerformanceDate
 			}
-			allContainers = append(allContainers, containerWithDate{
-				container: container,
-				dateStr:   dateStr,
+			allContainers = append(allContainers, ContainerWithDate{
+				Container: container,
+				DateStr:   dateStr,
+				MediaType: MediaTypeUnknown, // Not used for latest shows
 			})
 		}
 	}
@@ -672,8 +689,8 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 
 	// Sort by date in reverse chronological order (newest first)
 	sort.Slice(allContainers, func(i, j int) bool {
-		dateI := allContainers[i].dateStr
-		dateJ := allContainers[j].dateStr
+		dateI := allContainers[i].DateStr
+		dateJ := allContainers[j].DateStr
 
 		// Push empty dates to end
 		if dateI == "" && dateJ != "" {
@@ -704,7 +721,7 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 			// Extended: output full container structs with all fields
 			shows := make([]*AlbArtResp, len(latestContainers))
 			for i, item := range latestContainers {
-				shows[i] = item.container
+				shows[i] = item.Container
 			}
 			output := map[string]any{
 				"artistID":   artistIdInt,
@@ -729,16 +746,16 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 
 			for i, item := range latestContainers {
 				show := ShowOutput{
-					ContainerID: item.container.ContainerID,
-					Date:        item.dateStr,
-					Title:       item.container.ContainerInfo,
-					Venue:       item.container.VenueName,
+					ContainerID: item.Container.ContainerID,
+					Date:        item.DateStr,
+					Title:       item.Container.ContainerInfo,
+					Venue:       item.Container.VenueName,
 				}
 
 				// Standard level includes location details
 				if jsonLevel == JSONLevelStandard {
-					show.VenueCity = item.container.VenueCity
-					show.VenueState = item.container.VenueState
+					show.VenueCity = item.Container.VenueCity
+					show.VenueState = item.Container.VenueState
 				}
 
 				output.Shows[i] = show
@@ -763,10 +780,10 @@ func listArtistLatestShows(artistId string, limit int, jsonLevel string) error {
 
 		for _, item := range latestContainers {
 			table.AddRow(
-				fmt.Sprintf("%d", item.container.ContainerID),
-				item.dateStr,
-				item.container.ContainerInfo,
-				item.container.VenueName,
+				fmt.Sprintf("%d", item.Container.ContainerID),
+				item.DateStr,
+				item.Container.ContainerInfo,
+				item.Container.VenueName,
 			)
 		}
 

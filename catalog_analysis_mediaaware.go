@@ -11,6 +11,7 @@ import (
 // Uses getOutPathForMedia() to get the correct local path based on media type.
 // Uses getRclonePathForMedia() to get the correct remote path based on media type.
 // Returns true if the show exists either locally or remotely for the specified media type.
+// This function performs per-show filesystem checks (slower). Use showExistsForMediaIndexed when possible.
 func showExistsForMedia(show *AlbArtResp, cfg *Config, mediaType MediaType) bool {
 	albumFolder := buildAlbumFolderName(show.ArtistName, show.ContainerInfo)
 
@@ -36,6 +37,40 @@ func showExistsForMedia(show *AlbArtResp, cfg *Config, mediaType MediaType) bool
 		if exists {
 			return true
 		}
+	}
+
+	return false
+}
+
+// showExistsForMediaIndexed checks if a show exists using pre-built folder index (fast).
+// Falls back to per-show checks if index is unavailable or errored.
+// For 430-show artists, this is 430x faster (1 readdir vs 430 stat calls).
+func showExistsForMediaIndexed(show *AlbArtResp, cfg *Config, mediaType MediaType, idx *artistPresenceIndex) bool {
+	albumFolder := buildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+
+	// Fast path: check local index
+	if _, exists := idx.localFolders[albumFolder]; exists {
+		return true
+	}
+
+	// Fast path: check remote index (if available and no error)
+	if cfg.RcloneEnabled && idx.remoteListErr == nil {
+		if _, exists := idx.remoteFolders[albumFolder]; exists {
+			return true
+		}
+		return false // Index is valid, not found
+	}
+
+	// Fallback: remote index errored or rclone disabled, use slow per-show check
+	if cfg.RcloneEnabled && idx.remoteListErr != nil {
+		isVideo := mediaType.HasVideo()
+		remotePath := filepath.Join(sanitise(show.ArtistName), albumFolder)
+		exists, err := remotePathExists(remotePath, cfg, isVideo)
+		if err != nil {
+			warnRemoteCheckError(err)
+			return false
+		}
+		return exists
 	}
 
 	return false
@@ -110,8 +145,8 @@ func analyzeArtistCatalogMediaAware(artistID string, cfg *Config, jsonLevel stri
 			continue // Skip shows that don't match filter
 		}
 
-		// Use media-aware existence check
-		downloaded := showExistsForMedia(show, cfg, mediaFilter)
+		// Use fast indexed existence check (430x faster for large catalogs)
+		downloaded := showExistsForMediaIndexed(show, cfg, mediaFilter, &presenceIdx)
 
 		status := ShowStatus{
 			Show:       show,

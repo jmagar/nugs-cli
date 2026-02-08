@@ -250,15 +250,19 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 	if len(cfg.Urls) < 2 {
 		printInfo("Usage: nugs list artists | list <artist_id> [shows \"venue\" | latest <N>]")
 		fmt.Println("       list <show_count_filter>")
+		fmt.Println("       list <artist_id> [audio|video|both]")
 		fmt.Println("       list <artist_id> [\"venue\" | latest <N>]")
 		return true
 	}
 
 	subCmd := cfg.Urls[1]
 	if subCmd == "artists" {
+		// Extract media modifier from remaining args (ignored for artist list, but don't error)
 		showFilter := ""
-		if len(cfg.Urls) > 2 && cfg.Urls[2] == "shows" {
-			if len(cfg.Urls) < 4 {
+		remainingArgs := cfg.Urls[2:]
+		_, remainingArgs = parseMediaModifier(remainingArgs)
+		if len(remainingArgs) > 0 && remainingArgs[0] == "shows" {
+			if len(remainingArgs) < 2 {
 				printInfo("Usage: nugs list artists shows <operator><number>")
 				fmt.Println("Or:    list artists shows <operator><number>")
 				fmt.Println("Examples:")
@@ -268,7 +272,7 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 				fmt.Println("Operators: >, <, >=, <=, =")
 				return true
 			}
-			showFilter = cfg.Urls[3]
+			showFilter = remainingArgs[1]
 		}
 		err := listArtists(jsonLevel, showFilter)
 		if err != nil {
@@ -279,15 +283,19 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 
 	artistId := subCmd
 
+	// Extract media modifier from remaining args after artist ID
+	remainingArgs := cfg.Urls[2:]
+	mediaFilter, remainingArgs := parseMediaModifier(remainingArgs)
+
 	// Check for venue filter: list <artist_id> shows "venue"
-	if len(cfg.Urls) > 2 && cfg.Urls[2] == "shows" {
-		if len(cfg.Urls) < 4 {
+	if len(remainingArgs) > 0 && remainingArgs[0] == "shows" {
+		if len(remainingArgs) < 2 {
 			printInfo("Usage: nugs list <artist_id> shows \"<venue_name>\"")
 			fmt.Println("Or:    list <artist_id> shows \"<venue_name>\"")
 			fmt.Println("Example: list 461 \"Red Rocks\"")
 			return true
 		}
-		venueFilter := strings.Join(cfg.Urls[3:], " ")
+		venueFilter := strings.Join(remainingArgs[1:], " ")
 		err := listArtistShowsByVenue(artistId, venueFilter, jsonLevel)
 		if err != nil {
 			handleErr("List shows by venue failed.", err, true)
@@ -296,10 +304,10 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 	}
 
 	// Check for latest N: list <artist_id> latest <N>
-	if len(cfg.Urls) > 2 && cfg.Urls[2] == "latest" {
+	if len(remainingArgs) > 0 && remainingArgs[0] == "latest" {
 		limit := 10
-		if len(cfg.Urls) > 3 {
-			if parsedLimit, parseErr := strconv.Atoi(cfg.Urls[3]); parseErr == nil {
+		if len(remainingArgs) > 1 {
+			if parsedLimit, parseErr := strconv.Atoi(remainingArgs[1]); parseErr == nil {
 				if parsedLimit < 1 {
 					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
 					return true
@@ -314,8 +322,8 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 		return true
 	}
 
-	// Default: list all shows for artist
-	err := listArtistShows(artistId, jsonLevel)
+	// Default: list all shows for artist (with optional media filter)
+	err := listArtistShows(artistId, jsonLevel, mediaFilter)
 	if err != nil {
 		handleErr("List shows failed.", err, true)
 	}
@@ -359,6 +367,8 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 		fmt.Println("       catalog gaps <artist_id> [...] --ids-only")
 		fmt.Println("       catalog coverage [artist_ids...]")
 		fmt.Println("       catalog config enable|disable|set")
+		fmt.Println()
+		fmt.Println("       Note: catalog = cached/offline, list = live API")
 		return true
 	}
 
@@ -385,10 +395,13 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 		if len(cfg.Urls) > 2 {
 			argsAfterLatest = cfg.Urls[2:]
 		}
-		
-		// Extract media modifier
-		mediaFilter, remainingArgs := parseMediaModifier(argsAfterLatest)
-		
+
+		// Strip media modifier (ignored for latest - data source lacks Products)
+		mediaModifier, remainingArgs := parseMediaModifier(argsAfterLatest)
+		if mediaModifier != MediaTypeUnknown && jsonLevel == "" {
+			printInfo("Note: Media type filters (audio/video/both) are not supported for 'catalog latest' because the catalog API doesn't include format details. Use 'nugs list <artist> [audio|video|both]' for media-filtered browsing.")
+		}
+
 		// Parse limit from remaining args
 		if len(remainingArgs) > 0 {
 			if parsedLimit, err := strconv.Atoi(remainingArgs[0]); err == nil {
@@ -399,7 +412,7 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 				limit = parsedLimit
 			}
 		}
-		err := catalogLatest(limit, jsonLevel, mediaFilter)
+		err := catalogLatest(limit, jsonLevel)
 		if err != nil {
 			handleErr("Catalog latest failed.", err, true)
 		}
@@ -550,13 +563,13 @@ func handleArtistShorthand(cfg *Config) bool {
 // handleCatalogGapsFill handles the "catalog gaps <artist_id> [...] fill" command
 // which requires authentication.
 func handleCatalogGapsFill(cfg *Config, streamParams *StreamParams, jsonLevel string) {
-	artistIds := []string{}
-	for i := 2; i < len(cfg.Urls)-1; i++ {
-		artistIds = append(artistIds, cfg.Urls[i])
-	}
+	// Extract media modifier from args (between "gaps" and "fill")
+	argsAfterGaps := cfg.Urls[2 : len(cfg.Urls)-1] // Everything between "gaps" and "fill"
+	mediaFilter, artistIds := parseMediaModifier(argsAfterGaps)
+
 	if len(artistIds) == 0 {
 		fmt.Println("Error: No artist IDs provided")
-		fmt.Println("Usage: catalog gaps <artist_id> [...] fill")
+		fmt.Println("Usage: catalog gaps <artist_id> [...] [audio|video|both] fill")
 		return
 	}
 	for idx, artistId := range artistIds {
@@ -565,7 +578,7 @@ func handleCatalogGapsFill(cfg *Config, streamParams *StreamParams, jsonLevel st
 			fmt.Println(strings.Repeat("─", 80))
 			fmt.Println()
 		}
-		err := catalogGapsFill(artistId, cfg, streamParams, jsonLevel)
+		err := catalogGapsFill(artistId, cfg, streamParams, jsonLevel, mediaFilter)
 		if err != nil {
 			if len(artistIds) > 1 {
 				printWarning(fmt.Sprintf("Failed to fill gaps for artist %s: %v", artistId, err))
