@@ -161,61 +161,10 @@ func isShowDownloaded(show *AlbArtResp, idx artistPresenceIndex, cfg *Config) bo
 	return false
 }
 
+// analyzeArtistCatalog analyzes an artist's catalog with optional media type filtering.
+// Delegates to analyzeArtistCatalogMediaAware with MediaTypeUnknown (defaults to cfg.DefaultOutputs).
 func analyzeArtistCatalog(artistID string, cfg *Config, jsonLevel string) (*ArtistCatalogAnalysis, error) {
-	artistMetas, cacheUsed, cacheStaleUse, err := getArtistMetaCached(artistID, artistMetaCacheTTL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get artist metadata: %w", err)
-	}
-
-	if len(artistMetas) == 0 {
-		return nil, fmt.Errorf("no shows found for artist %s", artistID)
-	}
-
-	allShows, artistName := collectArtistShows(artistMetas)
-	if len(allShows) == 0 {
-		return nil, fmt.Errorf("no shows found for artist %s", artistID)
-	}
-
-	sort.Slice(allShows, func(i, j int) bool {
-		return allShows[i].PerformanceDate > allShows[j].PerformanceDate
-	})
-
-	presenceIdx := buildArtistPresenceIndex(artistName, cfg)
-	if presenceIdx.remoteListErr != nil && jsonLevel == "" {
-		printWarning(fmt.Sprintf("Remote artist folder bulk check failed, falling back to per-show checks: %v", presenceIdx.remoteListErr))
-	}
-
-	analysis := &ArtistCatalogAnalysis{
-		ArtistID:      artistID,
-		ArtistName:    artistName,
-		TotalShows:    len(allShows),
-		Shows:         make([]ShowStatus, 0, len(allShows)),
-		MissingShows:  make([]ShowStatus, 0, len(allShows)),
-		CacheUsed:     cacheUsed,
-		CacheStaleUse: cacheStaleUse,
-	}
-
-	for _, show := range allShows {
-		downloaded := isShowDownloaded(show, presenceIdx, cfg)
-		status := ShowStatus{
-			Show:       show,
-			Downloaded: downloaded,
-		}
-		analysis.Shows = append(analysis.Shows, status)
-		if downloaded {
-			analysis.Downloaded++
-			continue
-		}
-		analysis.MissingShows = append(analysis.MissingShows, status)
-	}
-
-	analysis.Missing = len(analysis.MissingShows)
-	if analysis.TotalShows > 0 {
-		analysis.DownloadPct = float64(analysis.Downloaded) / float64(analysis.TotalShows) * 100
-		analysis.MissingPct = float64(analysis.Missing) / float64(analysis.TotalShows) * 100
-	}
-
-	return analysis, nil
+	return analyzeArtistCatalogMediaAware(artistID, cfg, jsonLevel, MediaTypeUnknown)
 }
 
 // printJSON marshals data to JSON and prints it, handling errors properly

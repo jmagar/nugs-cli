@@ -19,7 +19,7 @@ func TestBuildRcloneUploadCommand_UsesCopyForDirectory(t *testing.T) {
 		RclonePath:   "/Music/Nugs",
 	}
 
-	cmd, remotePath, err := buildRcloneUploadCommand(localDir, "Artist", cfg, 4)
+	cmd, remotePath, err := buildRcloneUploadCommand(localDir, "Artist", cfg, 4, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestBuildRcloneUploadCommand_UsesCopytoForFile(t *testing.T) {
 		RclonePath:   "/Music/Nugs",
 	}
 
-	cmd, remotePath, err := buildRcloneUploadCommand(localFile, "Artist", cfg, 4)
+	cmd, remotePath, err := buildRcloneUploadCommand(localFile, "Artist", cfg, 4, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -74,6 +74,30 @@ func TestBuildRcloneVerifyCommand_UsesDirectCheckForDirectory(t *testing.T) {
 	want := []string{"rclone", "check", "--one-way", localDir, "gdrive:/Music/Nugs/Artist/album-dir"}
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Fatalf("unexpected verify args: got %v want %v", cmd.Args, want)
+	}
+}
+
+func TestBuildRcloneUploadCommand_UsesVideoRemotePath(t *testing.T) {
+	tmp := t.TempDir()
+	localFile := filepath.Join(tmp, "video.mp4")
+	if err := os.WriteFile(localFile, []byte("test"), 0644); err != nil {
+		t.Fatalf("failed to create local file: %v", err)
+	}
+
+	cfg := &Config{
+		RcloneRemote:    "gdrive",
+		RclonePath:      "/Music/Nugs",
+		RcloneVideoPath: "/Videos/Nugs",
+	}
+
+	_, remotePath, err := buildRcloneUploadCommand(localFile, "Artist", cfg, 4, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	expectedRemote := "gdrive:/Videos/Nugs/Artist/video.mp4"
+	if remotePath != expectedRemote {
+		t.Fatalf("unexpected remote path: got %q want %q", remotePath, expectedRemote)
 	}
 }
 

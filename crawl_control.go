@@ -118,8 +118,11 @@ func waitIfPausedOrCancelled() error {
 		if crawlerCtrl.cancelled.Load() || controlCancelled {
 			// Tier 3: Update progress box with cancel indicator
 			if pb := getCurrentProgressBox(); pb != nil {
+				pb.mu.Lock()
 				pb.IsCancelled = true
+				pb.mu.Unlock()
 				pb.SetMessage(MessagePriorityError, "Crawl cancelled by user", 10*time.Second)
+				renderProgressBox(pb)
 			}
 			return ErrCrawlCancelled
 		}
@@ -127,26 +130,36 @@ func waitIfPausedOrCancelled() error {
 		if !crawlerCtrl.paused.Load() && !controlPaused {
 			// Tier 3: Clear pause indicator when resuming
 			if pb := getCurrentProgressBox(); pb != nil {
-				if pb.IsPaused {
+				pb.mu.Lock()
+				wasPaused := pb.IsPaused
+				if wasPaused {
 					pb.IsPaused = false
 					// Force clear pause message by resetting priority first
-					pb.mu.Lock()
 					pb.MessagePriority = 0
-					pb.mu.Unlock()
+				}
+				pb.mu.Unlock()
+				if wasPaused {
 					pb.SetMessage(MessagePriorityStatus, "Resumed", 2*time.Second)
+					renderProgressBox(pb)
 				}
 			}
 			break
 		}
-		
+
 		// Tier 3: Set pause indicator with instructions (30 second timeout to allow other messages)
 		if pb := getCurrentProgressBox(); pb != nil {
-			if !pb.IsPaused {
+			pb.mu.Lock()
+			alreadyPaused := pb.IsPaused
+			if !alreadyPaused {
 				pb.IsPaused = true
+			}
+			pb.mu.Unlock()
+			if !alreadyPaused {
 				pb.SetMessage(MessagePriorityWarning, "Paused - Press Shift-P to resume", 30*time.Second)
+				renderProgressBox(pb)
 			}
 		}
-		
+
 		time.Sleep(100 * time.Millisecond)
 	}
 	return nil

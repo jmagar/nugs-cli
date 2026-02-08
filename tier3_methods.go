@@ -5,6 +5,16 @@ import (
 	"time"
 )
 
+// RequestRender marks the progress box to redraw on the next render attempt.
+func (s *ProgressBoxState) RequestRender() {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	s.forceRender = true
+	s.mu.Unlock()
+}
+
 // SetMessage sets a temporary message with priority and duration (Tier 3 enhancement)
 // Priority: 1=Status (cyan, ℹ), 2=Warning (yellow, ⚠), 3=Error (red, ✗)
 // Duration: how long the message should be displayed before expiring
@@ -39,6 +49,7 @@ func (s *ProgressBoxState) SetMessage(priority int, text string, duration time.D
 		case MessagePriorityStatus:
 			s.StatusMessage = text
 		}
+		s.forceRender = true
 	}
 }
 
@@ -153,6 +164,7 @@ func (s *ProgressBoxState) ResetForNewAlbum(showTitle, showNumber string, trackT
 	// Clear pause/cancel state for new album
 	s.IsPaused = false
 	s.IsCancelled = false
+	s.forceRender = true
 
 	// Fields that are NOT reset (preserved across albums):
 	// - RcloneEnabled (batch setting)

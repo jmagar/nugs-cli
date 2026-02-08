@@ -537,15 +537,42 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 		return errors.New("release has no tracks or videos")
 	}
 
-	if skuID != 0 {
-		if cfg.SkipVideos {
+	// Determine what to download based on defaultOutputs config and show media type
+	mediaPreference := ParseMediaType(cfg.DefaultOutputs)
+	if mediaPreference == MediaTypeUnknown {
+		mediaPreference = MediaTypeAudio // default to audio
+	}
+
+	showMediaType := getShowMediaType(meta)
+	downloadAudio := false
+	downloadVideo := false
+
+	if mediaPreference == MediaTypeBoth {
+		downloadAudio = showMediaType.HasAudio()
+		downloadVideo = showMediaType.HasVideo()
+	} else if mediaPreference == MediaTypeVideo {
+		downloadVideo = showMediaType.HasVideo()
+	} else { // audio (default)
+		downloadAudio = showMediaType.HasAudio()
+	}
+
+	// Legacy flag overrides
+	if cfg.SkipVideos {
+		downloadVideo = false
+	}
+	if cfg.ForceVideo {
+		downloadVideo = true
+		downloadAudio = false
+	}
+
+	// Handle video-only shows
+	if skuID != 0 && trackTotal < 1 {
+		if cfg.SkipVideos || !downloadVideo {
 			printInfo("Video-only album, skipped")
 			return nil
 		}
-		if cfg.ForceVideo || trackTotal < 1 {
-			// Video-only album - no track progress to show
-			return video(albumID, "", cfg, streamParams, meta, false, nil)
-		}
+		// Video-only album - no track progress to show
+		return video(albumID, "", cfg, streamParams, meta, false, nil)
 	}
 	// Create artist directory
 	artistFolder := sanitise(meta.ArtistName)
@@ -573,7 +600,7 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 	// Check if show already exists on remote
 	remoteShowPath := artistFolder + "/" + albumFolder
 	printInfo(fmt.Sprintf("Checking remote for: %s%s%s", colorCyan, albumFolder, colorReset))
-	exists, err := remotePathExists(remoteShowPath, cfg)
+	exists, err := remotePathExists(remoteShowPath, cfg, false)
 	if err != nil {
 		printWarning(fmt.Sprintf("Failed to check remote: %v", err))
 		// Continue with download even if remote check fails
@@ -620,6 +647,7 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 			BatchState:     batchState,
 			StartTime:      time.Now(),
 			TrackTotal:     trackTotal,
+			RenderInterval: defaultProgressRenderInterval,
 		}
 		// Tier 3: Register global progress box for crawl control access
 		setCurrentProgressBox(progressBox)
@@ -640,42 +668,57 @@ func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *Alb
 		progressBox.mu.Unlock()
 	}
 
-	for trackNum, track := range tracks {
-		if err := waitIfPausedOrCancelled(); err != nil {
-			return err
-		}
-		trackNum++
-		err := processTrack(
-			albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox)
-		if err != nil {
-			if isCrawlCancelledErr(err) {
+	// Download audio tracks if requested
+	if downloadAudio && trackTotal > 0 {
+		for trackNum, track := range tracks {
+			if err := waitIfPausedOrCancelled(); err != nil {
 				return err
 			}
-			// Track error count
-			progressBox.ErrorTracks++
-			handleErr("Track failed.", err, false)
+			trackNum++
+			err := processTrack(
+				albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox)
+			if err != nil {
+				if isCrawlCancelledErr(err) {
+					return err
+				}
+				// Track error count
+				progressBox.ErrorTracks++
+				handleErr("Track failed.", err, false)
+			}
+		}
+
+		// Mark audio completion (but don't show summary yet if uploading or downloading video)
+		if trackTotal > 0 {
+			progressBox.IsComplete = true
+			progressBox.CompletionTime = time.Now()
+			progressBox.TotalDuration = time.Since(progressBox.StartTime)
+		}
+
+		// Upload to rclone if enabled
+		if cfg.RcloneEnabled {
+			err = uploadToRclone(albumPath, artistFolder, cfg, progressBox, false)
+			if err != nil {
+				handleErr("Upload failed.", err, false)
+			}
+		}
+
+		// Show completion summary AFTER upload (or immediately if no upload) and no video pending
+		if trackTotal > 0 && !downloadVideo {
+			renderCompletionSummary(progressBox)
+			fmt.Println("") // Final newline after completion summary
 		}
 	}
 
-	// Mark completion (but don't show summary yet if uploading)
-	if trackTotal > 0 {
-		progressBox.IsComplete = true
-		progressBox.CompletionTime = time.Now()
-		progressBox.TotalDuration = time.Since(progressBox.StartTime)
-	}
-
-	// Upload to rclone if enabled
-	if cfg.RcloneEnabled {
-		err = uploadToRclone(albumPath, artistFolder, cfg, progressBox)
+	// Download video if requested
+	if downloadVideo && skuID != 0 {
+		if downloadAudio && trackTotal > 0 {
+			fmt.Println("") // Spacing between audio and video
+			printInfo("Downloading video...")
+		}
+		err = video(albumID, "", cfg, streamParams, meta, false, progressBox)
 		if err != nil {
-			handleErr("Upload failed.", err, false)
+			handleErr("Video download failed.", err, false)
 		}
-	}
-
-	// Show completion summary AFTER upload (or immediately if no upload)
-	if trackTotal > 0 {
-		renderCompletionSummary(progressBox)
-		fmt.Println("") // Final newline after completion summary
 	}
 
 	return nil

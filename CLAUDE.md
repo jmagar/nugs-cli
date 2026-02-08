@@ -68,10 +68,7 @@ This builds the binary and installs it to `~/.local/bin/nugs`.
 **Manual build:**
 
 ```bash
-# Build only
-go build -o nugs
-
-# Build and install to ~/.local/bin
+# Build and install to ~/.local/bin (preferred)
 mkdir -p ~/.local/bin
 go build -o ~/.local/bin/nugs
 
@@ -462,6 +459,108 @@ when multiple nugs processes run simultaneously.
 ---
 
 ## Recent Improvements
+
+### Video First-Class Citizen (2026-02-08)
+
+**Implemented:**
+- `defaultOutputs` config field for media type preference
+- Media type modifiers for all catalog commands
+- Emoji indicators for media availability (🎵 audio, 🎬 video, 📹 both)
+- Video-aware gap detection and coverage
+- Both-format downloads
+
+**Features:**
+- **Media Preference:** `defaultOutputs` = "audio" (default), "video", or "both"
+- **Command Modifiers:** All catalog commands accept `audio`, `video`, or `both` filters
+- **Visual Indicators:** Emoji symbols show media availability in list tables
+- **Download Control:** `nugs grab <id> both` downloads both formats
+- **Gap Detection:** Media-aware gap analysis (e.g., `nugs gaps 1125 video`)
+- **Coverage Stats:** Filter coverage by media type
+
+**Command Examples:**
+```bash
+# List commands with media filters
+nugs list video                  # Only video artists
+nugs list 1125 video             # Billy Strings videos only
+nugs list 1125 both              # Shows with both formats
+
+# Latest commands
+nugs latest video                # Latest video releases
+nugs latest 50 audio             # Latest 50 audio shows
+
+# Gap detection
+nugs gaps 1125 video             # Video gaps only
+nugs gaps 1125 both              # Shows missing either format
+nugs gaps 1125 fill video        # Download all video gaps
+
+# Coverage statistics
+nugs coverage 1125 video         # Video coverage
+nugs coverage both               # Both-format coverage
+```
+
+**Configuration:**
+```json
+{
+  "defaultOutputs": "video",
+  "format": 2,
+  "videoFormat": 5
+}
+```
+
+**Development Patterns:**
+
+**MediaType System:**
+```go
+type MediaType int
+const (
+    MediaTypeAudio MediaType = iota
+    MediaTypeVideo
+    MediaTypeBoth
+)
+
+// Parse media type from command args
+mediaType := parseMediaTypeFromArgs(args)
+
+// Filter shows by media type
+filteredShows := filterShowsByMediaType(shows, mediaType)
+```
+
+**Media-Aware Analysis:**
+```go
+// Gap detection with media type
+func findGaps(artistID int, mediaType MediaType) []Show {
+    // Check local paths based on media type
+    // Return shows missing requested format
+}
+
+// Coverage calculation
+func calculateCoverage(artistID int, mediaType MediaType) CoverageStats {
+    // Count downloads vs total for specific media type
+}
+```
+
+**Command Parsing:**
+```go
+// Extract media type modifier from args
+// "nugs list 1125 video" → artistID=1125, mediaType=Video
+// "nugs gaps 1125 audio fill" → artistID=1125, mediaType=Audio, action=fill
+```
+
+**Files Modified:**
+- `structs.go` - Added `defaultOutputs` to Config, MediaType enum
+- `catalog_handlers.go` - Media-aware analysis functions
+- `format.go` - Media type detection and helpers
+- `helpers.go` - Path detection for audio/video formats
+- `main.go` - Media type command parsing and download integration
+- `README.md` - Comprehensive documentation with video examples
+- `CLAUDE.md` - This documentation
+
+**Benefits:**
+- Video is now a first-class citizen, not an afterthought
+- Users can easily filter, browse, and download videos
+- Clear visual feedback on media availability
+- Flexible workflows for audio-only, video-only, or both
+- Consistent media type handling across all commands
 
 ### Shell Completions (2026-02-06)
 

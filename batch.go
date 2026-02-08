@@ -29,9 +29,10 @@ func artist(artistId string, cfg *Config, streamParams *StreamParams) error {
 
 	// Create ONE progress box for the entire batch (reused across all albums)
 	sharedProgressBox := &ProgressBoxState{
-		RcloneEnabled: cfg.RcloneEnabled,
-		BatchState:    batchState,
-		StartTime:     time.Now(),
+		RcloneEnabled:  cfg.RcloneEnabled,
+		BatchState:     batchState,
+		StartTime:      time.Now(),
+		RenderInterval: defaultProgressRenderInterval,
 	}
 	setCurrentProgressBox(sharedProgressBox)
 	defer setCurrentProgressBox(nil)
@@ -97,6 +98,7 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 		RcloneEnabled:  cfg.RcloneEnabled,
 		ShowDownloaded: "0 B",
 		ShowTotal:      "calculating...",
+		RenderInterval: defaultProgressRenderInterval,
 	}
 	// Tier 3: Register global progress box for crawl control access
 	setCurrentProgressBox(progressBox)
@@ -120,7 +122,7 @@ func playlist(plistId, legacyToken string, cfg *Config, streamParams *StreamPara
 	// Upload to rclone if enabled
 	if cfg.RcloneEnabled {
 		// Playlists don't have artist folder structure
-		err = uploadToRclone(plistPath, "", cfg, progressBox)
+		err = uploadToRclone(plistPath, "", cfg, progressBox, false)
 		if err != nil {
 			handleErr("Upload failed.", err, false)
 		}

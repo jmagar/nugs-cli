@@ -45,7 +45,7 @@ func checkRclonePathOnline(cfg *Config) string {
 	if strings.TrimSpace(cfg.RcloneRemote) == "" {
 		return "Offline (remote not configured)"
 	}
-	target := cfg.RcloneRemote + ":" + cfg.RclonePath
+	target := cfg.RcloneRemote + ":" + getRcloneBasePath(cfg, false)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "rclone", "lsf", target)
@@ -63,16 +63,18 @@ func checkRclonePathOnline(cfg *Config) string {
 	return "Offline"
 }
 
-// uploadToRclone uploads the local directory at localPath to the configured rclone remote.
+// uploadToRclone uploads the local path to the configured rclone remote.
 // If cfg.RcloneEnabled is false, the function returns immediately without error.
 // The function uses cfg.RcloneTransfers (default 4) for parallel transfers and can
 // optionally delete local files after successful upload verification if cfg.DeleteAfterUpload is true.
+// If isVideo is true, cfg.RcloneVideoPath is used as the remote base path (falling back
+// to cfg.RclonePath when rcloneVideoPath is empty).
 // Returns an error if:
 //   - Path validation fails
 //   - rclone copy command fails
 //   - Upload verification fails (requires rclone check command)
 //   - Local file deletion fails after successful upload
-func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState) error {
+func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
 	if !cfg.RcloneEnabled {
 		return nil
 	}
@@ -95,7 +97,7 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 		transfers = 4
 	}
 
-	cmd, remoteFullPath, err := buildRcloneUploadCommand(localPath, artistFolder, cfg, transfers)
+	cmd, remoteFullPath, err := buildRcloneUploadCommand(localPath, artistFolder, cfg, transfers, isVideo)
 	if err != nil {
 		return err
 	}
@@ -200,8 +202,8 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 	return nil
 }
 
-func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, transfers int) (*exec.Cmd, string, error) {
-	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
+	remoteDest := cfg.RcloneRemote + ":" + getRcloneBasePath(cfg, isVideo)
 
 	localInfo, err := os.Stat(localPath)
 	if err != nil {
@@ -445,11 +447,14 @@ func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, erro
 	return exec.Command("rclone", "check", "--one-way", "--include", fileName, localDir, remoteDir), nil
 }
 
-// remotePathExists checks if a directory exists at the specified remotePath on the configured rclone remote.
-// The remotePath is relative to cfg.RclonePath and should not include the remote name or base path.
+// remotePathExists checks if a path exists at the specified remotePath on the configured rclone remote.
+// The remotePath is relative to the media-specific base path:
+// - audio checks use cfg.RclonePath
+// - video checks use cfg.RcloneVideoPath (fallback cfg.RclonePath)
+// The path should not include the remote name or base path.
 // Returns false without error if cfg.RcloneEnabled is false.
 // Returns true if the directory exists, false if it doesn't exist or on error.
-func remotePathExists(remotePath string, cfg *Config) (bool, error) {
+func remotePathExists(remotePath string, cfg *Config, isVideo bool) (bool, error) {
 	if !cfg.RcloneEnabled {
 		return false, nil
 	}
@@ -459,7 +464,7 @@ func remotePathExists(remotePath string, cfg *Config) (bool, error) {
 		return false, fmt.Errorf("invalid remote path: %w", err)
 	}
 
-	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	remoteDest := cfg.RcloneRemote + ":" + getRcloneBasePath(cfg, isVideo)
 	fullPath := remoteDest + "/" + remotePath
 
 	// A successful command means the directory exists, even if it's empty.
@@ -495,7 +500,7 @@ func listRemoteArtistFolders(artistFolder string, cfg *Config) (map[string]struc
 		return nil, fmt.Errorf("invalid artist folder: %w", err)
 	}
 
-	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	remoteDest := cfg.RcloneRemote + ":" + getRcloneBasePath(cfg, false)
 	fullPath := remoteDest + "/" + artistFolder
 
 	cmd := exec.Command("rclone", "lsf", fullPath, "--dirs-only")

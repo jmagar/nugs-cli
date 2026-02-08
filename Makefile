@@ -11,7 +11,9 @@ build:
 # Clean removes binary from ~/.local/bin
 clean:
 	@rm -f ~/.local/bin/nugs
+	@rm -f ./nugs ./nugs-cli
 	@echo "✓ Removed ~/.local/bin/nugs"
+	@echo "✓ Removed local build artifacts (./nugs, ./nugs-cli)"
 
 # Install is the same as build (already in user's PATH)
 install: build

@@ -43,14 +43,6 @@ func main() {
 // config file detection, JSON flag parsing, and config/arg parsing.
 func bootstrap() (*Config, string) {
 	setupSessionPersistence()
-	scriptDir, err := getScriptDir()
-	if err != nil {
-		panic(err)
-	}
-	err = os.Chdir(scriptDir)
-	if err != nil {
-		panic(err)
-	}
 
 	// Check if any config file exists, if not, prompt to create one
 	configExists := false
@@ -67,7 +59,7 @@ func bootstrap() (*Config, string) {
 		}
 	}
 	if !configExists {
-		err = promptForConfig()
+		err := promptForConfig()
 		if err != nil {
 			handleErr("Failed to create config.", err, true)
 		}
@@ -460,36 +452,57 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 	return true
 }
 
-// handleArtistShorthand handles "<artistID> latest/full" shortcuts.
+// handleArtistShorthand handles "<artistID> latest/full [media]" shortcuts.
 // Returns true if the input was handled (including error cases).
+// Accepts optional media type modifier: "audio", "video", or "both"
 func handleArtistShorthand(cfg *Config) bool {
 	artistID, err := strconv.Atoi(cfg.Urls[0])
 	if err != nil {
 		return false
 	}
+
+	// Check for media type modifier (3rd arg: "audio", "video", "both")
+	mediaModifier := ""
+	if len(cfg.Urls) > 2 {
+		candidate := strings.ToLower(cfg.Urls[2])
+		if candidate == "audio" || candidate == "video" || candidate == "both" {
+			mediaModifier = candidate
+		}
+	}
+
 	switch cfg.Urls[1] {
 	case "latest":
 		artistUrl := fmt.Sprintf("https://play.nugs.net/artist/%d/latest", artistID)
 		cfg.Urls = []string{artistUrl}
-		printMusic(fmt.Sprintf("Downloading latest shows from %sartist %d%s", colorBold, artistID, colorReset))
+		if mediaModifier != "" {
+			cfg.DefaultOutputs = mediaModifier
+			printMusic(fmt.Sprintf("Downloading latest shows (%s) from %sartist %d%s", mediaModifier, colorBold, artistID, colorReset))
+		} else {
+			printMusic(fmt.Sprintf("Downloading latest shows from %sartist %d%s", colorBold, artistID, colorReset))
+		}
 	case "full":
 		artistUrl := fmt.Sprintf("https://play.nugs.net/#/artist/%d", artistID)
 		cfg.Urls = []string{artistUrl}
-		printMusic(fmt.Sprintf("Downloading entire catalog from %sartist %d%s", colorBold, artistID, colorReset))
+		if mediaModifier != "" {
+			cfg.DefaultOutputs = mediaModifier
+			printMusic(fmt.Sprintf("Downloading entire catalog (%s) from %sartist %d%s", mediaModifier, colorBold, artistID, colorReset))
+		} else {
+			printMusic(fmt.Sprintf("Downloading entire catalog from %sartist %d%s", colorBold, artistID, colorReset))
+		}
 	case "gaps", "update", "cache", "stats", "config", "coverage", "list":
 		fmt.Printf("%s✗ Invalid syntax%s\n\n", colorRed, colorReset)
 		fmt.Printf("Did you mean: %snugs catalog %s %d%s\n\n", colorBold, cfg.Urls[1], artistID, colorReset)
 		fmt.Printf("Valid artist shortcuts:\n")
-		fmt.Printf("  • %snugs %d latest%s  - Download latest shows\n", colorBold, artistID, colorReset)
-		fmt.Printf("  • %snugs %d full%s    - Download entire catalog\n\n", colorBold, artistID, colorReset)
+		fmt.Printf("  • %snugs %d latest%s [audio|video|both] - Download latest shows\n", colorBold, artistID, colorReset)
+		fmt.Printf("  • %snugs %d full%s [audio|video|both]   - Download entire catalog\n\n", colorBold, artistID, colorReset)
 		fmt.Printf("For catalog commands, use:\n")
 		fmt.Printf("  • %snugs catalog %s %d%s\n", colorBold, cfg.Urls[1], artistID, colorReset)
 		os.Exit(1)
 	default:
 		fmt.Printf("%s✗ Unknown command: %s%s\n\n", colorRed, cfg.Urls[1], colorReset)
 		fmt.Printf("Valid artist shortcuts:\n")
-		fmt.Printf("  • %snugs %d latest%s  - Download latest shows\n", colorBold, artistID, colorReset)
-		fmt.Printf("  • %snugs %d full%s    - Download entire catalog\n\n", colorBold, artistID, colorReset)
+		fmt.Printf("  • %snugs %d latest%s [audio|video|both] - Download latest shows\n", colorBold, artistID, colorReset)
+		fmt.Printf("  • %snugs %d full%s [audio|video|both]   - Download entire catalog\n\n", colorBold, artistID, colorReset)
 		os.Exit(1)
 	}
 	return false // continue to auth+dispatch with rewritten URL

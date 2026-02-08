@@ -151,7 +151,9 @@ On first run, you'll be prompted to create it.
 | `password` | Your Nugs.net password | string |
 | `format` | Audio download quality | `1` = 16-bit/44.1kHz ALAC<br>`2` = 16-bit/44.1kHz FLAC<br>`3` = 24-bit/48kHz MQA<br>`4` = 360 Reality Audio<br>`5` = 150 Kbps AAC |
 | `videoFormat` | Video download quality | `1` = 480p<br>`2` = 720p<br>`3` = 1080p<br>`4` = 1440p<br>`5` = 4K/best available |
+| `defaultOutputs` | Default media type preference | `audio` (default) - Prefer audio downloads<br>`video` - Prefer video downloads<br>`both` - Download both formats when available |
 | `outPath` | Download destination | Path (created if doesn't exist) |
+| `videoOutPath` | Video download destination (defaults to `outPath`) | Path |
 
 ### Advanced Settings
 
@@ -170,6 +172,7 @@ On first run, you'll be prompted to create it.
 | `rcloneEnabled` | Enable auto-upload to cloud storage |
 | `rcloneRemote` | Rclone remote name (e.g., `gdrive`) |
 | `rclonePath` | Path on remote (e.g., `/Music/Nugs`) |
+| `rcloneVideoPath` | Remote path for videos (defaults to `rclonePath`) |
 | `deleteAfterUpload` | Delete local files after successful upload |
 | `rcloneTransfers` | Number of parallel transfers (default: 4) |
 
@@ -243,15 +246,23 @@ nugs /path/to/urls.txt
 **Download artist's latest shows:**
 
 ```bash
-nugs grab 1125 latest  # Billy Strings
-nugs grab 461 latest   # Grateful Dead
+nugs grab 1125 latest        # Billy Strings (respects defaultOutputs)
+nugs grab 1125 latest video  # Latest videos only
+nugs grab 461 latest         # Grateful Dead
 ```
 
 **Download entire artist catalog:**
 
 ```bash
-nugs 1125 full  # Billy Strings - all shows
-nugs 461 full   # Grateful Dead - complete catalog
+nugs 1125 full               # Billy Strings - all shows (respects defaultOutputs)
+nugs 1125 full video         # Billy Strings - all videos only
+nugs 461 full both           # Grateful Dead - download both audio and video
+```
+
+**Download both formats:**
+
+```bash
+nugs grab 23329 both         # Download both audio and video for show 23329
 ```
 
 **Override quality settings:**
@@ -269,15 +280,24 @@ nugs grab -o /mnt/storage/music 23329  # Custom output path
 **List all artists:**
 
 ```bash
-nugs list
+nugs list                # All artists with media indicators
+nugs list audio          # Only artists with audio shows
+nugs list video          # Only artists with video shows
 ```
 
 **View artist's shows:**
 
 ```bash
-nugs list 1125  # Billy Strings
-nugs list 461   # Grateful Dead
+nugs list 1125           # Billy Strings (all shows with 🎵 🎬 📹 indicators)
+nugs list 1125 audio     # Billy Strings audio shows only
+nugs list 1125 video     # Billy Strings video shows only
+nugs list 461            # Grateful Dead
 ```
+
+**Media Type Indicators:**
+- 🎵 Audio only
+- 🎬 Video only
+- 📹 Both audio and video available
 
 **Filter and search shows:**
 
@@ -372,8 +392,10 @@ Top 10 Artists by Show Count:
 **View recently added shows:**
 
 ```bash
-nugs latest       # Default: 15 shows
-nugs latest 50    # Show 50 most recent
+nugs latest              # Default: 15 shows (both formats with emoji)
+nugs latest video        # Latest video releases only
+nugs latest 50           # Last 50 shows (both formats)
+nugs latest 50 audio     # Last 50 audio releases
 ```
 
 Output:
@@ -381,9 +403,10 @@ Output:
 ```text
 Latest 15 Shows in Catalog:
 
-   1. Daniel Donato         02/03/26    02/03/26 Missoula, MT
-   2. The String Cheese...  07/18/00    07/18/00 Mt. Shasta, CA
-   3. Dizgo                 01/30/26    01/30/26 Columbus, OH
+      Artist               Date        Title                      Media
+   1. 🎬 Daniel Donato     02/03/26    02/03/26 Missoula, MT      Video
+   2. 🎵 String Cheese...  07/18/00    07/18/00 Mt. Shasta, CA    Audio
+   3. 📹 Dizgo             01/30/26    01/30/26 Columbus, OH      Both
    ...
 ```
 
@@ -392,17 +415,20 @@ Latest 15 Shows in Catalog:
 **Find missing shows in your collection:**
 
 ```bash
-nugs gaps 1125  # Billy Strings
-nugs gaps 1125 461 1045  # Multiple artists at once
+nugs gaps 1125               # Billy Strings (respects defaultOutputs)
+nugs gaps 1125 audio         # Audio gaps only
+nugs gaps 1125 video         # Video gaps only
+nugs gaps 1125 both          # Both audio AND video gaps (stricter - shows you have either audio OR video but not both)
+nugs gaps 1125 461 1045      # Multiple artists at once
 ```
 
 Output:
 
 ```text
-  ID       Date         Title
-  ────────────────────────────────────────────────────────────
-  46385    12/14/25     12/14/25 ACL Live Austin, TX
-  46380    12/13/25     12/13/25 The Criterion Oklahoma City
+  ID       Date         Title                                    Media
+  ────────────────────────────────────────────────────────────────────
+  46385    12/14/25     12/14/25 ACL Live Austin, TX             🎵
+  46380    12/13/25     12/13/25 The Criterion Oklahoma City     🎬
   ...
 ```
 
@@ -410,12 +436,16 @@ Output:
 
 ```bash
 nugs gaps 1125 --ids-only
+nugs gaps 1125 video --ids-only  # Video gaps only
 # Output: 46385
 #         46380
 #         46375
 
-# Download all gaps
-nugs gaps 1125 --ids-only | xargs -n1 nugs grab
+# Download all audio gaps
+nugs gaps 1125 audio --ids-only | xargs -n1 nugs grab
+
+# Download all video gaps
+nugs gaps 1125 video --ids-only | xargs -n1 nugs grab video
 
 # Download first 10 gaps
 nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs grab
@@ -424,18 +454,20 @@ nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs grab
 **Auto-download all missing shows:**
 
 ```bash
-nugs gaps 1045 fill
+nugs gaps 1045 fill              # Fill gaps (respects defaultOutputs)
+nugs gaps 1045 fill video        # Fill all video gaps
+nugs gaps 1045 fill both         # Fill all shows where you're missing either format
 ```
 
 Output:
 
 ```text
-Filling Gaps: Phish
+Filling Gaps: Phish (Video)
 
   Total Missing:    234 shows
 
-⬇ Downloading 1/234: 2025-12-14 - 12/14/25 Madison Square Garden...
-⬇ Downloading 2/234: 2025-12-13 - 12/13/25 Madison Square Garden...
+⬇ Downloading 1/234: 2025-12-14 - 12/14/25 Madison Square Garden... 🎬
+⬇ Downloading 2/234: 2025-12-13 - 12/13/25 Madison Square Garden... 🎬
 ...
 
 Download Summary:
@@ -449,26 +481,32 @@ Download Summary:
 **Check download coverage for artists:**
 
 ```bash
-# Single artist
+# Single artist (respects defaultOutputs)
 nugs coverage 1125
+
+# Coverage for specific media type
+nugs coverage 1125 video         # Video coverage only
+nugs coverage 1125 audio         # Audio coverage only
+nugs coverage 1125 both          # Both formats coverage
 
 # Multiple artists
 nugs coverage 1125 461 1045
 
 # All artists with downloads (auto-detects from output directory)
 nugs coverage
+nugs coverage video              # Video coverage for all artists
 ```
 
 Output:
 
 ```text
-Download Coverage Statistics
+Download Coverage Statistics (Video)
 
-  Artist ID    Artist Name                              Downloaded    Total    Coverage
-  ────────────────────────────────────────────────────────────────────────────────────
-        1125   Billy Strings                                   23      430       5.3%
-         461   Phish                                          195      734      26.6%
-        1045   Widespread Panic                               142      892      15.9%
+  Artist ID    Artist Name              Downloaded    Total    Coverage    Media
+  ──────────────────────────────────────────────────────────────────────────────
+        1125   Billy Strings                    12      156       7.7%    🎬
+         461   Phish                            45      234      19.2%    🎬
+        1045   Widespread Panic                 78      445      17.5%    🎬
 ```
 
 ---
@@ -703,10 +741,15 @@ nugs -o <path> <url>          # Custom output directory
 ### List Commands
 
 ```bash
-nugs list                                    # List all artists
+nugs list                                    # List all artists with media indicators
+nugs list audio                              # List only artists with audio
+nugs list video                              # List only artists with video
 nugs list >100                               # Filter artists by show count
 nugs list <=50                               # Operators: >, <, >=, <=, =
-nugs list <artist_id>                        # List all artist's shows
+nugs list <artist_id>                        # List all artist's shows with 🎵🎬📹
+nugs list <artist_id> audio                  # List artist's audio shows only
+nugs list <artist_id> video                  # List artist's video shows only
+nugs list <artist_id> both                   # Shows with both formats
 nugs list <artist_id> latest <N>             # List latest N shows
 nugs list <artist_id> "venue"                # Filter shows by venue name
 nugs list --json <level>                     # JSON output
@@ -719,27 +762,33 @@ nugs list <artist_id> --json <level>         # JSON output
 # List latest 5 shows from Billy Strings
 nugs list 1125 latest 5
 
+# List Billy Strings video shows only
+nugs list 1125 video
+
 # Find all Grateful Dead shows at Red Rocks
 nugs list 461 "Red Rocks"
 
-# Find all Billy Strings shows at Ryman (case-insensitive)
-nugs list 1125 "ryman"
+# Find all Billy Strings video shows at Ryman
+nugs list 1125 video "ryman"
+
+# List artists with video content
+nugs list video
 ```
 
 ### Catalog Commands
 
 ```bash
-nugs update                        # Update catalog cache
-nugs cache                         # View cache status
-nugs stats                         # View statistics
-nugs latest [limit]                # View latest additions
-nugs gaps <artist_id> [...]        # List missing shows only (one or more artists)
-nugs gaps <id> [...]  --ids-only   # IDs only (for piping)
-nugs gaps <id> fill                # Auto-download all missing shows
-nugs coverage [artist_ids...]      # Show download coverage stats
-nugs refresh enable                # Enable auto-refresh
-nugs refresh disable               # Disable auto-refresh
-nugs refresh set                   # Configure auto-refresh
+nugs update                             # Update catalog cache
+nugs cache                              # View cache status
+nugs stats                              # View statistics
+nugs latest [limit] [audio|video|both]  # View latest additions (with media filter)
+nugs gaps <id> [audio|video|both]       # List missing shows (with media type)
+nugs gaps <id> [...]  --ids-only        # IDs only (for piping)
+nugs gaps <id> [audio|video|both] fill  # Auto-download missing shows
+nugs coverage [ids...] [audio|video|both]  # Coverage stats (with media filter)
+nugs refresh enable                     # Enable auto-refresh
+nugs refresh disable                    # Disable auto-refresh
+nugs refresh set                        # Configure auto-refresh
 ```
 
 ### Global Options
@@ -897,13 +946,78 @@ nugs stats
 ### Example 6: Check Collection Coverage
 
 ```bash
-# Get coverage stats for your favorite artists (coming soon)
+# Get coverage stats for your favorite artists
 nugs coverage
+
+# Check video coverage
+nugs coverage video
 
 # Or check individual artists
 nugs gaps 1125  # Shows coverage percentage
 nugs gaps 461
 nugs gaps 1045
+```
+
+### Example 7: Video-First Workflows
+
+**Configure for video preference:**
+
+```json
+{
+  "defaultOutputs": "video",
+  "videoFormat": 5,
+  "outPath": "/mnt/storage/nugs"
+}
+```
+
+**Browse and download videos:**
+
+```bash
+# Find artists with video content
+nugs list video
+
+# View Billy Strings videos
+nugs list 1125 video
+
+# Download latest videos
+nugs grab 1125 latest video
+
+# Fill all video gaps
+nugs gaps 1125 video fill
+
+# Check video coverage
+nugs coverage 1125 video
+```
+
+### Example 8: Comprehensive Collection (Both Formats)
+
+**Download both audio and video:**
+
+```bash
+# Single show - both formats
+nugs grab 46201 both
+
+# Artist's latest - both formats
+nugs grab 1125 latest both
+
+# Fill gaps for both formats
+nugs gaps 1125 both fill
+
+# Find shows where you're missing either format
+nugs gaps 1125 both
+```
+
+**Check what you have:**
+
+```bash
+# Overall coverage (audio)
+nugs coverage 1125 audio
+
+# Video coverage
+nugs coverage 1125 video
+
+# Shows with both formats downloaded
+nugs coverage 1125 both
 ```
 
 ---

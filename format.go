@@ -13,6 +13,8 @@ import (
 	"golang.org/x/term"
 )
 
+const defaultProgressRenderInterval = 100 * time.Millisecond
+
 // Box drawing characters for beautiful tables
 const (
 	boxTopLeft     = "┌"
@@ -423,39 +425,47 @@ type ProgressBoxState struct {
 	AccumulatedTracks int   // Number of completed tracks
 	RcloneEnabled     bool
 	LinesDrawn        int
-	
+
 	// ETA tracking
-	DownloadETA       string    // Estimated time remaining for download
-	UploadETA         string    // Estimated time remaining for upload
-	SpeedHistory      []float64 // Last 10 download speed samples for smoothing
-	UploadSpeedHistory []float64 // Last 10 upload speed samples for smoothing (thread-safe)
-	LastUpdateTime    time.Time // Last time progress was updated
-	
+	DownloadETA        string        // Estimated time remaining for download
+	UploadETA          string        // Estimated time remaining for upload
+	SpeedHistory       []float64     // Last 10 download speed samples for smoothing
+	UploadSpeedHistory []float64     // Last 10 upload speed samples for smoothing (thread-safe)
+	LastUpdateTime     time.Time     // Last time the progress box was rendered
+	RenderInterval     time.Duration // Minimum interval between redraws (defaults to 100ms)
+
 	// Completion tracking
-	IsComplete        bool      // Whether all tracks have completed
-	CompletionTime    time.Time // When the download completed
-	TotalDuration     time.Duration // Total time taken for the show
-	SkippedTracks     int       // Number of tracks skipped (already exist)
-	ErrorTracks       int       // Number of tracks that failed
-	StartTime         time.Time // When the download started
-	
+	IsComplete     bool          // Whether all tracks have completed
+	CompletionTime time.Time     // When the download completed
+	TotalDuration  time.Duration // Total time taken for the show
+	SkippedTracks  int           // Number of tracks skipped (already exist)
+	ErrorTracks    int           // Number of tracks that failed
+	StartTime      time.Time     // When the download started
+
 	// Phase tracking (Tier 1 enhancement)
-	CurrentPhase      string    // Current operation phase (download, upload, verify, paused, error)
-	StatusColor       string    // ANSI color code for current phase
-	
+	CurrentPhase string // Current operation phase (download, upload, verify, paused, error)
+	StatusColor  string // ANSI color code for current phase
+
 	// Message display (Tier 3 enhancement)
-	ErrorMessage      string    // Current error message to display
-	WarningMessage    string    // Current warning message to display
-	StatusMessage     string    // Current status message to display
-	MessageExpiry     time.Time // When the current message should expire
-	MessagePriority   int       // Priority of current message (1=status, 2=warning, 3=error)
-	
+	ErrorMessage    string    // Current error message to display
+	WarningMessage  string    // Current warning message to display
+	StatusMessage   string    // Current status message to display
+	MessageExpiry   time.Time // When the current message should expire
+	MessagePriority int       // Priority of current message (1=status, 2=warning, 3=error)
+
 	// State indicators (Tier 3 enhancement)
-	IsPaused          bool      // Whether the download/upload is paused
-	IsCancelled       bool      // Whether the operation was cancelled
+	IsPaused    bool // Whether the download/upload is paused
+	IsCancelled bool // Whether the operation was cancelled
 
 	// Batch progress (Tier 4 enhancement)
-	BatchState        *BatchProgressState // Optional batch context for multi-album operations
+	BatchState *BatchProgressState // Optional batch context for multi-album operations
+
+	// Render-state tracking for smart redraw decisions
+	LastRenderedTrackNumber     int
+	LastRenderedMessagePriority int
+	LastRenderedPaused          bool
+	LastRenderedCancelled       bool
+	forceRender                 bool
 }
 
 // SetPhase sets the current operation phase and corresponding color (Tier 1 enhancement)
@@ -477,19 +487,58 @@ func (s *ProgressBoxState) SetPhase(phase string) {
 	}
 }
 
+func (s *ProgressBoxState) getRenderIntervalLocked() time.Duration {
+	if s.RenderInterval <= 0 {
+		return defaultProgressRenderInterval
+	}
+	return s.RenderInterval
+}
+
+func (s *ProgressBoxState) hasCriticalRenderChangeLocked() bool {
+	return s.TrackNumber != s.LastRenderedTrackNumber ||
+		s.MessagePriority != s.LastRenderedMessagePriority ||
+		s.IsPaused != s.LastRenderedPaused ||
+		s.IsCancelled != s.LastRenderedCancelled
+}
+
+func (s *ProgressBoxState) shouldRenderLocked(now time.Time) bool {
+	force := s.forceRender || s.hasCriticalRenderChangeLocked()
+	if !force && !s.LastUpdateTime.IsZero() &&
+		now.Sub(s.LastUpdateTime) < s.getRenderIntervalLocked() {
+		return false
+	}
+
+	s.LastUpdateTime = now
+	s.forceRender = false
+	s.LastRenderedTrackNumber = s.TrackNumber
+	s.LastRenderedMessagePriority = s.MessagePriority
+	s.LastRenderedPaused = s.IsPaused
+	s.LastRenderedCancelled = s.IsCancelled
+	return true
+}
+
+func (s *ProgressBoxState) shouldRender(now time.Time) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.shouldRenderLocked(now)
+}
+
 // calculateBoxWidth determines optimal box width based on terminal size (Tier 1 enhancement)
 // Returns a width between 79 (minimum) and 120 (maximum) characters
 func calculateBoxWidth() int {
 	termWidth := getTermWidth()
-	
+
 	// Minimum width for readability
 	const minWidth = 79
 	// Maximum width to prevent overly wide boxes
 	const maxWidth = 120
-	
+
 	// Use 95% of terminal width to leave some breathing room
 	boxWidth := int(float64(termWidth) * 0.95)
-	
+
 	// Clamp to min/max bounds
 	if boxWidth < minWidth {
 		return minWidth
@@ -497,14 +546,22 @@ func calculateBoxWidth() int {
 	if boxWidth > maxWidth {
 		return maxWidth
 	}
-	
+
 	return boxWidth
 }
 
 // renderProgressBox draws the complete progress box with dual progress bars
 func renderProgressBox(state *ProgressBoxState) {
+	if state == nil {
+		return
+	}
+
 	// Lock for reading state (released after we copy all values we need)
 	state.mu.Lock()
+	if !state.shouldRenderLocked(time.Now()) {
+		state.mu.Unlock()
+		return
+	}
 
 	width := calculateBoxWidth() // Dynamic width based on terminal size (Tier 1 enhancement)
 
@@ -708,7 +765,7 @@ func buildProgressBar(percentage int, width int, fillColor string) string {
 
 	bar := fillColor + strings.Repeat("█", filled) + colorReset +
 		strings.Repeat("░", empty)
-	
+
 	return bar
 }
 
@@ -718,12 +775,12 @@ func buildProgressBar(percentage int, width int, fillColor string) string {
 func calculateETA(speedHistory []float64, remaining int64) string {
 	// Guard against negative remaining (progress calculation errors)
 	if remaining <= 0 {
-		return ""  // Already complete or invalid state
+		return "" // Already complete or invalid state
 	}
 
 	// Show ETA even with just 1 speed sample (don't require full history)
 	if len(speedHistory) == 0 {
-		return ""  // No data yet
+		return "" // No data yet
 	}
 
 	// Calculate average speed from available samples
@@ -734,7 +791,7 @@ func calculateETA(speedHistory []float64, remaining int64) string {
 	avgSpeed := totalSpeed / float64(len(speedHistory))
 
 	// Avoid division by zero - use threshold for float precision
-	if avgSpeed < 0.001 {  // Effectively zero (< 1 byte/sec)
+	if avgSpeed < 0.001 { // Effectively zero (< 1 byte/sec)
 		return ""
 	}
 
@@ -760,11 +817,11 @@ func formatDuration(d time.Duration) string {
 	if d < time.Second {
 		return "0s"
 	}
-	
+
 	hours := int(d.Hours())
 	minutes := int(d.Minutes()) % 60
 	seconds := int(d.Seconds()) % 60
-	
+
 	if hours > 0 {
 		return fmt.Sprintf("%dh %dm", hours, minutes)
 	}
@@ -840,23 +897,23 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	defer state.mu.Unlock()
 
 	width := calculateBoxWidth() // Match progress box width
-	
+
 	// Clear previous box
 	if state.LinesDrawn > 0 {
 		for i := 0; i < state.LinesDrawn; i++ {
 			fmt.Print("\033[A\033[2K")
 		}
 	}
-	
+
 	lineCount := 0
-	
+
 	// Top border with double lines
 	fmt.Printf("%s%s%s%s%s\n",
 		colorGreen, boxDoubleTopLeft,
 		strings.Repeat(boxDoubleHorizontal, width),
 		boxDoubleTopRight, colorReset)
 	lineCount++
-	
+
 	// Header: COMPLETED
 	header := fmt.Sprintf("  %s DOWNLOAD COMPLETE", symbolCheck)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
@@ -864,7 +921,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		padRight(truncateWithEllipsis(header, width-2), width-2),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
-	
+
 	// Show title
 	titleLine := fmt.Sprintf("  %s", state.ShowTitle)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
@@ -872,21 +929,21 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		padRight(truncateWithEllipsis(titleLine, width-2), width-2),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
-	
+
 	// Separator
 	fmt.Printf("%s%s%s%s%s\n",
 		colorCyan, "╠",
 		strings.Repeat(boxDoubleHorizontal, width),
 		"╣", colorReset)
 	lineCount++
-	
+
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
 		strings.Repeat(" ", width-2),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
-	
+
 	// Stats lines
 	completedTracks := state.AccumulatedTracks
 	stats := []string{
@@ -894,7 +951,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		fmt.Sprintf("  Total Size:         %s", state.ShowTotal),
 		fmt.Sprintf("  Duration:           %s", formatDuration(state.TotalDuration)),
 	}
-	
+
 	// Add skipped/error stats if any
 	if state.SkippedTracks > 0 {
 		stats = append(stats, fmt.Sprintf("  Skipped:            %d", state.SkippedTracks))
@@ -902,13 +959,13 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	if state.ErrorTracks > 0 {
 		stats = append(stats, fmt.Sprintf("  Errors:             %d", state.ErrorTracks))
 	}
-	
+
 	// Calculate average speed if duration > 0
 	if state.TotalDuration.Seconds() > 0 {
 		avgSpeed := float64(state.AccumulatedBytes) / state.TotalDuration.Seconds()
 		stats = append(stats, fmt.Sprintf("  Avg Speed:          %s/s", humanize.Bytes(uint64(avgSpeed))))
 	}
-	
+
 	for _, stat := range stats {
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
@@ -916,20 +973,20 @@ func renderCompletionSummary(state *ProgressBoxState) {
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 	}
-	
+
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
 		strings.Repeat(" ", width-2),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
-	
+
 	// Bottom border
 	fmt.Printf("%s%s%s%s%s\n",
 		colorGreen, boxDoubleBottomLeft,
 		strings.Repeat(boxDoubleHorizontal, width),
 		boxDoubleBottomRight, colorReset)
 	lineCount++
-	
+
 	state.LinesDrawn = lineCount
 }
