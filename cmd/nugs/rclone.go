@@ -49,7 +49,10 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 			} else {
 				progressBox.UploadETA = ""
 			}
+			progressBox.ForceRender = true  // Force render on upload progress updates
 			progressBox.Mu.Unlock()
+
+			// renderProgressBox locks internally, call outside our lock
 			renderProgressBox(progressBox)
 		}
 
