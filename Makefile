@@ -1,19 +1,18 @@
-.PHONY: build clean install
+.PHONY: build clean install test
 
 # Build binary directly to ~/.local/bin/nugs
 build:
 	@mkdir -p ~/.local/bin
 	@echo "Building nugs..."
-	@go build -o ~/.local/bin/nugs
-	@echo "✓ Build complete: ~/.local/bin/nugs"
-	@echo "✓ Binary is in your PATH at: ~/.local/bin/nugs"
+	@go build -o ~/.local/bin/nugs .
+	@echo "done: ~/.local/bin/nugs"
 
 # Clean removes binary from ~/.local/bin
 clean:
-	@rm -f ~/.local/bin/nugs
-	@rm -f ./nugs ./nugs-cli
-	@echo "✓ Removed ~/.local/bin/nugs"
-	@echo "✓ Removed local build artifacts (./nugs, ./nugs-cli)"
+	@rm -f ~/.local/bin/nugs ./nugs ./nugs-cli
+
+test:
+	@go test ./... -count=1
 
 # Install is the same as build (already in user's PATH)
 install: build
