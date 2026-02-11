@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -26,10 +25,7 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-const (
-	chapsFileFname = "chapters_nugs_dl_tmp.txt"
-	durRegex       = `Duration: ([\d:.]+)`
-)
+const durRegex = `Duration: ([\d:.]+)`
 
 var resFallback = map[string]string{
 	"720":  "480",
@@ -202,7 +198,7 @@ func GetSegUrls(manifestUrl, query string) ([]string, error) {
 
 // DownloadVideoFile downloads a video file from a URL with progress tracking.
 func DownloadVideoFile(videoPath, _url string, onProgress func(downloaded, total, speed int64)) error {
-	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_WRONLY, 0755)
+	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -275,7 +271,7 @@ func (s *simpleWriteCounter) Write(p []byte) (int, error) {
 
 // DownloadLstream downloads a livestream video by downloading all segments.
 func DownloadLstream(videoPath, baseUrl string, segUrls []string, onProgress func(segNum, segTotal int)) error {
-	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -366,91 +362,87 @@ func GetDuration(tsPath, ffmpegNameStr string) (int, error) {
 }
 
 // GetNextChapStart gets the start time of a chapter by index.
-func GetNextChapStart(chapters []any, idx int) float64 {
-	for i, chapter := range chapters {
-		if i == idx {
-			m := chapter.(map[string]any)
-			return m["chapterSeconds"].(float64)
-		}
+func GetNextChapStart(chapters []any, idx int) (float64, error) {
+	if idx < 0 || idx >= len(chapters) {
+		return 0, fmt.Errorf("chapter index %d out of range", idx)
 	}
-	return 0
+	m, ok := chapters[idx].(map[string]any)
+	if !ok {
+		return 0, fmt.Errorf("chapter at index %d is not a map", idx)
+	}
+	secs, ok := m["chapterSeconds"].(float64)
+	if !ok {
+		return 0, fmt.Errorf("chapterSeconds missing or not a number at index %d", idx)
+	}
+	return secs, nil
 }
 
-// WriteChapsFile writes an ffmpeg chapters metadata file.
-func WriteChapsFile(chapters []any, dur int) error {
-	f, err := os.OpenFile(chapsFileFname, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0755)
+// WriteChapsFile writes an ffmpeg chapters metadata file and returns the temp file path.
+func WriteChapsFile(chapters []any, dur int) (string, error) {
+	f, err := os.CreateTemp("", "nugs-chapters-*.txt")
 	if err != nil {
-		return err
+		return "", fmt.Errorf("failed to create chapters temp file: %w", err)
 	}
 	defer f.Close()
+	chapsPath := f.Name()
+
 	_, err = f.WriteString(";FFMETADATA1\n")
 	if err != nil {
-		return err
+		return chapsPath, err
 	}
 	chaptersCount := len(chapters)
-
-	var nextChapStart float64
 
 	for i, chapter := range chapters {
 		i++
 		isLast := i == chaptersCount
 
-		// casting to struct won't work.
-		m := chapter.(map[string]any)
-		start := m["chapterSeconds"].(float64)
+		m, ok := chapter.(map[string]any)
+		if !ok {
+			return chapsPath, fmt.Errorf("chapter at index %d is not a map", i-1)
+		}
+		start, ok := m["chapterSeconds"].(float64)
+		if !ok {
+			return chapsPath, fmt.Errorf("chapterSeconds missing or not a number at index %d", i-1)
+		}
 
 		if !isLast {
-			nextChapStart = GetNextChapStart(chapters, i)
+			nextChapStart, nextErr := GetNextChapStart(chapters, i)
+			if nextErr != nil {
+				return chapsPath, nextErr
+			}
 			if nextChapStart <= start {
 				continue
 			}
-		}
-
-		_, err := f.WriteString("\n[CHAPTER]\n")
-		if err != nil {
-			return err
-		}
-		_, err = f.WriteString("TIMEBASE=1/1\n")
-		if err != nil {
-			return err
-		}
-
-		startLine := fmt.Sprintf("START=%d\n", int(math.Round(start)))
-		_, err = f.WriteString(startLine)
-		if err != nil {
-			return err
-		}
-		if isLast {
-			endLine := fmt.Sprintf("END=%d\n", dur)
-			_, err = f.WriteString(endLine)
-			if err != nil {
-				return err
-			}
+			_, err = f.WriteString(fmt.Sprintf("\n[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\n",
+				int(math.Round(start)), int(math.Round(nextChapStart)-1)))
 		} else {
-			endLine := fmt.Sprintf("END=%d\n", int(math.Round(nextChapStart)-1))
-			_, err = f.WriteString(endLine)
-			if err != nil {
-				return err
-			}
+			_, err = f.WriteString(fmt.Sprintf("\n[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\n",
+				int(math.Round(start)), dur))
 		}
-		_, err = f.WriteString("TITLE=" + m["chaptername"].(string) + "\n")
 		if err != nil {
-			return err
+			return chapsPath, err
+		}
+
+		title, _ := m["chaptername"].(string)
+		_, err = f.WriteString("TITLE=" + title + "\n")
+		if err != nil {
+			return chapsPath, err
 		}
 	}
-	return nil
+	return chapsPath, nil
 }
 
 // TsToMp4 converts a TS file to MP4 using ffmpeg, optionally including chapters.
-func TsToMp4(vidPathTs, vidPath, ffmpegNameStr string, chapAvail bool) error {
+// chapsFilePath is the path to the chapters metadata file (empty if no chapters).
+func TsToMp4(vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
 	var (
 		errBuffer bytes.Buffer
 		args      []string
 	)
-	if chapAvail {
+	if chapsFilePath != "" {
 		args = []string{
 			"-hide_banner", "-i", vidPathTs, "-f", "ffmetadata",
-			"-i", chapsFileFname, "-map_metadata", "1", "-c", "copy", vidPath,
+			"-i", chapsFilePath, "-map_metadata", "1", "-c", "copy", vidPath,
 		}
 	} else {
 		args = []string{"-hide_banner", "-i", vidPathTs, "-c", "copy", vidPath}
@@ -558,7 +550,7 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 	}
 
 	if !cfg.SkipChapters {
-		chapsAvail = !reflect.ValueOf(meta.VideoChapters).IsZero()
+		chapsAvail = len(meta.VideoChapters) > 0
 	}
 
 	videoFname := helpers.BuildAlbumFolderName(meta.ArtistName, meta.ContainerInfo, 110)
@@ -716,17 +708,22 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 		ui.PrintError("Failed to download video segments")
 		return err
 	}
+	var chapsFilePath string
 	if chapsAvail {
 		dur, getDurErr := GetDuration(vidPathTs, cfg.FfmpegNameStr)
 		if getDurErr != nil {
 			ui.PrintError("Failed to get TS duration")
 			return getDurErr
 		}
-		err = WriteChapsFile(meta.VideoChapters, dur)
+		chapsFilePath, err = WriteChapsFile(meta.VideoChapters, dur)
 		if err != nil {
+			if chapsFilePath != "" {
+				os.Remove(chapsFilePath)
+			}
 			ui.PrintError("Failed to write chapters file")
 			return err
 		}
+		defer os.Remove(chapsFilePath)
 	}
 	ui.PrintInfo("Putting into MP4 container...")
 	if progressBox != nil {
@@ -736,16 +733,10 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 			deps.RenderProgressBox(progressBox)
 		}
 	}
-	err = TsToMp4(vidPathTs, vidPath, cfg.FfmpegNameStr, chapsAvail)
+	err = TsToMp4(vidPathTs, vidPath, cfg.FfmpegNameStr, chapsFilePath)
 	if err != nil {
 		ui.PrintError("Failed to put TS into MP4 container")
 		return err
-	}
-	if chapsAvail {
-		err = os.Remove(chapsFileFname)
-		if err != nil {
-			ui.PrintError("Failed to delete chapters file")
-		}
 	}
 	err = os.Remove(vidPathTs)
 	if err != nil {

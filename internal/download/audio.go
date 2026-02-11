@@ -71,7 +71,7 @@ func DownloadTrack(trackPath, _url string, onProgress func(downloaded, total, sp
 			return err
 		}
 	}
-	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0755)
+	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
@@ -184,14 +184,20 @@ func GetKey(keyUrl string) ([]byte, error) {
 }
 
 // Pkcs5Trimming removes PKCS5 padding from decrypted data.
-func Pkcs5Trimming(data []byte) []byte {
-	padding := data[len(data)-1]
-	return data[:len(data)-int(padding)]
+func Pkcs5Trimming(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, errors.New("pkcs5: empty data")
+	}
+	padding := int(data[len(data)-1])
+	if padding == 0 || padding > aes.BlockSize || padding > len(data) {
+		return nil, fmt.Errorf("pkcs5: invalid padding value %d", padding)
+	}
+	return data[:len(data)-padding], nil
 }
 
 // DecryptTrack decrypts a downloaded encrypted TS track file.
-func DecryptTrack(key, iv []byte) ([]byte, error) {
-	encData, err := os.ReadFile("temp_enc.ts")
+func DecryptTrack(tempPath string, key, iv []byte) ([]byte, error) {
+	encData, err := os.ReadFile(tempPath)
 	if err != nil {
 		return nil, err
 	}
@@ -253,15 +259,19 @@ func HlsOnly(trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded
 		return err
 	}
 
-	err = DownloadTrack("temp_enc.ts", tsUrl, onProgress, printNewline, deps)
+	tempFile, err := os.CreateTemp("", "nugs-enc-*.ts")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tempPath := tempFile.Name()
+	tempFile.Close()
+	defer os.Remove(tempPath)
+
+	err = DownloadTrack(tempPath, tsUrl, onProgress, printNewline, deps)
 	if err != nil {
 		return err
 	}
-	decData, err := DecryptTrack(keyBytes, iv)
-	if err != nil {
-		return err
-	}
-	err = os.Remove("temp_enc.ts")
+	decData, err := DecryptTrack(tempPath, keyBytes, iv)
 	if err != nil {
 		return err
 	}

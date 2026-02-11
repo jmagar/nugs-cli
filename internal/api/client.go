@@ -4,19 +4,23 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
 const (
-	DevKey        = "x7f54tgbdyc64y656thy47er4"
-	ClientID      = "Eg7HuH873H65r5rt325UytR5429"
+	// DevKey and ClientID are intentionally hardcoded. Do NOT move these to env vars,
+	// config files, or build-time injection. They are public app-level identifiers
+	// required by the Nugs.net API and are not secret credentials.
+	DevKey   = "x7f54tgbdyc64y656thy47er4"
+	ClientID = "Eg7HuH873H65r5rt325UytR5429"
 	Layout        = "01/02/2006 15:04:05"
 	UserAgent     = "NugsNet/3.26.724 (Android; 7.1.2; Asus; ASUS_Z01QD; Scale/2.0; en)"
 	UserAgentTwo  = "nugsnetAndroid"
@@ -28,9 +32,20 @@ const (
 )
 
 var (
-	Jar, _ = cookiejar.New(nil)
-	Client = &http.Client{Jar: Jar}
+	Jar    = mustCookieJar()
+	Client = &http.Client{
+		Jar:     Jar,
+		Timeout: 30 * time.Second,
+	}
 )
+
+func mustCookieJar() *cookiejar.Jar {
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		panic(fmt.Sprintf("failed to create cookie jar: %v", err))
+	}
+	return jar
+}
 
 // QualityMap maps URL path segments to quality info.
 var QualityMap = map[string]model.Quality{
@@ -124,7 +139,7 @@ func GetSubInfo(token string) (*model.SubInfo, error) {
 
 // GetPlan returns the plan description and whether it's a promo.
 func GetPlan(subInfo *model.SubInfo) (string, bool) {
-	if !reflect.ValueOf(subInfo.Plan).IsZero() {
+	if subInfo.Plan.ID != "" {
 		return subInfo.Plan.Description, false
 	}
 	return subInfo.Promo.Plan.Description, true
@@ -132,7 +147,11 @@ func GetPlan(subInfo *model.SubInfo) (string, bool) {
 
 // ExtractLegToken extracts legacy token and uguid from JWT.
 func ExtractLegToken(tokenStr string) (string, string, error) {
-	payload := strings.SplitN(tokenStr, ".", 3)[1]
+	parts := strings.SplitN(tokenStr, ".", 3)
+	if len(parts) < 2 {
+		return "", "", errors.New("invalid JWT: expected at least 2 dot-separated parts")
+	}
+	payload := parts[1]
 	decoded, err := base64.RawURLEncoding.DecodeString(payload)
 	if err != nil {
 		return "", "", err

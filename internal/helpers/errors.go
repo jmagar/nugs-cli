@@ -10,13 +10,15 @@ import (
 	"strings"
 )
 
-// HandleErr prints or panics on error.
+// HandleErr prints an error to stderr. The _panic parameter is deprecated and
+// retained only for API compatibility — it now calls os.Exit(1) instead of panic.
 func HandleErr(errText string, err error, _panic bool) {
 	errString := errText + "\n" + err.Error()
 	if _panic {
-		panic(errString)
+		fmt.Fprintln(os.Stderr, errString)
+		os.Exit(1)
 	}
-	fmt.Println(errString)
+	fmt.Fprintln(os.Stderr, errString)
 }
 
 // WasRunFromSrc checks if the binary was run from a Go build temp directory.
