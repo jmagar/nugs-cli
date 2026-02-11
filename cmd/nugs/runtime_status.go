@@ -27,9 +27,9 @@ func printActiveRuntimeHint(currentPID int, currentCommand []string) {
 }
 
 func updateRuntimeProgress(label string, percentage int, speed, current, total string) {
-	runtime.UpdateRuntimeProgress(label, percentage, speed, current, total, runErrorCount, runWarningCount)
+	runtime.UpdateRuntimeProgress(label, percentage, speed, current, total, int(runErrorCount.Load()), int(runWarningCount.Load()))
 }
 
 func finalizeRuntimeStatus(state string) {
-	runtime.FinalizeRuntimeStatus(state, runErrorCount, runWarningCount)
+	runtime.FinalizeRuntimeStatus(state, int(runErrorCount.Load()), int(runWarningCount.Load()))
 }

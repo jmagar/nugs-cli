@@ -60,7 +60,8 @@ func CheckRclonePathOnline(cfg *model.Config) string {
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return "Offline (timeout)"
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
 		return "Online (path missing)"
 	}
 	return "Offline"
@@ -424,7 +425,8 @@ func RemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool,
 	err := cmd.Run()
 
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
 			if exitErr.ExitCode() == 3 {
 				return false, nil
 			}
@@ -453,7 +455,8 @@ func ListRemoteArtistFolders(artistFolder string, cfg *model.Config) (map[string
 	cmd := exec.Command("rclone", "lsf", fullPath, "--dirs-only")
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
 			return folders, nil
 		}
 		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)

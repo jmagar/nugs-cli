@@ -40,7 +40,6 @@ func bootstrap() (*Config, string) {
 	configExists := false
 	homeDir, _ := os.UserHomeDir()
 	configSearchPaths := []string{
-		"config.json",
 		filepath.Join(homeDir, ".nugs", "config.json"),
 		filepath.Join(homeDir, ".config", "nugs", "config.json"),
 	}
@@ -595,8 +594,8 @@ func dispatch(cfg *Config, streamParams *StreamParams, legacyToken, uguID string
 				return true
 			}
 		}
-		errorsBefore := runErrorCount
-		warningsBefore := runWarningCount
+		errorsBefore := runErrorCount.Load()
+		warningsBefore := runWarningCount.Load()
 		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
 		itemId, mediaType := checkUrl(_url)
 		if itemId == "" {
@@ -629,8 +628,8 @@ func dispatch(cfg *Config, streamParams *StreamParams, legacyToken, uguID string
 			handleErr("Item failed.", itemErr, false)
 		}
 		completedItems++
-		itemErrors := runErrorCount - errorsBefore
-		itemWarnings := runWarningCount - warningsBefore
+		itemErrors := runErrorCount.Load() - errorsBefore
+		itemWarnings := runWarningCount.Load() - warningsBefore
 		itemStatus := fmt.Sprintf("Item %d/%d complete", albumNum+1, albumTotal)
 		if itemErr != nil || itemErrors > 0 {
 			itemStatus = fmt.Sprintf("Item %d/%d completed with issues", albumNum+1, albumTotal)
@@ -641,6 +640,6 @@ func dispatch(cfg *Config, streamParams *StreamParams, legacyToken, uguID string
 	fmt.Println()
 	printSection("Run Summary")
 	printInfo(fmt.Sprintf("Completed %d/%d items", completedItems, albumTotal))
-	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", runErrorCount, runWarningCount))
+	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", runErrorCount.Load(), runWarningCount.Load()))
 	return false
 }

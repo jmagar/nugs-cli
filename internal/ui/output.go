@@ -3,13 +3,14 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
 // RunErrorCount and RunWarningCount track errors/warnings during a run.
-var RunErrorCount int
-var RunWarningCount int
+var RunErrorCount atomic.Int64
+var RunWarningCount atomic.Int64
 
 // PrintSuccess prints a success message.
 func PrintSuccess(msg string) {
@@ -18,7 +19,7 @@ func PrintSuccess(msg string) {
 
 // PrintError prints an error message and increments the error counter.
 func PrintError(msg string) {
-	RunErrorCount++
+	RunErrorCount.Add(1)
 	fmt.Printf("%s%s%s %s%s\n", ColorRed, SymbolCross, ColorReset, msg, ColorReset)
 }
 
@@ -29,7 +30,7 @@ func PrintInfo(msg string) {
 
 // PrintWarning prints a warning message and increments the warning counter.
 func PrintWarning(msg string) {
-	RunWarningCount++
+	RunWarningCount.Add(1)
 	fmt.Printf("%s%s%s %s%s\n", ColorYellow, SymbolWarning, ColorReset, msg, ColorReset)
 }
 

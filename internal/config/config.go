@@ -195,20 +195,30 @@ func PromptForConfig() error {
 		CatalogRefreshInterval: "daily",
 	}
 
-	// Write to file
+	// Write to ~/.nugs/config.json
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configDir := filepath.Join(homeDir, ".nugs")
+	if mkErr := os.MkdirAll(configDir, 0700); mkErr != nil {
+		return fmt.Errorf("failed to create config directory: %w", mkErr)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+
 	data, err := json.MarshalIndent(cfg, "", "    ")
 	if err != nil {
 		return err
 	}
 
-	err = os.WriteFile("config.json", data, 0600)
+	err = os.WriteFile(configPath, data, 0600)
 	if err != nil {
 		return err
 	}
 
 	fmt.Println()
-	ui.PrintSuccess("config.json created successfully!")
-	ui.PrintInfo("You can edit config.json later to change these settings.")
+	ui.PrintSuccess(fmt.Sprintf("Config created at %s", configPath))
+	ui.PrintInfo("You can edit this file later to change settings.")
 	fmt.Println()
 	return nil
 }
@@ -329,10 +339,11 @@ func ResolveFfmpegBinary(cfg *model.Config) (string, error) {
 	return "", errors.New("ffmpeg binary not found (checked ./ffmpeg and PATH)")
 }
 
+var showCountFilterRegex = regexp.MustCompile(`^(>=|<=|>|<|=)\d+$`)
+
 // IsShowCountFilterToken returns true if the string matches a show count filter pattern.
 func IsShowCountFilterToken(s string) bool {
-	re := regexp.MustCompile(`^(>=|<=|>|<|=)\d+$`)
-	return re.MatchString(s)
+	return showCountFilterRegex.MatchString(s)
 }
 
 // IsMediaModifier returns true if the string is a media type modifier keyword.
@@ -402,7 +413,6 @@ func ReadConfig() (*model.Config, error) {
 	}
 
 	configPaths := []string{
-		"config.json",
 		filepath.Join(homeDir, ".nugs", "config.json"),
 		filepath.Join(homeDir, ".config", "nugs", "config.json"),
 	}
@@ -421,7 +431,7 @@ func ReadConfig() (*model.Config, error) {
 	}
 
 	if data == nil {
-		return nil, fmt.Errorf("config file not found in any location (./config.json, ~/.nugs/config.json, ~/.config/nugs/config.json): %w", lastErr)
+		return nil, fmt.Errorf("config file not found in any location (~/.nugs/config.json, ~/.config/nugs/config.json): %w", lastErr)
 	}
 
 	var obj model.Config
@@ -474,15 +484,17 @@ func WriteConfig(cfg *model.Config) error {
 	// Write to the same file that was loaded by ReadConfig
 	targetPath := LoadedConfigPath
 	if targetPath == "" {
-		targetPath = "config.json" // fallback to current directory
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("failed to get home directory: %w", err)
+		}
+		targetPath = filepath.Join(homeDir, ".nugs", "config.json")
 	}
 
 	// Ensure parent directory exists
 	dir := filepath.Dir(targetPath)
-	if dir != "." {
-		if mkErr := os.MkdirAll(dir, 0755); mkErr != nil {
-			return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
-		}
+	if mkErr := os.MkdirAll(dir, 0700); mkErr != nil {
+		return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
 	}
 
 	err = os.WriteFile(targetPath, configData, 0600)

@@ -14,6 +14,8 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
+var timePattern = regexp.MustCompile(`^(\d{2}):(\d{2})$`)
+
 // ShouldAutoRefresh checks if the cache should be automatically refreshed.
 func ShouldAutoRefresh(cfg *model.Config) (bool, error) {
 	if !cfg.CatalogAutoRefresh {
@@ -32,7 +34,6 @@ func ShouldAutoRefresh(cfg *model.Config) (bool, error) {
 
 	now := time.Now().In(loc)
 
-	timePattern := regexp.MustCompile(`^(\d{2}):(\d{2})$`)
 	matches := timePattern.FindStringSubmatch(cfg.CatalogRefreshTime)
 	if matches == nil {
 		return false, fmt.Errorf("invalid refresh time format: %s (expected HH:MM)", cfg.CatalogRefreshTime)
@@ -141,7 +142,6 @@ func ConfigureAutoRefresh(cfg *model.Config) error {
 		timeInput = "05:00"
 	}
 
-	timePattern := regexp.MustCompile(`^(\d{2}):(\d{2})$`)
 	if !timePattern.MatchString(timeInput) {
 		return fmt.Errorf("invalid time format: %s (expected HH:MM)", timeInput)
 	}

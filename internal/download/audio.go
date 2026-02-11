@@ -27,7 +27,7 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-const bitrateRegex = `[\w]+(?:_(\d+)k_v\d+)`
+var bitrateRegex = regexp.MustCompile(`[\w]+(?:_(\d+)k_v\d+)`)
 
 var trackFallback = map[int]int{
 	1: 2,
@@ -124,8 +124,7 @@ func (a *writeCounterAdapter) Write(p []byte) (int, error) {
 
 // ExtractBitrate extracts the bitrate from a manifest URL.
 func ExtractBitrate(manUrl string) string {
-	regex := regexp.MustCompile(bitrateRegex)
-	match := regex.FindStringSubmatch(manUrl)
+	match := bitrateRegex.FindStringSubmatch(manUrl)
 	if match != nil {
 		return match[1]
 	}

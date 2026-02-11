@@ -16,9 +16,11 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
+var showFilterRegex = regexp.MustCompile(`^(>=|<=|>|<|=)\s*(\d+)$`)
+
 // ParseShowFilter parses a filter expression like "shows >100" into operator and value.
 func ParseShowFilter(filter string) (string, int, error) {
-	re := regexp.MustCompile(`^(>=|<=|>|<|=)\s*(\d+)$`)
+	re := showFilterRegex
 	matches := re.FindStringSubmatch(filter)
 	if matches == nil {
 		return "", 0, fmt.Errorf("invalid filter format: %s (expected: >N, <N, >=N, <=N, or =N)", filter)

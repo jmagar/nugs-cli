@@ -25,7 +25,7 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-const durRegex = `Duration: ([\d:.]+)`
+var durRegex = regexp.MustCompile(`Duration: ([\d:.]+)`)
 
 var resFallback = map[string]string{
 	"720":  "480",
@@ -310,8 +310,7 @@ func DownloadLstream(videoPath, baseUrl string, segUrls []string, onProgress fun
 
 // ExtractDuration extracts the duration string from ffmpeg output.
 func ExtractDuration(errStr string) string {
-	regex := regexp.MustCompile(durRegex)
-	match := regex.FindStringSubmatch(errStr)
+	match := durRegex.FindStringSubmatch(errStr)
 	if match != nil {
 		return match[1]
 	}

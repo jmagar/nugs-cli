@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -43,7 +44,8 @@ func ListAllRemoteArtistFolders(cfg *model.Config) (map[string]struct{}, error) 
 	cmd := exec.Command("rclone", "lsf", remoteDest, "--dirs-only")
 	output, err := cmd.Output()
 	if err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 3 {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
 			return folders, nil
 		}
 		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)

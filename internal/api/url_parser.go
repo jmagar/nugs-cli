@@ -28,6 +28,16 @@ var RegexStrings = []string{
 	`^(\d+)$`,
 }
 
+// compiledRegexes are pre-compiled versions of RegexStrings.
+var compiledRegexes []*regexp.Regexp
+
+func init() {
+	compiledRegexes = make([]*regexp.Regexp, len(RegexStrings))
+	for i, s := range RegexStrings {
+		compiledRegexes[i] = regexp.MustCompile(s)
+	}
+}
+
 // ParsePaidLstreamShowID extracts the showID parameter from a query string.
 func ParsePaidLstreamShowID(query string) (string, error) {
 	q, err := url.ParseQuery(query)
@@ -82,9 +92,8 @@ func ParseStreamParams(userId string, subInfo *model.SubInfo, isPromo bool) *mod
 
 // CheckURL matches a URL against known Nugs.net patterns.
 func CheckURL(_url string) (string, int) {
-	for i, regexStr := range RegexStrings {
-		regex := regexp.MustCompile(regexStr)
-		match := regex.FindStringSubmatch(_url)
+	for i, re := range compiledRegexes {
+		match := re.FindStringSubmatch(_url)
 		if match != nil {
 			return match[1], i
 		}

@@ -10,11 +10,11 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
-const sanRegexStr = `[\/:*?"><|]`
+var sanRegex = regexp.MustCompile(`[\/:*?"><|]`)
 
 // Sanitise cleans a filename by replacing invalid characters.
 func Sanitise(filename string) string {
-	san := regexp.MustCompile(sanRegexStr).ReplaceAllString(filename, "_")
+	san := sanRegex.ReplaceAllString(filename, "_")
 	return strings.TrimSuffix(san, "	")
 }
 
@@ -51,10 +51,13 @@ func FileExists(path string) (bool, error) {
 	return false, err
 }
 
-// ValidatePath checks that a path does not contain dangerous characters.
+// ValidatePath checks that a path does not contain dangerous characters or traversal sequences.
 func ValidatePath(path string) error {
 	if strings.ContainsAny(path, "\x00\n\r") {
 		return fmt.Errorf("path contains invalid characters")
+	}
+	if strings.Contains(path, "..") {
+		return fmt.Errorf("path contains directory traversal sequence")
 	}
 	return nil
 }
@@ -85,12 +88,15 @@ func GetRcloneBasePath(cfg *model.Config, isVideo bool) string {
 func CalculateLocalSize(localPath string) int64 {
 	var totalSize int64
 
-	err := filepath.Walk(localPath, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(localPath, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !info.IsDir() {
-			totalSize += info.Size()
+		if !d.IsDir() {
+			info, infoErr := d.Info()
+			if infoErr == nil {
+				totalSize += info.Size()
+			}
 		}
 		return nil
 	})
