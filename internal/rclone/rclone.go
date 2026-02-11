@@ -226,11 +226,14 @@ func ParseRcloneProgressLine(line string) (int, string, string, string, bool) {
 	}
 	idx := strings.Index(line, "Transferred:")
 	if idx < 0 {
+		idx = strings.Index(strings.ToLower(line), "transferred:")
+	}
+	if idx < 0 {
 		return 0, "", "", "", false
 	}
 	segment := strings.TrimSpace(line[idx+len("Transferred:"):])
 	fields := strings.Split(segment, ",")
-	if len(fields) < 2 {
+	if len(fields) == 0 {
 		return 0, "", "", "", false
 	}
 	transferredPart := strings.Join(strings.Fields(strings.TrimSpace(fields[0])), " ")
@@ -252,7 +255,7 @@ func ParseRcloneProgressLine(line string) (int, string, string, string, bool) {
 	}
 
 	percent := -1
-	for _, field := range fields[1:] {
+	for _, field := range fields {
 		part := strings.TrimSpace(field)
 		if strings.HasSuffix(part, "%") {
 			num := strings.TrimSuffix(part, "%")
@@ -276,12 +279,17 @@ func ParseRcloneProgressLine(line string) (int, string, string, string, bool) {
 	}
 
 	speed := "0 B"
-	for _, field := range fields[1:] {
+	for _, field := range fields {
 		part := strings.TrimSpace(field)
 		if strings.Contains(part, "/s") {
 			speed = part
 			break
 		}
+	}
+	speed = strings.TrimPrefix(speed, "@ ")
+	speed = strings.TrimSpace(speed)
+	if speed == "" {
+		speed = "0 B"
 	}
 
 	return percent, speed, uploaded, total, true

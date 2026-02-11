@@ -19,7 +19,7 @@ const (
 	uploadCompleteVisibilityDelay = 500 * time.Millisecond
 )
 
-func checkRcloneAvailable(quiet bool) error { return rclone.CheckRcloneAvailable(quiet) }
+func checkRcloneAvailable(quiet bool) error    { return rclone.CheckRcloneAvailable(quiet) }
 func checkRclonePathOnline(cfg *Config) string { return rclone.CheckRclonePathOnline(cfg) }
 
 func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
@@ -65,7 +65,7 @@ func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, p
 			} else {
 				progressBox.UploadETA = ""
 			}
-			progressBox.ForceRender = true  // Force render on upload progress updates
+			progressBox.ForceRender = true // Force render on upload progress updates
 			progressBox.Mu.Unlock()
 
 			// renderProgressBox locks internally, call outside our lock
@@ -75,13 +75,15 @@ func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, p
 		onPreUpload := func(totalBytes int64) {
 			progressBox.Mu.Lock()
 			progressBox.UploadTotal = humanize.Bytes(uint64(totalBytes))
-			progressBox.UploadTotalSet = true  // Prevent rclone from overwriting calculated total
+			progressBox.UploadTotalSet = true // Prevent rclone from overwriting calculated total
 			progressBox.Uploaded = "0 B"
 			progressBox.UploadPercent = 0
+			progressBox.ForceRender = true
 			progressBox.Mu.Unlock()
 
 			// SetMessage locks internally, so call it outside our lock
 			progressBox.SetMessage(model.MessagePriorityStatus, "Uploading to remote...", 0)
+			renderProgressBox(progressBox)
 		}
 
 		err := rclone.UploadToRclone(localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
@@ -146,4 +148,3 @@ func remotePathExists(remotePath string, cfg *Config, isVideo bool) (bool, error
 func listRemoteArtistFolders(artistFolder string, cfg *Config) (map[string]struct{}, error) {
 	return rclone.ListRemoteArtistFolders(artistFolder, cfg)
 }
-

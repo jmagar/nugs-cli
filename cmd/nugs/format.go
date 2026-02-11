@@ -54,8 +54,8 @@ func padRight(s string, width int) string              { return ui.PadRight(s, w
 func padCenter(s string, width int) string             { return ui.PadCenter(s, width) }
 func printHeader(title string)                         { ui.PrintHeader(title) }
 func printSection(title string)                        { ui.PrintSection(title) }
-func printList(items []string, color string)            { ui.PrintList(items, color) }
-func printKeyValue(key, value, valueColor string)       { ui.PrintKeyValue(key, value, valueColor) }
+func printList(items []string, color string)           { ui.PrintList(items, color) }
+func printKeyValue(key, value, valueColor string)      { ui.PrintKeyValue(key, value, valueColor) }
 func printDivider()                                    { ui.PrintDivider() }
 func printBox(text string, borderColor string)         { ui.PrintBox(text, borderColor) }
 
@@ -140,6 +140,14 @@ func renderProgressBox(state *ProgressBoxState) {
 	defer state.Mu.Unlock()
 
 	lineCount := 0
+	innerWidth := width - 2
+	contentWidth := width - 4
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	fitLine := func(line string) string {
+		return padRight(truncateWithEllipsis(line, contentWidth), innerWidth)
+	}
 
 	// Top border with double lines
 	fmt.Printf("%s%s%s%s%s\n",
@@ -157,7 +165,7 @@ func renderProgressBox(state *ProgressBoxState) {
 			batch.CurrentAlbum, batch.TotalAlbums, batch.Complete, batch.Failed, formatDuration(elapsed))
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorPurple, boxVertical, colorReset,
-			padRight(truncateWithEllipsis(batchHeader, width-2), width-2),
+			fitLine(batchHeader),
 			colorPurple, boxVertical, colorReset)
 		lineCount++
 
@@ -173,7 +181,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	header := fmt.Sprintf("  %s %s", symbolDownload, state.ShowNumber)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(truncateWithEllipsis(header, width-2), width-2),
+		fitLine(header),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -181,7 +189,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	titleLine := fmt.Sprintf("  %s", state.ShowTitle)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(truncateWithEllipsis(titleLine, width-2), width-2),
+		fitLine(titleLine),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -195,7 +203,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -209,14 +217,14 @@ func renderProgressBox(state *ProgressBoxState) {
 	}
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(truncateWithEllipsis(infoLine, width-2), width-2),
+		fitLine(infoLine),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -243,7 +251,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	}
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(dlLine, width-2),
+		fitLine(dlLine),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -260,7 +268,7 @@ func renderProgressBox(state *ProgressBoxState) {
 		}
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
-			padRight(ulLine, width-2),
+			fitLine(ulLine),
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 	}
@@ -268,7 +276,7 @@ func renderProgressBox(state *ProgressBoxState) {
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -277,14 +285,14 @@ func renderProgressBox(state *ProgressBoxState) {
 		msgLine := fmt.Sprintf("  %s", msg)
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
-			padRight(truncateWithEllipsis(msgLine, width-2), width-2),
+			fitLine(msgLine),
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 
 		// Empty line after message for spacing
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
-			strings.Repeat(" ", width-2),
+			strings.Repeat(" ", innerWidth),
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 	}
@@ -294,14 +302,14 @@ func renderProgressBox(state *ProgressBoxState) {
 		state.TrackNumber, state.TrackTotal, state.ShowDownloaded, state.ShowTotal, state.ShowPercent)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(showLine, width-2),
+		fitLine(showLine),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -428,6 +436,14 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	defer state.Mu.Unlock()
 
 	width := calculateBoxWidth() // Match progress box width
+	innerWidth := width - 2
+	contentWidth := width - 4
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+	fitLine := func(line string) string {
+		return padRight(truncateWithEllipsis(line, contentWidth), innerWidth)
+	}
 
 	// Clear previous box
 	if state.LinesDrawn > 0 {
@@ -453,7 +469,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	header := fmt.Sprintf("  %s %s", symbolCheck, headerText)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(truncateWithEllipsis(header, width-2), width-2),
+		fitLine(header),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -461,7 +477,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	titleLine := fmt.Sprintf("  %s", state.ShowTitle)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		padRight(truncateWithEllipsis(titleLine, width-2), width-2),
+		fitLine(titleLine),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -475,7 +491,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
@@ -520,7 +536,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	for _, stat := range stats {
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
-			padRight(truncateWithEllipsis(stat, width-2), width-2),
+			fitLine(stat),
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 	}
@@ -528,7 +544,7 @@ func renderCompletionSummary(state *ProgressBoxState) {
 	// Empty line
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", width-2),
+		strings.Repeat(" ", innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
