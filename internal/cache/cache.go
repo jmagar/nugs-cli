@@ -85,7 +85,7 @@ func WriteCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Dur
 
 		// Write catalog.json atomically using temp file
 		catalogPath := filepath.Join(cacheDir, "catalog.json")
-		catalogData, err := json.MarshalIndent(catalog, "", "  ")
+		catalogData, err := json.Marshal(catalog)
 		if err != nil {
 			return fmt.Errorf("failed to marshal catalog: %w", err)
 		}
@@ -164,7 +164,7 @@ func BuildArtistIndex(catalog *model.LatestCatalogResp) error {
 
 	artistIndex := model.ArtistsIndex{Index: index}
 	indexPath := filepath.Join(cacheDir, "artists_index.json")
-	indexData, err := json.MarshalIndent(artistIndex, "", "  ")
+	indexData, err := json.Marshal(artistIndex)
 	if err != nil {
 		return fmt.Errorf("failed to marshal artist index: %w", err)
 	}
@@ -203,7 +203,7 @@ func BuildContainerIndex(catalog *model.LatestCatalogResp) error {
 
 	containerIndex := model.ContainersIndex{Containers: containers}
 	indexPath := filepath.Join(cacheDir, "containers_index.json")
-	indexData, err := json.MarshalIndent(containerIndex, "", "  ")
+	indexData, err := json.Marshal(containerIndex)
 	if err != nil {
 		return fmt.Errorf("failed to marshal container index: %w", err)
 	}
