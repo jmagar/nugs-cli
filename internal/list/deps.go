@@ -1,7 +1,11 @@
 // Package list implements list commands for browsing artists, shows, and playlists.
 package list
 
-import "github.com/jmagar/nugs-cli/internal/model"
+import (
+	"context"
+
+	"github.com/jmagar/nugs-cli/internal/model"
+)
 
 // Deps holds callbacks to functions that live outside this package.
 type Deps struct {
@@ -12,5 +16,5 @@ type Deps struct {
 	MatchesMediaFilter func(showMedia, filter model.MediaType) bool
 
 	// Playlist downloads a catalog playlist by GUID.
-	Playlist func(plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool) error
+	Playlist func(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool) error
 }

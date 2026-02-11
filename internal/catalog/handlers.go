@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,14 +21,14 @@ import (
 const ArtistMetaCacheTTL = 24 * time.Hour
 
 // AnalyzeArtistCatalog analyzes an artist's catalog with optional media type filtering.
-func AnalyzeArtistCatalog(artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
-	return AnalyzeArtistCatalogMediaAware(artistID, cfg, jsonLevel, mediaFilter, deps)
+func AnalyzeArtistCatalog(ctx context.Context, artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
+	return AnalyzeArtistCatalogMediaAware(ctx, artistID, cfg, jsonLevel, mediaFilter, deps)
 }
 
 // CatalogUpdate fetches and caches the latest catalog.
-func CatalogUpdate(jsonLevel string, deps *Deps) error {
+func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 	startTime := time.Now()
-	catalog, err := api.GetLatestCatalog()
+	catalog, err := api.GetLatestCatalog(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch catalog: %w", err)
 	}
@@ -297,8 +298,8 @@ func CatalogLatest(limit int, jsonLevel string) error {
 }
 
 // CatalogGapsForArtist finds missing shows for a single artist.
-func CatalogGapsForArtist(artistId string, cfg *model.Config, jsonLevel string, idsOnly bool, mediaFilter model.MediaType, deps *Deps) error {
-	analysis, err := AnalyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter, deps)
+func CatalogGapsForArtist(ctx context.Context, artistId string, cfg *model.Config, jsonLevel string, idsOnly bool, mediaFilter model.MediaType, deps *Deps) error {
+	analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 	if err != nil {
 		return err
 	}
@@ -365,7 +366,7 @@ func CatalogGapsForArtist(artistId string, cfg *model.Config, jsonLevel string, 
 }
 
 // CatalogGaps finds missing shows for one or more artists.
-func CatalogGaps(artistIds []string, cfg *model.Config, jsonLevel string, idsOnly bool, mediaFilter model.MediaType, deps *Deps) error {
+func CatalogGaps(ctx context.Context, artistIds []string, cfg *model.Config, jsonLevel string, idsOnly bool, mediaFilter model.MediaType, deps *Deps) error {
 	for i, artistId := range artistIds {
 		if i > 0 && jsonLevel == "" && !idsOnly {
 			fmt.Println()
@@ -373,7 +374,7 @@ func CatalogGaps(artistIds []string, cfg *model.Config, jsonLevel string, idsOnl
 			fmt.Println()
 		}
 
-		err := CatalogGapsForArtist(artistId, cfg, jsonLevel, idsOnly, mediaFilter, deps)
+		err := CatalogGapsForArtist(ctx, artistId, cfg, jsonLevel, idsOnly, mediaFilter, deps)
 		if err != nil {
 			if len(artistIds) > 1 {
 				if jsonLevel == "" {
@@ -389,8 +390,8 @@ func CatalogGaps(artistIds []string, cfg *model.Config, jsonLevel string, idsOnl
 }
 
 // CatalogGapsFill downloads all missing shows for an artist.
-func CatalogGapsFill(artistId string, cfg *model.Config, streamParams *model.StreamParams, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
-	analysis, err := AnalyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter, deps)
+func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
+	analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 	if err != nil {
 		return err
 	}
@@ -469,7 +470,7 @@ func CatalogGapsFill(artistId string, cfg *model.Config, streamParams *model.Str
 		batchState.CurrentAlbum = i + 1
 		batchState.CurrentTitle = show.ContainerInfo
 
-		err := deps.Album(fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
+		err := deps.Album(ctx, fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
 		if err != nil {
 			failedCount++
 			batchState.Failed++
@@ -538,7 +539,7 @@ func CatalogGapsFill(artistId string, cfg *model.Config, streamParams *model.Str
 }
 
 // CatalogCoverage shows download coverage statistics for artists.
-func CatalogCoverage(artistIds []string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
+func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
 	type coverageStats struct {
 		artistID        string
 		artistName      string
@@ -651,7 +652,7 @@ func CatalogCoverage(artistIds []string, cfg *model.Config, jsonLevel string, me
 	}
 
 	for _, artistId := range artistIds {
-		analysis, err := AnalyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter, deps)
+		analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 		if err != nil {
 			if jsonLevel == "" {
 				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for artist %s: %v", artistId, err))
@@ -748,7 +749,7 @@ func CatalogCoverage(artistIds []string, cfg *model.Config, jsonLevel string, me
 }
 
 // CatalogList displays all shows for an artist with status indicators.
-func CatalogList(artistIds []string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
+func CatalogList(ctx context.Context, artistIds []string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
 	for i, artistId := range artistIds {
 		if i > 0 && jsonLevel == "" {
 			fmt.Println()
@@ -756,7 +757,7 @@ func CatalogList(artistIds []string, cfg *model.Config, jsonLevel string, mediaF
 			fmt.Println()
 		}
 
-		err := CatalogListForArtist(artistId, cfg, jsonLevel, mediaFilter, deps)
+		err := CatalogListForArtist(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 		if err != nil {
 			if len(artistIds) > 1 {
 				if jsonLevel == "" {
@@ -772,8 +773,8 @@ func CatalogList(artistIds []string, cfg *model.Config, jsonLevel string, mediaF
 }
 
 // CatalogListForArtist displays all shows for a single artist with status indicators.
-func CatalogListForArtist(artistId string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
-	analysis, err := AnalyzeArtistCatalog(artistId, cfg, jsonLevel, mediaFilter, deps)
+func CatalogListForArtist(ctx context.Context, artistId string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
+	analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 	if err != nil {
 		return err
 	}

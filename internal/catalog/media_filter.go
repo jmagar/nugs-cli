@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -89,13 +90,13 @@ func MatchesMediaFilter(showMedia, filter model.MediaType) bool {
 }
 
 // AnalyzeArtistCatalogMediaAware is the media-aware version of catalog analysis.
-func AnalyzeArtistCatalogMediaAware(artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
+func AnalyzeArtistCatalogMediaAware(ctx context.Context, artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
 	if deps.GetArtistMetaCached == nil {
 		return nil, fmt.Errorf("GetArtistMetaCached callback not configured")
 	}
 
 	const artistMetaCacheTTL = ArtistMetaCacheTTL
-	artistMetas, cacheUsed, cacheStaleUse, err := deps.GetArtistMetaCached(artistID, artistMetaCacheTTL)
+	artistMetas, cacheUsed, cacheStaleUse, err := deps.GetArtistMetaCached(ctx, artistID, artistMetaCacheTTL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get artist metadata: %w", err)
 	}

@@ -4,6 +4,7 @@ package main
 // These will be removed in Phase 12 when all callers move to internal packages.
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -30,27 +31,39 @@ var (
 
 var qualityMap = api.QualityMap
 
-func auth(email, pwd string) (string, error)       { return api.Auth(email, pwd) }
-func getUserInfo(token string) (string, error)      { return api.GetUserInfo(token) }
-func getSubInfo(token string) (*SubInfo, error)     { return api.GetSubInfo(token) }
-func getPlan(subInfo *SubInfo) (string, bool)        { return api.GetPlan(subInfo) }
+func auth(ctx context.Context, email, pwd string) (string, error) {
+	return api.Auth(ctx, email, pwd)
+}
+func getUserInfo(ctx context.Context, token string) (string, error) {
+	return api.GetUserInfo(ctx, token)
+}
+func getSubInfo(ctx context.Context, token string) (*SubInfo, error) {
+	return api.GetSubInfo(ctx, token)
+}
+func getPlan(subInfo *SubInfo) (string, bool) { return api.GetPlan(subInfo) }
 func extractLegToken(tokenStr string) (string, string, error) {
 	return api.ExtractLegToken(tokenStr)
 }
-func getAlbumMeta(albumId string) (*AlbumMeta, error) { return api.GetAlbumMeta(albumId) }
-func getPlistMeta(plistId, email, legacyToken string, cat bool) (*PlistMeta, error) {
-	return api.GetPlistMeta(plistId, email, legacyToken, cat)
+func getAlbumMeta(ctx context.Context, albumId string) (*AlbumMeta, error) {
+	return api.GetAlbumMeta(ctx, albumId)
 }
-func getLatestCatalog() (*LatestCatalogResp, error)  { return api.GetLatestCatalog() }
-func getArtistMeta(artistId string) ([]*ArtistMeta, error) {
-	return api.GetArtistMeta(artistId)
+func getPlistMeta(ctx context.Context, plistId, email, legacyToken string, cat bool) (*PlistMeta, error) {
+	return api.GetPlistMeta(ctx, plistId, email, legacyToken, cat)
 }
-func getArtistList() (*ArtistListResp, error) { return api.GetArtistList() }
-func getPurchasedManUrl(skuID int, showID, userID, uguID string) (string, error) {
-	return api.GetPurchasedManURL(skuID, showID, userID, uguID)
+func getLatestCatalog(ctx context.Context) (*LatestCatalogResp, error) {
+	return api.GetLatestCatalog(ctx)
 }
-func getStreamMeta(trackId, skuId, format int, streamParams *StreamParams) (string, error) {
-	return api.GetStreamMeta(trackId, skuId, format, streamParams)
+func getArtistMeta(ctx context.Context, artistId string) ([]*ArtistMeta, error) {
+	return api.GetArtistMeta(ctx, artistId)
+}
+func getArtistList(ctx context.Context) (*ArtistListResp, error) {
+	return api.GetArtistList(ctx)
+}
+func getPurchasedManUrl(ctx context.Context, skuID int, showID, userID, uguID string) (string, error) {
+	return api.GetPurchasedManURL(ctx, skuID, showID, userID, uguID)
+}
+func getStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams *StreamParams) (string, error) {
+	return api.GetStreamMeta(ctx, trackId, skuId, format, streamParams)
 }
 func queryQuality(streamUrl string) *Quality { return api.QueryQuality(streamUrl) }
 func getTrackQual(quals []*Quality, wantFmt int) *Quality {
@@ -59,7 +72,7 @@ func getTrackQual(quals []*Quality, wantFmt int) *Quality {
 
 // getArtistMetaCached bridges api and cache packages.
 // It stays in root because it imports both internal/api and internal/cache.
-func getArtistMetaCached(artistID string, ttl time.Duration) (pages []*ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error) {
+func getArtistMetaCached(ctx context.Context, artistID string, ttl time.Duration) (pages []*ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error) {
 	cachedPages, cachedAt, readErr := readArtistMetaCache(artistID)
 	if readErr == nil && len(cachedPages) > 0 {
 		if time.Since(cachedAt) <= ttl {
@@ -67,7 +80,7 @@ func getArtistMetaCached(artistID string, ttl time.Duration) (pages []*ArtistMet
 		}
 	}
 
-	freshPages, fetchErr := getArtistMeta(artistID)
+	freshPages, fetchErr := getArtistMeta(ctx, artistID)
 	if fetchErr == nil {
 		_ = writeArtistMetaCache(artistID, freshPages)
 		return freshPages, false, false, nil

@@ -289,7 +289,7 @@ func CheckIfHlsOnly(quals []*model.Quality) bool {
 }
 
 // ProcessTrack downloads a single track, handling quality selection and progress updates.
-func ProcessTrack(folPath string, trackNum, trackTotal int, cfg *model.Config, track *model.Track, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
+func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int, cfg *model.Config, track *model.Track, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
 	if deps.WaitIfPausedOrCancelled != nil {
 		if err := deps.WaitIfPausedOrCancelled(); err != nil {
 			return err
@@ -303,7 +303,7 @@ func ProcessTrack(folPath string, trackNum, trackTotal int, cfg *model.Config, t
 	)
 	// Call the stream meta endpoint four times to get all avail formats since the formats can shift.
 	for _, i := range [4]int{1, 4, 7, 10} {
-		streamUrl, err := api.GetStreamMeta(track.TrackID, 0, i, streamParams)
+		streamUrl, err := api.GetStreamMeta(ctx, track.TrackID, 0, i, streamParams)
 		if err != nil {
 			ui.PrintError("Failed to get track stream metadata")
 			return err
@@ -517,7 +517,7 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 			}
 
 			// Try to get stream URL (using format 1 as a representative format)
-			streamUrl, err := api.GetStreamMeta(t.TrackID, 0, 1, streamParams)
+			streamUrl, err := api.GetStreamMeta(ctx, t.TrackID, 0, 1, streamParams)
 			if err != nil || streamUrl == "" {
 				return
 			}
@@ -553,7 +553,7 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 
 // Album downloads an album or show from Nugs.net using the provided albumID.
 // If albumID is empty, uses the provided artResp metadata instead of fetching it.
-func Album(albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
+func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
 	var (
 		meta   *model.AlbArtResp
 		tracks []model.Track
@@ -562,7 +562,7 @@ func Album(albumID string, cfg *model.Config, streamParams *model.StreamParams, 
 		meta = artResp
 		tracks = meta.Songs
 	} else {
-		_meta, err := api.GetAlbumMeta(albumID)
+		_meta, err := api.GetAlbumMeta(ctx, albumID)
 		if err != nil {
 			ui.PrintError("Failed to get metadata")
 			return err
@@ -614,7 +614,7 @@ func Album(albumID string, cfg *model.Config, streamParams *model.StreamParams, 
 			return nil
 		}
 		// Video-only album - no track progress to show
-		return Video(albumID, "", cfg, streamParams, meta, false, nil, deps)
+		return Video(ctx, albumID, "", cfg, streamParams, meta, false, nil, deps)
 	}
 	// Create artist directory
 	artistFolder := helpers.Sanitise(meta.ArtistName)
@@ -720,7 +720,7 @@ func Album(albumID string, cfg *model.Config, streamParams *model.StreamParams, 
 				}
 			}
 			trackNum++
-			err := ProcessTrack(
+			err := ProcessTrack(ctx,
 				albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox, deps)
 			if err != nil {
 				if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
@@ -762,7 +762,7 @@ func Album(albumID string, cfg *model.Config, streamParams *model.StreamParams, 
 			fmt.Println("") // Spacing between audio and video
 			ui.PrintInfo("Downloading video...")
 		}
-		err = Video(albumID, "", cfg, streamParams, meta, false, progressBox, deps)
+		err = Video(ctx, albumID, "", cfg, streamParams, meta, false, progressBox, deps)
 		if err != nil {
 			helpers.HandleErr("Video download failed.", err, false)
 		}

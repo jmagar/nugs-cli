@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -519,7 +520,7 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 }
 
 // Video downloads a video from Nugs.net using the provided videoID.
-func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamParams, _meta *model.AlbArtResp, isLstream bool, progressBox *model.ProgressBoxState, deps *Deps) error {
+func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, streamParams *model.StreamParams, _meta *model.AlbArtResp, isLstream bool, progressBox *model.ProgressBoxState, deps *Deps) error {
 	var (
 		chapsAvail  bool
 		skuID       int
@@ -531,7 +532,7 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 	if _meta != nil {
 		meta = _meta
 	} else {
-		m, err := api.GetAlbumMeta(videoID)
+		m, err := api.GetAlbumMeta(ctx, videoID)
 		if err != nil {
 			ui.PrintError("Failed to get metadata")
 			return err
@@ -567,10 +568,10 @@ func Video(videoID, uguID string, cfg *model.Config, streamParams *model.StreamP
 		return errors.New("no video available")
 	}
 	if uguID == "" {
-		manifestUrl, err = api.GetStreamMeta(
+		manifestUrl, err = api.GetStreamMeta(ctx,
 			meta.ContainerID, skuID, 0, streamParams)
 	} else {
-		manifestUrl, err = api.GetPurchasedManURL(skuID, videoID, streamParams.UserID, uguID)
+		manifestUrl, err = api.GetPurchasedManURL(ctx, skuID, videoID, streamParams.UserID, uguID)
 	}
 
 	if err != nil {

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"regexp"
@@ -72,7 +73,7 @@ func ShouldAutoRefresh(cfg *model.Config) (bool, error) {
 }
 
 // AutoRefreshIfNeeded checks and performs auto-refresh if needed.
-func AutoRefreshIfNeeded(cfg *model.Config, deps *Deps) error {
+func AutoRefreshIfNeeded(ctx context.Context, cfg *model.Config, deps *Deps) error {
 	should, err := ShouldAutoRefresh(cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Auto-refresh check failed: %v\n", err)
@@ -84,7 +85,7 @@ func AutoRefreshIfNeeded(cfg *model.Config, deps *Deps) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Auto-refreshing catalog cache...\n")
-	err = CatalogUpdate("", deps)
+	err = CatalogUpdate(ctx, "", deps)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Auto-refresh failed: %v\n", err)
 	}

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -60,14 +61,14 @@ var QualityMap = map[string]model.Quality{
 }
 
 // Auth authenticates with email/password and returns an access token.
-func Auth(email, pwd string) (string, error) {
+func Auth(ctx context.Context, email, pwd string) (string, error) {
 	data := url.Values{}
 	data.Set("client_id", ClientID)
 	data.Set("grant_type", "password")
 	data.Set("scope", "openid profile email nugsnet:api nugsnet:legacyapi offline_access")
 	data.Set("username", email)
 	data.Set("password", pwd)
-	req, err := http.NewRequest(http.MethodPost, AuthURL, strings.NewReader(data.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, AuthURL, strings.NewReader(data.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -90,8 +91,8 @@ func Auth(email, pwd string) (string, error) {
 }
 
 // GetUserInfo retrieves user subscription ID.
-func GetUserInfo(token string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, UserInfoURL, nil)
+func GetUserInfo(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, UserInfoURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -114,8 +115,8 @@ func GetUserInfo(token string) (string, error) {
 }
 
 // GetSubInfo retrieves subscription information.
-func GetSubInfo(token string) (*model.SubInfo, error) {
-	req, err := http.NewRequest(http.MethodGet, SubInfoURL, nil)
+func GetSubInfo(ctx context.Context, token string) (*model.SubInfo, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, SubInfoURL, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -165,8 +166,8 @@ func ExtractLegToken(tokenStr string) (string, string, error) {
 }
 
 // GetAlbumMeta retrieves album metadata by container ID.
-func GetAlbumMeta(albumId string) (*model.AlbumMeta, error) {
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"api.aspx", nil)
+func GetAlbumMeta(ctx context.Context, albumId string) (*model.AlbumMeta, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -193,14 +194,14 @@ func GetAlbumMeta(albumId string) (*model.AlbumMeta, error) {
 }
 
 // GetPlistMeta retrieves playlist metadata.
-func GetPlistMeta(plistId, email, legacyToken string, cat bool) (*model.PlistMeta, error) {
+func GetPlistMeta(ctx context.Context, plistId, email, legacyToken string, cat bool) (*model.PlistMeta, error) {
 	var path string
 	if cat {
 		path = "api.aspx"
 	} else {
 		path = "secureApi.aspx"
 	}
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -234,8 +235,8 @@ func GetPlistMeta(plistId, email, legacyToken string, cat bool) (*model.PlistMet
 }
 
 // GetLatestCatalog retrieves the latest catalog from the API.
-func GetLatestCatalog() (*model.LatestCatalogResp, error) {
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"api.aspx", nil)
+func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -261,7 +262,7 @@ func GetLatestCatalog() (*model.LatestCatalogResp, error) {
 }
 
 // GetArtistMeta retrieves all pages of artist metadata.
-func GetArtistMeta(artistId string) ([]*model.ArtistMeta, error) {
+func GetArtistMeta(ctx context.Context, artistId string) ([]*model.ArtistMeta, error) {
 	var allArtistMeta []*model.ArtistMeta
 	offset := 1
 	query := url.Values{}
@@ -271,7 +272,7 @@ func GetArtistMeta(artistId string) ([]*model.ArtistMeta, error) {
 	query.Set("availType", "1")
 	query.Set("vdisp", "1")
 	for {
-		req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"api.aspx", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 		if err != nil {
 			return nil, err
 		}
@@ -303,8 +304,8 @@ func GetArtistMeta(artistId string) ([]*model.ArtistMeta, error) {
 }
 
 // GetArtistList retrieves the list of all artists.
-func GetArtistList() (*model.ArtistListResp, error) {
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"api.aspx", nil)
+func GetArtistList(ctx context.Context) (*model.ArtistListResp, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -330,8 +331,8 @@ func GetArtistList() (*model.ArtistListResp, error) {
 }
 
 // GetPurchasedManURL retrieves the purchased manifest URL.
-func GetPurchasedManURL(skuID int, showID, userID, uguID string) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"bigriver/vidPlayer.aspx", nil)
+func GetPurchasedManURL(ctx context.Context, skuID int, showID, userID, uguID string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"bigriver/vidPlayer.aspx", nil)
 	if err != nil {
 		return "", err
 	}
@@ -360,8 +361,8 @@ func GetPurchasedManURL(skuID int, showID, userID, uguID string) (string, error)
 }
 
 // GetStreamMeta retrieves the stream URL for a track.
-func GetStreamMeta(trackId, skuId, format int, streamParams *model.StreamParams) (string, error) {
-	req, err := http.NewRequest(http.MethodGet, StreamAPIBase+"bigriver/subPlayer.aspx", nil)
+func GetStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams *model.StreamParams) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"bigriver/subPlayer.aspx", nil)
 	if err != nil {
 		return "", err
 	}

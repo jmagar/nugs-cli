@@ -1,6 +1,7 @@
 package list
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -60,11 +61,11 @@ func ApplyShowFilter(artists []model.Artist, operator string, value int) []model
 }
 
 // ListArtists fetches and displays a formatted list of all artists.
-func ListArtists(jsonLevel string, showFilter string) error {
+func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error {
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist catalog...")
 	}
-	artistList, err := api.GetArtistList()
+	artistList, err := api.GetArtistList(ctx)
 	if err != nil {
 		ui.PrintError("Failed to get artist list")
 		return err
@@ -166,10 +167,10 @@ func ListArtists(jsonLevel string, showFilter string) error {
 }
 
 // DisplayWelcome shows a welcome screen with latest shows from the catalog.
-func DisplayWelcome() error {
+func DisplayWelcome(ctx context.Context) error {
 	ui.PrintHeader("Welcome to Nugs Downloader")
 
-	catalog, err := api.GetLatestCatalog()
+	catalog, err := api.GetLatestCatalog(ctx)
 	if err != nil {
 		ui.PrintWarning(fmt.Sprintf("Unable to fetch latest shows: %v", err))
 		fmt.Println()
@@ -246,7 +247,7 @@ func DisplayWelcome() error {
 }
 
 // ListArtistShows fetches and displays all shows for a specific artist.
-func ListArtistShows(artistId string, jsonLevel string, deps *Deps, mediaFilter ...model.MediaType) error {
+func ListArtistShows(ctx context.Context, artistId string, jsonLevel string, deps *Deps, mediaFilter ...model.MediaType) error {
 	mf := model.MediaTypeUnknown
 	if len(mediaFilter) > 0 {
 		mf = mediaFilter[0]
@@ -254,7 +255,7 @@ func ListArtistShows(artistId string, jsonLevel string, deps *Deps, mediaFilter 
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist shows...")
 	}
-	allMeta, err := api.GetArtistMeta(artistId)
+	allMeta, err := api.GetArtistMeta(ctx, artistId)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -434,7 +435,7 @@ func ListArtistShows(artistId string, jsonLevel string, deps *Deps, mediaFilter 
 }
 
 // ListArtistShowsByVenue filters artist shows by venue name.
-func ListArtistShowsByVenue(artistId string, venueFilter string, jsonLevel string) error {
+func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter string, jsonLevel string) error {
 	if _, err := strconv.Atoi(artistId); err != nil {
 		return fmt.Errorf("invalid artist ID: %s (must be numeric)", artistId)
 	}
@@ -443,7 +444,7 @@ func ListArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 		fmt.Printf("Fetching shows at venues matching \"%s\"...\n", venueFilter)
 	}
 
-	allMeta, err := api.GetArtistMeta(artistId)
+	allMeta, err := api.GetArtistMeta(ctx, artistId)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -592,12 +593,12 @@ func ListArtistShowsByVenue(artistId string, venueFilter string, jsonLevel strin
 }
 
 // ListArtistLatestShows displays the latest N shows for an artist.
-func ListArtistLatestShows(artistId string, limit int, jsonLevel string) error {
+func ListArtistLatestShows(ctx context.Context, artistId string, limit int, jsonLevel string) error {
 	if jsonLevel == "" {
 		fmt.Printf("Fetching latest %d shows...\n", limit)
 	}
 
-	allMeta, err := api.GetArtistMeta(artistId)
+	allMeta, err := api.GetArtistMeta(ctx, artistId)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -772,11 +773,11 @@ func ResolveCatPlistId(plistUrl string) (string, error) {
 }
 
 // CatalogPlist downloads a catalog playlist.
-func CatalogPlist(plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
+func CatalogPlist(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
 	resolvedId, err := ResolveCatPlistId(plistId)
 	if err != nil {
 		fmt.Println("Failed to resolve playlist ID.")
 		return err
 	}
-	return deps.Playlist(resolvedId, legacyToken, cfg, streamParams, true)
+	return deps.Playlist(ctx, resolvedId, legacyToken, cfg, streamParams, true)
 }

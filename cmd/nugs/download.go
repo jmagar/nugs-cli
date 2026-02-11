@@ -4,6 +4,8 @@ package main
 // These will be removed in Phase 12 when all callers move to internal packages.
 
 import (
+	"context"
+
 	"github.com/jmagar/nugs-cli/internal/download"
 	"github.com/jmagar/nugs-cli/internal/model"
 )
@@ -25,12 +27,12 @@ func buildDownloadDeps() *download.Deps {
 	}
 }
 
-func album(albumID string, cfg *Config, streamParams *StreamParams, artResp *AlbArtResp, batchState *BatchProgressState, progressBox *ProgressBoxState) error {
-	return download.Album(albumID, cfg, streamParams, artResp, batchState, progressBox, buildDownloadDeps())
+func album(ctx context.Context, albumID string, cfg *Config, streamParams *StreamParams, artResp *AlbArtResp, batchState *BatchProgressState, progressBox *ProgressBoxState) error {
+	return download.Album(ctx, albumID, cfg, streamParams, artResp, batchState, progressBox, buildDownloadDeps())
 }
 
-func processTrack(folPath string, trackNum, trackTotal int, cfg *Config, track *Track, streamParams *StreamParams, progressBox *ProgressBoxState) error {
-	return download.ProcessTrack(folPath, trackNum, trackTotal, cfg, track, streamParams, progressBox, buildDownloadDeps())
+func processTrack(ctx context.Context, folPath string, trackNum, trackTotal int, cfg *Config, track *Track, streamParams *StreamParams, progressBox *ProgressBoxState) error {
+	return download.ProcessTrack(ctx, folPath, trackNum, trackTotal, cfg, track, streamParams, progressBox, buildDownloadDeps())
 }
 
 func preCalculateShowSize(tracks []Track, streamParams *StreamParams, cfg *Config) (int64, error) {

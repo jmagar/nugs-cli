@@ -1,6 +1,7 @@
 package download
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -14,8 +15,8 @@ import (
 )
 
 // Artist downloads all albums for an artist.
-func Artist(artistId string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
-	meta, err := api.GetArtistMeta(artistId)
+func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
+	meta, err := api.GetArtistMeta(ctx, artistId)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -64,10 +65,10 @@ func Artist(artistId string, cfg *model.Config, streamParams *model.StreamParams
 
 			// Pass the shared progress box to reuse it (no new boxes created!)
 			if cfg.SkipVideos {
-				err = Album("", cfg, streamParams, container, batchState, sharedProgressBox, deps)
+				err = Album(ctx, "", cfg, streamParams, container, batchState, sharedProgressBox, deps)
 			} else {
 				// Can't re-use this metadata as it doesn't have any product info for videos.
-				err = Album(strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox, deps)
+				err = Album(ctx, strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox, deps)
 			}
 			if err != nil {
 				batchState.Failed++
@@ -84,8 +85,8 @@ func Artist(artistId string, cfg *model.Config, streamParams *model.StreamParams
 }
 
 // Playlist downloads all tracks in a playlist.
-func Playlist(plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool, deps *Deps) error {
-	_meta, err := api.GetPlistMeta(plistId, cfg.Email, legacyToken, cat)
+func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool, deps *Deps) error {
+	_meta, err := api.GetPlistMeta(ctx, plistId, cfg.Email, legacyToken, cat)
 	if err != nil {
 		ui.PrintError("Failed to get playlist metadata")
 		return err
@@ -132,7 +133,7 @@ func Playlist(plistId, legacyToken string, cfg *model.Config, streamParams *mode
 			}
 		}
 		trackNum++
-		err := ProcessTrack(
+		err := ProcessTrack(ctx,
 			plistPath, trackNum, trackTotal, cfg, &track.Track, streamParams, progressBox, deps)
 		if err != nil {
 			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
@@ -155,11 +156,11 @@ func Playlist(plistId, legacyToken string, cfg *model.Config, streamParams *mode
 }
 
 // PaidLstream downloads a paid livestream video.
-func PaidLstream(query, uguID string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
+func PaidLstream(ctx context.Context, query, uguID string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
 	showId, err := api.ParsePaidLstreamShowID(query)
 	if err != nil {
 		return err
 	}
-	err = Video(showId, uguID, cfg, streamParams, nil, true, nil, deps)
+	err = Video(ctx, showId, uguID, cfg, streamParams, nil, true, nil, deps)
 	return err
 }

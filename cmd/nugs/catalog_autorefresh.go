@@ -3,14 +3,18 @@ package main
 // Auto-refresh wrappers delegating to internal/catalog during migration.
 // These will be removed in Phase 12 when all callers move to internal packages.
 
-import "github.com/jmagar/nugs-cli/internal/catalog"
+import (
+	"context"
+
+	"github.com/jmagar/nugs-cli/internal/catalog"
+)
 
 func shouldAutoRefresh(cfg *Config) (bool, error) {
 	return catalog.ShouldAutoRefresh(cfg)
 }
 
-func autoRefreshIfNeeded(cfg *Config) error {
-	return catalog.AutoRefreshIfNeeded(cfg, buildCatalogDeps())
+func autoRefreshIfNeeded(ctx context.Context, cfg *Config) error {
+	return catalog.AutoRefreshIfNeeded(ctx, cfg, buildCatalogDeps())
 }
 
 func enableAutoRefresh(cfg *Config) error {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,7 +90,7 @@ func TestAnalyzeArtistCatalog_UsesCacheAndComputesCounts(t *testing.T) {
 		RcloneTransfers: 0,
 	}
 
-	analysis, err := analyzeArtistCatalog("1125", cfg, "", MediaTypeBoth)
+	analysis, err := analyzeArtistCatalog(context.Background(), "1125", cfg, "", MediaTypeBoth)
 	if err != nil {
 		t.Fatalf("analyzeArtistCatalog failed: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestCatalogGapsForArtist_DefaultOutputIsMissingListOnly(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		if err := catalogGapsForArtist("3344", cfg, "", false, MediaTypeUnknown); err != nil {
+		if err := catalogGapsForArtist(context.Background(), "3344", cfg, "", false, MediaTypeUnknown); err != nil {
 			t.Fatalf("catalogGapsForArtist failed: %v", err)
 		}
 	})
@@ -174,7 +175,7 @@ func TestGetArtistMetaCached_UsesFreshCache(t *testing.T) {
 		t.Fatalf("failed to seed artist cache: %v", err)
 	}
 
-	pages, cacheUsed, cacheStaleUse, err := getArtistMetaCached("555", 24*time.Hour)
+	pages, cacheUsed, cacheStaleUse, err := getArtistMetaCached(context.Background(), "555", 24*time.Hour)
 	if err != nil {
 		t.Fatalf("getArtistMetaCached failed: %v", err)
 	}

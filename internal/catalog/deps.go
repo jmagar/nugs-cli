@@ -3,6 +3,7 @@
 package catalog
 
 import (
+	"context"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -21,10 +22,10 @@ type Deps struct {
 
 	// Album downloads a single album/show by container ID.
 	// Used by gap-fill to download missing shows.
-	Album func(albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState) error
+	Album func(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState) error
 
 	// Playlist downloads a catalog playlist by GUID.
-	Playlist func(plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool) error
+	Playlist func(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool) error
 
 	// SetCurrentProgressBox registers (or clears) the global progress box.
 	SetCurrentProgressBox func(box *model.ProgressBoxState)
@@ -36,5 +37,5 @@ type Deps struct {
 	FormatDuration func(d time.Duration) string
 
 	// GetArtistMetaCached retrieves artist metadata, using the cache when fresh.
-	GetArtistMetaCached func(artistID string, ttl time.Duration) (pages []*model.ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error)
+	GetArtistMetaCached func(ctx context.Context, artistID string, ttl time.Duration) (pages []*model.ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error)
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -152,8 +153,10 @@ func run(cfg *Config, jsonLevel string) {
 	stopHotkeys := startCrawlHotkeysIfNeeded(cfg.Urls)
 	defer stopHotkeys()
 
+	ctx := context.Background()
+
 	// Auto-refresh catalog cache if needed
-	err := autoRefreshIfNeeded(cfg)
+	err := autoRefreshIfNeeded(ctx, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Auto-refresh warning: %v\n", err)
 	}
@@ -169,7 +172,7 @@ func run(cfg *Config, jsonLevel string) {
 
 	// Show welcome screen if no arguments provided
 	if len(cfg.Urls) == 0 {
-		err := displayWelcome()
+		err := displayWelcome(ctx)
 		if err != nil {
 			fmt.Printf("Error displaying welcome screen: %v\n", err)
 		}
@@ -177,10 +180,10 @@ func run(cfg *Config, jsonLevel string) {
 	}
 
 	// Route list and catalog commands (pre-auth)
-	if handleListCommand(cfg, jsonLevel) {
+	if handleListCommand(ctx, cfg, jsonLevel) {
 		return
 	}
-	if handleCatalogCommand(cfg, jsonLevel) {
+	if handleCatalogCommand(ctx, cfg, jsonLevel) {
 		return
 	}
 
@@ -198,18 +201,18 @@ func run(cfg *Config, jsonLevel string) {
 		handleErr("Failed to make output folder.", err, true)
 	}
 	if cfg.Token == "" {
-		token, err = auth(cfg.Email, cfg.Password)
+		token, err = auth(ctx, cfg.Email, cfg.Password)
 		if err != nil {
 			handleErr("Failed to auth.", err, true)
 		}
 	} else {
 		token = cfg.Token
 	}
-	userId, err := getUserInfo(token)
+	userId, err := getUserInfo(ctx, token)
 	if err != nil {
 		handleErr("Failed to get user info.", err, true)
 	}
-	subInfo, err := getSubInfo(token)
+	subInfo, err := getSubInfo(ctx, token)
 	if err != nil {
 		handleErr("Failed to get subcription info.", err, true)
 	}
@@ -226,15 +229,15 @@ func run(cfg *Config, jsonLevel string) {
 
 	// Handle "catalog gaps <artist_id> [...] fill" (requires auth)
 	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
-		handleCatalogGapsFill(cfg, streamParams, jsonLevel)
+		handleCatalogGapsFill(ctx, cfg, streamParams, jsonLevel)
 		return
 	}
 
-	runCancelled = dispatch(cfg, streamParams, legacyToken, uguID)
+	runCancelled = dispatch(ctx, cfg, streamParams, legacyToken, uguID)
 }
 
 // handleListCommand routes "list" subcommands. Returns true if handled.
-func handleListCommand(cfg *Config, jsonLevel string) bool {
+func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) bool {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "list" {
 		return false
 	}
@@ -265,7 +268,7 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 			}
 			showFilter = remainingArgs[1]
 		}
-		err := listArtists(jsonLevel, showFilter)
+		err := listArtists(ctx, jsonLevel, showFilter)
 		if err != nil {
 			handleErr("List artists failed.", err, true)
 		}
@@ -287,7 +290,7 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 			return true
 		}
 		venueFilter := strings.Join(remainingArgs[1:], " ")
-		err := listArtistShowsByVenue(artistId, venueFilter, jsonLevel)
+		err := listArtistShowsByVenue(ctx, artistId, venueFilter, jsonLevel)
 		if err != nil {
 			handleErr("List shows by venue failed.", err, true)
 		}
@@ -306,7 +309,7 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 				limit = parsedLimit
 			}
 		}
-		err := listArtistLatestShows(artistId, limit, jsonLevel)
+		err := listArtistLatestShows(ctx, artistId, limit, jsonLevel)
 		if err != nil {
 			handleErr("List latest shows failed.", err, true)
 		}
@@ -314,7 +317,7 @@ func handleListCommand(cfg *Config, jsonLevel string) bool {
 	}
 
 	// Default: list all shows for artist (with optional media filter)
-	err := listArtistShows(artistId, jsonLevel, mediaFilter)
+	err := listArtistShows(ctx, artistId, jsonLevel, mediaFilter)
 	if err != nil {
 		handleErr("List shows failed.", err, true)
 	}
@@ -338,7 +341,7 @@ func parseMediaModifier(args []string) (MediaType, []string) {
 	return MediaTypeUnknown, args
 }
 
-func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
+func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bool {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "catalog" {
 		return false
 	}
@@ -366,7 +369,7 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 	subCmd := cfg.Urls[1]
 	switch subCmd {
 	case "update":
-		err := catalogUpdate(jsonLevel)
+		err := catalogUpdate(ctx, jsonLevel)
 		if err != nil {
 			handleErr("Catalog update failed.", err, true)
 		}
@@ -433,7 +436,7 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 			fmt.Println("Error: No artist IDs provided")
 			return true
 		}
-		err := catalogGaps(artistIds, cfg, jsonLevel, idsOnly, mediaFilter)
+		err := catalogGaps(ctx, artistIds, cfg, jsonLevel, idsOnly, mediaFilter)
 		if err != nil {
 			handleErr("Catalog gaps failed.", err, true)
 		}
@@ -447,7 +450,7 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 		argsAfterList := cfg.Urls[2:]
 		mediaFilter, artistIds := parseMediaModifier(argsAfterList)
 		
-		err := catalogList(artistIds, cfg, jsonLevel, mediaFilter)
+		err := catalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog list failed.", err, true)
 		}
@@ -460,7 +463,7 @@ func handleCatalogCommand(cfg *Config, jsonLevel string) bool {
 		// Extract media modifier
 		mediaFilter, artistIds := parseMediaModifier(argsAfterCoverage)
 		
-		err := catalogCoverage(artistIds, cfg, jsonLevel, mediaFilter)
+		err := catalogCoverage(ctx, artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog coverage failed.", err, true)
 		}
@@ -553,7 +556,7 @@ func handleArtistShorthand(cfg *Config) bool {
 
 // handleCatalogGapsFill handles the "catalog gaps <artist_id> [...] fill" command
 // which requires authentication.
-func handleCatalogGapsFill(cfg *Config, streamParams *StreamParams, jsonLevel string) {
+func handleCatalogGapsFill(ctx context.Context, cfg *Config, streamParams *StreamParams, jsonLevel string) {
 	// Extract media modifier from args (between "gaps" and "fill")
 	argsAfterGaps := cfg.Urls[2 : len(cfg.Urls)-1] // Everything between "gaps" and "fill"
 	mediaFilter, artistIds := parseMediaModifier(argsAfterGaps)
@@ -569,7 +572,7 @@ func handleCatalogGapsFill(cfg *Config, streamParams *StreamParams, jsonLevel st
 			fmt.Println(strings.Repeat("─", 80))
 			fmt.Println()
 		}
-		err := catalogGapsFill(artistId, cfg, streamParams, jsonLevel, mediaFilter)
+		err := catalogGapsFill(ctx, artistId, cfg, streamParams, jsonLevel, mediaFilter)
 		if err != nil {
 			if len(artistIds) > 1 {
 				printWarning(fmt.Sprintf("Failed to fill gaps for artist %s: %v", artistId, err))
@@ -583,7 +586,7 @@ func handleCatalogGapsFill(cfg *Config, streamParams *StreamParams, jsonLevel st
 // dispatch iterates over URLs, resolves their type, and routes each to the
 // appropriate handler (album, playlist, video, artist, etc.).
 // Returns true if the run was cancelled.
-func dispatch(cfg *Config, streamParams *StreamParams, legacyToken, uguID string) bool {
+func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, legacyToken, uguID string) bool {
 	albumTotal := len(cfg.Urls)
 	var itemErr error
 	completedItems := 0
@@ -604,21 +607,21 @@ func dispatch(cfg *Config, streamParams *StreamParams, legacyToken, uguID string
 		}
 		switch mediaType {
 		case 0:
-			itemErr = album(itemId, cfg, streamParams, nil, nil, nil)
+			itemErr = album(ctx, itemId, cfg, streamParams, nil, nil, nil)
 		case 1, 2:
-			itemErr = playlist(itemId, legacyToken, cfg, streamParams, false)
+			itemErr = playlist(ctx, itemId, legacyToken, cfg, streamParams, false)
 		case 3:
-			itemErr = catalogPlist(itemId, legacyToken, cfg, streamParams)
+			itemErr = catalogPlist(ctx, itemId, legacyToken, cfg, streamParams)
 		case 4, 10:
-			itemErr = video(itemId, "", cfg, streamParams, nil, false, nil)
+			itemErr = video(ctx, itemId, "", cfg, streamParams, nil, false, nil)
 		case 5:
-			itemErr = artist(itemId, cfg, streamParams)
+			itemErr = artist(ctx, itemId, cfg, streamParams)
 		case 6, 7, 8:
-			itemErr = video(itemId, "", cfg, streamParams, nil, true, nil)
+			itemErr = video(ctx, itemId, "", cfg, streamParams, nil, true, nil)
 		case 9:
-			itemErr = paidLstream(itemId, uguID, cfg, streamParams)
+			itemErr = paidLstream(ctx, itemId, uguID, cfg, streamParams)
 		case 11:
-			itemErr = album(itemId, cfg, streamParams, nil, nil, nil)
+			itemErr = album(ctx, itemId, cfg, streamParams, nil, nil, nil)
 		}
 		if itemErr != nil {
 			if isCrawlCancelledErr(itemErr) {
