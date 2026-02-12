@@ -89,11 +89,11 @@ func TestResetForNewAlbumClearsUploadTotalSet(t *testing.T) {
 // TestUploadDurationCalculation tests edge cases in duration calculation
 func TestUploadDurationCalculation(t *testing.T) {
 	tests := []struct {
-		name          string
-		startTime     time.Time
-		wantZero      bool
-		wantNonZero   bool
-		description   string
+		name        string
+		startTime   time.Time
+		wantZero    bool
+		wantNonZero bool
+		description string
 	}{
 		{
 			name:        "Zero start time",
@@ -133,11 +133,11 @@ func TestUploadDurationCalculation(t *testing.T) {
 // TestSpeedCalculationEdgeCases tests division by zero and instant upload handling
 func TestSpeedCalculationEdgeCases(t *testing.T) {
 	tests := []struct {
-		name         string
-		duration     time.Duration
-		bytes        int64
-		shouldCalc   bool
-		description  string
+		name        string
+		duration    time.Duration
+		bytes       int64
+		shouldCalc  bool
+		description string
 	}{
 		{
 			name:        "Zero duration",

@@ -15,15 +15,15 @@ import (
 func buildDownloadDeps() *download.Deps {
 	return &download.Deps{
 		WaitIfPausedOrCancelled: waitIfPausedOrCancelled,
-		IsCrawlCancelledErr:    isCrawlCancelledErr,
-		SetCurrentProgressBox:  setCurrentProgressBox,
-		RenderProgressBox:      renderProgressBox,
+		IsCrawlCancelledErr:     isCrawlCancelledErr,
+		SetCurrentProgressBox:   setCurrentProgressBox,
+		RenderProgressBox:       renderProgressBox,
 		RenderCompletionSummary: renderCompletionSummary,
-		UploadToRclone:         uploadToRclone,
-		RemotePathExists:       remotePathExists,
-		PrintProgress:          printProgress,
-		UpdateSpeedHistory:     updateSpeedHistory,
-		CalculateETA:           calculateETA,
+		UploadToRclone:          uploadToRclone,
+		RemotePathExists:        remotePathExists,
+		PrintProgress:           printProgress,
+		UpdateSpeedHistory:      updateSpeedHistory,
+		CalculateETA:            calculateETA,
 	}
 }
 

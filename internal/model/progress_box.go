@@ -38,7 +38,7 @@ type ProgressBoxState struct {
 	UploadSpeed       string
 	Uploaded          string
 	UploadTotal       string
-	UploadTotalSet    bool  // Flag to prevent overwriting calculated upload total
+	UploadTotalSet    bool // Flag to prevent overwriting calculated upload total
 	ShowPercent       int
 	ShowDownloaded    string
 	ShowTotal         string
@@ -143,9 +143,9 @@ func (s *ProgressBoxState) isValidTransition(from, to string) bool {
 	case PhasePaused:
 		return to == PhaseDownload || to == PhaseUpload || to == PhaseVerify
 	case PhaseComplete, PhaseError:
-		return to == PhaseIdle || to == PhaseDownload  // Can restart after completion/error
+		return to == PhaseIdle || to == PhaseDownload // Can restart after completion/error
 	default:
-		return true  // Unknown phases allowed for backward compatibility
+		return true // Unknown phases allowed for backward compatibility
 	}
 }
 

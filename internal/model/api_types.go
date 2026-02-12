@@ -31,11 +31,11 @@ type Payload struct {
 
 // UserInfo holds user profile information.
 type UserInfo struct {
-	Sub              string `json:"sub"`
+	Sub               string `json:"sub"`
 	PreferredUsername string `json:"preferred_username"`
-	Name             string `json:"name"`
-	Email            string `json:"email"`
-	EmailVerified    bool   `json:"email_verified"`
+	Name              string `json:"name"`
+	Email             string `json:"email"`
+	EmailVerified     bool   `json:"email_verified"`
 }
 
 // SubInfo holds subscription information.

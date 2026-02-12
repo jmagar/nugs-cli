@@ -34,9 +34,9 @@ func getMediaTypeIndicator(mediaType MediaType) string {
 	return ui.GetMediaTypeIndicator(mediaType)
 }
 
-func describeAudioFormat(format int) string       { return ui.DescribeAudioFormat(format) }
-func describeVideoFormat(videoFormat int) string   { return ui.DescribeVideoFormat(videoFormat) }
-func describeAuthStatus(cfg *Config) string        { return ui.DescribeAuthStatus(cfg) }
+func describeAudioFormat(format int) string      { return ui.DescribeAudioFormat(format) }
+func describeVideoFormat(videoFormat int) string { return ui.DescribeVideoFormat(videoFormat) }
+func describeAuthStatus(cfg *Config) string      { return ui.DescribeAuthStatus(cfg) }
 
 func printStartupEnvironment(cfg *Config, jsonLevel string) {
 	if jsonLevel != "" {

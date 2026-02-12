@@ -416,11 +416,11 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 			fmt.Println("       catalog gaps <artist_id> [...] [audio|video|both] --ids-only")
 			return true
 		}
-		
+
 		// Extract media modifier from args after "catalog gaps"
 		argsAfterGaps := cfg.Urls[2:]
 		mediaFilter, argsAfterGaps := parseMediaModifier(argsAfterGaps)
-		
+
 		// Handle --ids-only flag
 		idsOnly := false
 		artistIds := []string{}
@@ -431,7 +431,7 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 			}
 			artistIds = append(artistIds, arg)
 		}
-		
+
 		if len(artistIds) == 0 {
 			fmt.Println("Error: No artist IDs provided")
 			return true
@@ -445,11 +445,11 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 			printInfo("Usage: nugs catalog list <artist_id> [...] [audio|video|both]")
 			return true
 		}
-		
+
 		// Extract media modifier from args after "catalog list"
 		argsAfterList := cfg.Urls[2:]
 		mediaFilter, artistIds := parseMediaModifier(argsAfterList)
-		
+
 		err := catalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog list failed.", err, true)
@@ -459,10 +459,10 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 		if len(cfg.Urls) > 2 {
 			argsAfterCoverage = cfg.Urls[2:]
 		}
-		
+
 		// Extract media modifier
 		mediaFilter, artistIds := parseMediaModifier(argsAfterCoverage)
-		
+
 		err := catalogCoverage(ctx, artistIds, cfg, jsonLevel, mediaFilter)
 		if err != nil {
 			handleErr("Catalog coverage failed.", err, true)

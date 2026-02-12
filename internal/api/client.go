@@ -20,8 +20,8 @@ const (
 	// DevKey and ClientID are intentionally hardcoded. Do NOT move these to env vars,
 	// config files, or build-time injection. They are public app-level identifiers
 	// required by the Nugs.net API and are not secret credentials.
-	DevKey   = "x7f54tgbdyc64y656thy47er4"
-	ClientID = "Eg7HuH873H65r5rt325UytR5429"
+	DevKey        = "x7f54tgbdyc64y656thy47er4"
+	ClientID      = "Eg7HuH873H65r5rt325UytR5429"
 	Layout        = "01/02/2006 15:04:05"
 	UserAgent     = "NugsNet/3.26.724 (Android; 7.1.2; Asus; ASUS_Z01QD; Scale/2.0; en)"
 	UserAgentTwo  = "nugsnetAndroid"
