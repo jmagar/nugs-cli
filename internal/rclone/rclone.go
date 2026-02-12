@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,25 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
+
+var (
+	transferredSegmentPattern = regexp.MustCompile(`(?i)\btransferred:\s*(.+)$`)
+	transferredPairPattern    = regexp.MustCompile(`^\s*([^,]+?)\s*/\s*([^,]+?)(?:\s*,|$)`)
+	percentPattern            = regexp.MustCompile(`(\d{1,3})\s*%`)
+	speedPattern              = regexp.MustCompile(`(?:^|,)\s*@?\s*([^,]*?/s)\s*(?:,|$)`)
+)
+
+var defaultStorageProvider model.StorageProvider = NewStorageAdapter()
+
+// SetStorageProvider swaps the default storage provider used by rclone wrappers.
+// Passing nil resets it to the standard rclone adapter.
+func SetStorageProvider(provider model.StorageProvider) {
+	if provider == nil {
+		defaultStorageProvider = NewStorageAdapter()
+		return
+	}
+	defaultStorageProvider = provider
+}
 
 // CheckRcloneAvailable verifies rclone is installed and available in PATH.
 func CheckRcloneAvailable(quiet bool) error {
@@ -74,86 +94,21 @@ type UploadProgressFunc func(percent int, speed, uploaded, total string)
 // If progressFn is non-nil, it is called with progress updates.
 // If fallbackPrintFn is non-nil, it is used for non-progress-box output.
 func UploadToRclone(localPath string, artistFolder string, cfg *model.Config, progressFn UploadProgressFunc, isVideo bool, onPreUpload func(totalBytes int64), onComplete func(), onDeleteAfterUpload func(localPath string)) error {
-	if !cfg.RcloneEnabled {
-		return nil
-	}
-
-	if err := helpers.ValidatePath(localPath); err != nil {
-		return fmt.Errorf("invalid local path: %w", err)
-	}
-
-	if artistFolder != "" {
-		if err := helpers.ValidatePath(artistFolder); err != nil {
-			return fmt.Errorf("invalid artist folder: %w", err)
-		}
-	}
-
-	transfers := cfg.RcloneTransfers
-	if transfers == 0 {
-		transfers = 4
-	}
-
-	cmd, remoteFullPath, err := BuildRcloneUploadCommand(localPath, artistFolder, cfg, transfers, isVideo)
-	if err != nil {
-		return err
-	}
-
-	// Calculate local directory size for upload progress
-	if onPreUpload != nil {
-		totalBytes := helpers.CalculateLocalSize(localPath)
-		if totalBytes > 0 {
-			onPreUpload(totalBytes)
-		}
-	}
-
-	if progressFn != nil {
-		err = RunRcloneWithProgress(cmd, progressFn)
-	} else {
-		ui.PrintUpload(fmt.Sprintf("Uploading to %s%s%s...", ui.ColorBold, remoteFullPath, ui.ColorReset))
-		err = RunRcloneWithProgress(cmd, nil)
-		fmt.Println("")
-	}
-
-	if err != nil {
-		return fmt.Errorf("rclone upload failed: %w", err)
-	}
-
-	if progressFn == nil {
-		ui.PrintSuccess("Upload complete!")
-	}
-
-	if cfg.DeleteAfterUpload {
-		if progressFn == nil {
-			ui.PrintInfo("Verifying upload integrity...")
-		}
-		verifyCmd, err := BuildRcloneVerifyCommand(localPath, remoteFullPath)
-		if err != nil {
-			return fmt.Errorf("failed to build upload verification command: %w", err)
-		}
-		var verifyOut, verifyErr bytes.Buffer
-		verifyCmd.Stdout = &verifyOut
-		verifyCmd.Stderr = &verifyErr
-
-		err = verifyCmd.Run()
-		if err != nil {
-			return fmt.Errorf("upload verification failed - NOT deleting local files: %w\nOutput: %s\nErrors: %s",
-				err, verifyOut.String(), verifyErr.String())
-		}
-
-		if progressFn == nil {
-			ui.PrintSuccess("Upload verified successfully")
-			fmt.Printf("Deleting local files: %s\n", localPath)
-		}
-		err = os.RemoveAll(localPath)
-		if err != nil {
-			return fmt.Errorf("failed to delete local files: %w", err)
-		}
-		if progressFn == nil {
-			ui.PrintSuccess("Local files deleted")
-		}
-	}
-
-	return nil
+	return defaultStorageProvider.Upload(context.Background(), cfg, model.UploadRequest{
+		LocalPath:    localPath,
+		ArtistFolder: artistFolder,
+		IsVideo:      isVideo,
+	}, model.StorageHooks{
+		OnProgress: func(progress model.UploadProgress) {
+			if progressFn == nil {
+				return
+			}
+			progressFn(progress.Percent, progress.Speed, progress.Uploaded, progress.Total)
+		},
+		OnPreUpload:         onPreUpload,
+		OnComplete:          onComplete,
+		OnDeleteAfterUpload: onDeleteAfterUpload,
+	})
 }
 
 // BuildRcloneUploadCommand constructs the rclone copy/copyto command.
@@ -225,45 +180,29 @@ func ParseRcloneProgressLine(line string) (int, string, string, string, bool) {
 	if line == "" {
 		return 0, "", "", "", false
 	}
-	idx := strings.Index(line, "Transferred:")
-	if idx < 0 {
-		idx = strings.Index(strings.ToLower(line), "transferred:")
-	}
-	if idx < 0 {
+
+	segmentMatch := transferredSegmentPattern.FindStringSubmatch(line)
+	if len(segmentMatch) < 2 {
 		return 0, "", "", "", false
 	}
-	segment := strings.TrimSpace(line[idx+len("Transferred:"):])
-	fields := strings.Split(segment, ",")
-	if len(fields) == 0 {
+
+	segment := strings.TrimSpace(segmentMatch[1])
+	pairMatch := transferredPairPattern.FindStringSubmatch(segment)
+	if len(pairMatch) < 3 {
 		return 0, "", "", "", false
 	}
-	transferredPart := strings.Join(strings.Fields(strings.TrimSpace(fields[0])), " ")
-	var uploaded string
-	var total string
-	if slashIdx := strings.Index(transferredPart, " / "); slashIdx >= 0 {
-		uploaded = strings.TrimSpace(transferredPart[:slashIdx])
-		total = strings.TrimSpace(transferredPart[slashIdx+3:])
-	} else {
-		parts := strings.SplitN(transferredPart, "/", 2)
-		if len(parts) != 2 {
-			return 0, "", "", "", false
-		}
-		uploaded = strings.TrimSpace(parts[0])
-		total = strings.TrimSpace(parts[1])
-	}
+
+	uploaded := strings.Join(strings.Fields(strings.TrimSpace(pairMatch[1])), " ")
+	total := strings.Join(strings.Fields(strings.TrimSpace(pairMatch[2])), " ")
 	if uploaded == "" || total == "" {
 		return 0, "", "", "", false
 	}
 
 	percent := -1
-	for _, field := range fields {
-		part := strings.TrimSpace(field)
-		if strings.HasSuffix(part, "%") {
-			num := strings.TrimSuffix(part, "%")
-			if parsed, err := strconv.Atoi(strings.TrimSpace(num)); err == nil {
-				percent = parsed
-				break
-			}
+	percentMatch := percentPattern.FindStringSubmatch(segment)
+	if len(percentMatch) > 1 {
+		if parsed, err := strconv.Atoi(strings.TrimSpace(percentMatch[1])); err == nil {
+			percent = parsed
 		}
 	}
 	if percent < 0 {
@@ -280,13 +219,11 @@ func ParseRcloneProgressLine(line string) (int, string, string, string, bool) {
 	}
 
 	speed := "0 B"
-	for _, field := range fields {
-		part := strings.TrimSpace(field)
-		if strings.Contains(part, "/s") {
-			speed = part
-			break
-		}
+	speedMatch := speedPattern.FindStringSubmatch(segment)
+	if len(speedMatch) > 1 {
+		speed = strings.TrimSpace(speedMatch[1])
 	}
+	speed = strings.TrimPrefix(speed, "@")
 	speed = strings.TrimPrefix(speed, "@ ")
 	speed = strings.TrimSpace(speed)
 	if speed == "" {
@@ -413,68 +350,10 @@ func BuildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, erro
 
 // RemotePathExists checks if a path exists on the configured rclone remote.
 func RemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
-	if !cfg.RcloneEnabled {
-		return false, nil
-	}
-
-	if err := helpers.ValidatePath(remotePath); err != nil {
-		return false, fmt.Errorf("invalid remote path: %w", err)
-	}
-
-	remoteDest := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, isVideo)
-	fullPath := remoteDest + "/" + remotePath
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "rclone", "lsf", fullPath)
-	err := cmd.Run()
-
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if exitErr.ExitCode() == 3 {
-				return false, nil
-			}
-			return false, fmt.Errorf("rclone error checking remote path (exit %d): %w", exitErr.ExitCode(), err)
-		}
-		return false, fmt.Errorf("failed to execute rclone: %w", err)
-	}
-
-	return true, nil
+	return defaultStorageProvider.PathExists(context.Background(), cfg, remotePath, isVideo)
 }
 
 // ListRemoteArtistFolders returns show folder names under one artist folder on remote storage.
 func ListRemoteArtistFolders(artistFolder string, cfg *model.Config) (map[string]struct{}, error) {
-	folders := make(map[string]struct{})
-	if !cfg.RcloneEnabled {
-		return folders, nil
-	}
-
-	if err := helpers.ValidatePath(artistFolder); err != nil {
-		return nil, fmt.Errorf("invalid artist folder: %w", err)
-	}
-
-	remoteDest := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, false)
-	fullPath := remoteDest + "/" + artistFolder
-
-	cmd := exec.Command("rclone", "lsf", fullPath, "--dirs-only")
-	output, err := cmd.Output()
-	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
-			return folders, nil
-		}
-		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)
-	}
-
-	for _, line := range strings.Split(string(output), "\n") {
-		trimmed := strings.TrimSuffix(strings.TrimSpace(line), "/")
-		if trimmed == "" {
-			continue
-		}
-		folders[trimmed] = struct{}{}
-	}
-
-	return folders, nil
+	return defaultStorageProvider.ListArtistFolders(context.Background(), cfg, artistFolder, false)
 }

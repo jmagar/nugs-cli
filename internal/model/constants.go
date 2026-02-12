@@ -1,6 +1,9 @@
 package model
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // JSON output levels
 const (
@@ -16,6 +19,49 @@ const (
 	MessagePriorityWarning = 2 // Warning messages (yellow, warning symbol)
 	MessagePriorityError   = 3 // Error messages (red, cross symbol)
 )
+
+// Shared download constants.
+const (
+	MaxProgressPercent = 100
+	KBpsDivisor        = 1000
+
+	UnknownSizeLabel       = "Unknown"
+	UnknownSizeLabelLower  = "unknown"
+	UnknownResolutionLabel = "unknown"
+	ZeroBytesLabel         = "0 B"
+	CalculatingSizeLabel   = "calculating..."
+
+	StatusMessageDuration = 5 * time.Second
+	SkipMessageDuration   = 3 * time.Second
+
+	MaxFormatFallbackAttempts = 10
+
+	PreCalcConcurrency       = 8
+	PreCalcPerTrackTimeout   = 5 * time.Second
+	PreCalcPerRequestTimeout = 5 * time.Second
+	PreCalcMaxTimeout        = 60 * time.Second
+
+	AlbumFolderMaxRunes = 120
+	VideoNameMaxRunes   = 110
+
+	BatchShowNumberFormat = "Show %d/%d: %s"
+
+	VideoShowNumberDefault    = "Video"
+	VideoTrackNameDefault     = "Video Stream"
+	VideoDownloadStatusLabel  = "Downloading video stream"
+	VideoConvertStatusLabel   = "Converting TS to MP4"
+	VideoUploadStatusLabel    = "Uploading video to rclone"
+	VideoOnDemandFormatLabel  = "VIDEO ON DEMAND"
+	LiveHDVideoFormatLabel    = "LIVE HD VIDEO"
+	AvailableAvailabilityType = "AVAILABLE"
+	ShowContainerType         = "Show"
+
+	Res2160 = "2160"
+	Res4K   = "4K"
+	Resp    = "p"
+)
+
+var TrackStreamMetaFormatProbeOrder = [4]int{1, 4, 7, 10}
 
 // MediaType represents the type of media content (audio, video, or both)
 type MediaType int

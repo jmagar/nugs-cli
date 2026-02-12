@@ -1,6 +1,7 @@
 package helpers
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,31 @@ import (
 )
 
 var sanRegex = regexp.MustCompile(`[\/:*?"><|]`)
+
+var (
+	// ErrInvalidPathCharacters indicates control characters were found in a path.
+	ErrInvalidPathCharacters = errors.New("path contains invalid characters")
+	// ErrPathTraversalDetected indicates path traversal tokens were found.
+	ErrPathTraversalDetected = errors.New("path contains directory traversal sequence")
+)
+
+// PathResolver centralizes media-aware local/remote path resolution.
+type PathResolver interface {
+	LocalBaseForMedia(mediaType model.MediaType) string
+	LocalBasesForFilter(mediaFilter model.MediaType) []string
+	LocalShowPath(show *model.AlbArtResp, mediaType model.MediaType) string
+	RemoteShowPath(show *model.AlbArtResp) string
+}
+
+// ConfigPathResolver resolves paths based on Config.
+type ConfigPathResolver struct {
+	cfg *model.Config
+}
+
+// NewConfigPathResolver returns a media-aware path resolver backed by cfg.
+func NewConfigPathResolver(cfg *model.Config) PathResolver {
+	return &ConfigPathResolver{cfg: cfg}
+}
 
 // Sanitise cleans a filename by replacing invalid characters.
 func Sanitise(filename string) string {
@@ -54,10 +80,10 @@ func FileExists(path string) (bool, error) {
 // ValidatePath checks that a path does not contain dangerous characters or traversal sequences.
 func ValidatePath(path string) error {
 	if strings.ContainsAny(path, "\x00\n\r") {
-		return fmt.Errorf("path contains invalid characters")
+		return fmt.Errorf("%w: %q", ErrInvalidPathCharacters, path)
 	}
 	if strings.Contains(path, "..") {
-		return fmt.Errorf("path contains directory traversal sequence")
+		return fmt.Errorf("%w: %q", ErrPathTraversalDetected, path)
 	}
 	return nil
 }
@@ -110,16 +136,87 @@ func CalculateLocalSize(localPath string) int64 {
 
 // GetOutPathForMedia returns the correct local output path based on media type.
 func GetOutPathForMedia(cfg *model.Config, mediaType model.MediaType) string {
-	if mediaType.HasVideo() && cfg.VideoOutPath != "" {
-		return cfg.VideoOutPath
+	return NewConfigPathResolver(cfg).LocalBaseForMedia(mediaType)
+}
+
+// LocalBaseForMedia returns the correct local output path based on media type.
+func (r *ConfigPathResolver) LocalBaseForMedia(mediaType model.MediaType) string {
+	if r == nil || r.cfg == nil {
+		return ""
 	}
-	return cfg.OutPath
+	if mediaType.HasVideo() && strings.TrimSpace(r.cfg.VideoOutPath) != "" {
+		return r.cfg.VideoOutPath
+	}
+	return r.cfg.OutPath
 }
 
 // GetRclonePathForMedia returns the correct remote path based on media type.
 func GetRclonePathForMedia(cfg *model.Config, mediaType model.MediaType) string {
+	if cfg == nil {
+		return ""
+	}
 	if mediaType.HasVideo() && cfg.RcloneVideoPath != "" {
 		return cfg.RcloneVideoPath
 	}
 	return cfg.RclonePath
+}
+
+// LocalBasesForFilter returns the local base paths relevant for a media filter.
+func (r *ConfigPathResolver) LocalBasesForFilter(mediaFilter model.MediaType) []string {
+	if r == nil || r.cfg == nil {
+		return nil
+	}
+
+	var paths []string
+	switch mediaFilter {
+	case model.MediaTypeAudio:
+		paths = append(paths, r.cfg.OutPath)
+	case model.MediaTypeVideo:
+		if strings.TrimSpace(r.cfg.VideoOutPath) != "" {
+			paths = append(paths, r.cfg.VideoOutPath)
+		} else {
+			paths = append(paths, r.cfg.OutPath)
+		}
+	default:
+		paths = append(paths, r.cfg.OutPath)
+		if strings.TrimSpace(r.cfg.VideoOutPath) != "" {
+			paths = append(paths, r.cfg.VideoOutPath)
+		}
+	}
+	return uniqueNonEmptyPaths(paths)
+}
+
+// LocalShowPath returns the artist/show local path for the given media type.
+func (r *ConfigPathResolver) LocalShowPath(show *model.AlbArtResp, mediaType model.MediaType) string {
+	if r == nil || show == nil {
+		return ""
+	}
+	albumFolder := BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+	return filepath.Join(r.LocalBaseForMedia(mediaType), Sanitise(show.ArtistName), albumFolder)
+}
+
+// RemoteShowPath returns the artist/show remote-relative path.
+func (r *ConfigPathResolver) RemoteShowPath(show *model.AlbArtResp) string {
+	if show == nil {
+		return ""
+	}
+	albumFolder := BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+	return filepath.Join(Sanitise(show.ArtistName), albumFolder)
+}
+
+func uniqueNonEmptyPaths(paths []string) []string {
+	seen := make(map[string]struct{}, len(paths))
+	uniq := make([]string, 0, len(paths))
+	for _, p := range paths {
+		trimmed := strings.TrimSpace(p)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		uniq = append(uniq, trimmed)
+	}
+	return uniq
 }

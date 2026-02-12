@@ -49,12 +49,12 @@ func WriteCounterWrite(wc *model.WriteCounter, p []byte, deps *Deps) (int, error
 	n := len(p)
 	wc.Downloaded += int64(n)
 	if wc.Total > 0 {
-		percentage := float64(wc.Downloaded) / float64(wc.Total) * float64(100)
+		percentage := float64(wc.Downloaded) / float64(wc.Total) * float64(model.MaxProgressPercent)
 		wc.Percentage = int(percentage)
 	}
 	toDivideBy := time.Now().UnixMilli() - wc.StartTime
 	if toDivideBy != 0 {
-		speed = int64(wc.Downloaded) / toDivideBy * 1000
+		speed = int64(wc.Downloaded) / toDivideBy * model.KBpsDivisor
 	}
 	if wc.OnProgress != nil {
 		wc.OnProgress(wc.Downloaded, wc.Total, speed)
@@ -93,7 +93,7 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 		return errors.New(do.Status)
 	}
 	totalBytes := do.ContentLength
-	totalStr := "unknown"
+	totalStr := model.UnknownSizeLabelLower
 	if totalBytes > 0 {
 		totalStr = humanize.Bytes(uint64(totalBytes))
 	}
@@ -318,7 +318,7 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		chosenQual *model.Quality
 	)
 	// Call the stream meta endpoint four times to get all avail formats since the formats can shift.
-	for _, i := range [4]int{1, 4, 7, 10} {
+	for _, i := range model.TrackStreamMetaFormatProbeOrder {
 		streamUrl, err := api.GetStreamMeta(ctx, track.TrackID, 0, i, streamParams)
 		if err != nil {
 			ui.PrintError("Failed to get track stream metadata")
@@ -349,7 +349,7 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		}
 	} else {
 		// Guard against infinite loop: max 10 fallback attempts
-		maxFallbacks := 10
+		maxFallbacks := model.MaxFormatFallbackAttempts
 		for i := 0; i < maxFallbacks; i++ {
 			chosenQual = api.GetTrackQual(quals, wantFmt)
 			if chosenQual != nil {
@@ -370,7 +370,7 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			if progressBox != nil {
 				fallbackMsg := fmt.Sprintf("Using %s (requested %s unavailable)",
 					model.GetQualityName(wantFmt), model.GetQualityName(origWantFmt))
-				progressBox.SetMessage(model.MessagePriorityWarning, fallbackMsg, 5*time.Second)
+				progressBox.SetMessage(model.MessagePriorityWarning, fallbackMsg, model.StatusMessageDuration)
 			}
 		}
 	}
@@ -391,7 +391,7 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			progressBox.Mu.Unlock()
 			// Tier 3: Set skip indicator message
 			skipMsg := fmt.Sprintf("Skipped track %d - already exists", trackNum)
-			progressBox.SetMessage(model.MessagePriorityStatus, skipMsg, 3*time.Second)
+			progressBox.SetMessage(model.MessagePriorityStatus, skipMsg, model.SkipMessageDuration)
 		}
 		return nil
 	}
@@ -408,11 +408,11 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		if progressBox == nil {
 			// Fallback to old progress display if no box provided
 			trackPercentage := 0
-			trackTotalStr := "unknown"
+			trackTotalStr := model.UnknownSizeLabelLower
 			if total > 0 {
-				trackPercentage = int((float64(downloaded) / float64(total)) * 100)
-				if trackPercentage > 100 {
-					trackPercentage = 100
+				trackPercentage = int((float64(downloaded) / float64(total)) * model.MaxProgressPercent)
+				if trackPercentage > model.MaxProgressPercent {
+					trackPercentage = model.MaxProgressPercent
 				}
 				trackTotalStr = humanize.Bytes(uint64(total))
 			}
@@ -426,11 +426,11 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 
 		// Update progress box with download progress
 		trackPercentage := 0
-		trackTotalStr := "unknown"
+		trackTotalStr := model.UnknownSizeLabelLower
 		if total > 0 {
-			trackPercentage = int((float64(downloaded) / float64(total)) * 100)
-			if trackPercentage > 100 {
-				trackPercentage = 100
+			trackPercentage = int((float64(downloaded) / float64(total)) * model.MaxProgressPercent)
+			if trackPercentage > model.MaxProgressPercent {
+				trackPercentage = model.MaxProgressPercent
 			}
 			trackTotalStr = humanize.Bytes(uint64(total))
 		}
@@ -442,9 +442,9 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 				trackProgress = 1
 			}
 		}
-		showPercentage := int(((float64(trackNum-1) + trackProgress) / float64(trackTotal)) * 100)
-		if showPercentage > 100 {
-			showPercentage = 100
+		showPercentage := int(((float64(trackNum-1) + trackProgress) / float64(trackTotal)) * model.MaxProgressPercent)
+		if showPercentage > model.MaxProgressPercent {
+			showPercentage = model.MaxProgressPercent
 		}
 
 		// Lock for atomic update of all progress fields
@@ -520,12 +520,12 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 	var wg sync.WaitGroup
 
 	// Semaphore to limit concurrent requests to 8
-	sem := make(chan struct{}, 8)
+	sem := make(chan struct{}, model.PreCalcConcurrency)
 
 	// Context with timeout for overall operation (tracks * 5 seconds, max 60 seconds)
-	timeout := time.Duration(len(tracks)) * 5 * time.Second
-	if timeout > 60*time.Second {
-		timeout = 60 * time.Second
+	timeout := time.Duration(len(tracks)) * model.PreCalcPerTrackTimeout
+	if timeout > model.PreCalcMaxTimeout {
+		timeout = model.PreCalcMaxTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -550,7 +550,7 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 			}
 
 			// Create HEAD request with timeout
-			reqCtx, reqCancel := context.WithTimeout(ctx, 5*time.Second)
+			reqCtx, reqCancel := context.WithTimeout(ctx, model.PreCalcPerRequestTimeout)
 			defer reqCancel()
 
 			req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, streamUrl, nil)
@@ -578,225 +578,224 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 	return totalSize, nil
 }
 
-// Album downloads an album or show from Nugs.net using the provided albumID.
-// If albumID is empty, uses the provided artResp metadata instead of fetching it.
-func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
-	var (
-		meta   *model.AlbArtResp
-		tracks []model.Track
-	)
+func resolveAlbumMetaAndTracks(ctx context.Context, albumID string, artResp *model.AlbArtResp) (*model.AlbArtResp, []model.Track, error) {
 	if albumID == "" {
-		meta = artResp
-		tracks = meta.Songs
-	} else {
-		_meta, err := api.GetAlbumMeta(ctx, albumID)
-		if err != nil {
-			ui.PrintError("Failed to get metadata")
-			return err
-		}
-		meta = _meta.Response
-		tracks = meta.Tracks
+		return artResp, artResp.Songs, nil
 	}
-
-	trackTotal := len(tracks)
-
-	skuID := GetVideoSku(meta.Products)
-
-	if skuID == 0 && trackTotal < 1 {
-		return errors.New("release has no tracks or videos")
+	meta, err := api.GetAlbumMeta(ctx, albumID)
+	if err != nil {
+		ui.PrintError("Failed to get metadata")
+		return nil, nil, err
 	}
+	return meta.Response, meta.Response.Tracks, nil
+}
 
-	// Determine what to download based on defaultOutputs config and show media type
+func resolveAlbumDownloadModes(cfg *model.Config, meta *model.AlbArtResp) (bool, bool) {
 	mediaPreference := model.ParseMediaType(cfg.DefaultOutputs)
 	if mediaPreference == model.MediaTypeUnknown {
-		mediaPreference = model.MediaTypeAudio // default to audio
+		mediaPreference = model.MediaTypeAudio
 	}
-
 	showMediaType := GetShowMediaType(meta)
-	downloadAudio := false
-	downloadVideo := false
-
-	if mediaPreference == model.MediaTypeBoth {
-		downloadAudio = showMediaType.HasAudio()
-		downloadVideo = showMediaType.HasVideo()
-	} else if mediaPreference == model.MediaTypeVideo {
-		downloadVideo = showMediaType.HasVideo()
-	} else { // audio (default)
-		downloadAudio = showMediaType.HasAudio()
+	downloadAudio := mediaPreference != model.MediaTypeVideo && showMediaType.HasAudio()
+	downloadVideo := mediaPreference != model.MediaTypeAudio && showMediaType.HasVideo()
+	if mediaPreference == model.MediaTypeVideo {
+		downloadAudio = false
 	}
-
-	// Legacy flag overrides
 	if cfg.SkipVideos {
 		downloadVideo = false
 	}
 	if cfg.ForceVideo {
-		downloadVideo = true
-		downloadAudio = false
+		return false, true
 	}
+	return downloadAudio, downloadVideo
+}
 
-	// Handle video-only shows
-	if skuID != 0 && trackTotal < 1 {
-		if cfg.SkipVideos || !downloadVideo {
-			ui.PrintInfo("Video-only album, skipped")
-			return nil
-		}
-		// Video-only album - no track progress to show
-		return Video(ctx, albumID, "", cfg, streamParams, meta, false, nil, deps)
+func handleVideoOnlyAlbum(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, meta *model.AlbArtResp, trackTotal, skuID int, downloadVideo bool, deps *Deps) (bool, error) {
+	if skuID == 0 || trackTotal > 0 {
+		return false, nil
 	}
-	// Create artist directory
-	artistFolder := helpers.Sanitise(meta.ArtistName)
-	artistPath := filepath.Join(cfg.OutPath, artistFolder)
-	err := helpers.MakeDirs(artistPath)
-	if err != nil {
-		ui.PrintError("Failed to make artist folder")
-		return err
+	if cfg.SkipVideos || !downloadVideo {
+		ui.PrintInfo("Video-only album, skipped")
+		return true, nil
 	}
+	return true, Video(ctx, albumID, "", cfg, streamParams, meta, false, nil, deps)
+}
 
+func buildAlbumFolderName(meta *model.AlbArtResp) string {
 	albumFolder := helpers.BuildAlbumFolderName(meta.ArtistName, meta.ContainerInfo)
 	fmt.Println(albumFolder)
-	if len([]rune(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " "))) > 120 {
-		fmt.Println(
-			"Album folder name was chopped because it exceeds 120 characters.")
+	fullName := meta.ArtistName + " - " + strings.TrimRight(meta.ContainerInfo, " ")
+	if len([]rune(fullName)) > model.AlbumFolderMaxRunes {
+		fmt.Printf("Album folder name was chopped because it exceeds %d characters.\n", model.AlbumFolderMaxRunes)
 	}
-	albumPath := filepath.Join(artistPath, albumFolder)
+	return albumFolder
+}
 
-	// Check if show already exists locally
+func prepareAlbumPaths(cfg *model.Config, meta *model.AlbArtResp, deps *Deps) (string, string, bool, error) {
+	artistFolder := helpers.Sanitise(meta.ArtistName)
+	artistPath := filepath.Join(cfg.OutPath, artistFolder)
+	if err := helpers.MakeDirs(artistPath); err != nil {
+		ui.PrintError("Failed to make artist folder")
+		return "", "", false, err
+	}
+	albumFolder := buildAlbumFolderName(meta)
+	albumPath := filepath.Join(artistPath, albumFolder)
 	if stat, statErr := os.Stat(albumPath); statErr == nil && stat.IsDir() {
 		ui.PrintInfo(fmt.Sprintf("Show already exists locally %s skipping", ui.SymbolArrow))
-		return nil
+		return "", "", true, nil
 	}
-
-	// Check if show already exists on remote
 	remoteShowPath := artistFolder + "/" + albumFolder
 	ui.PrintInfo(fmt.Sprintf("Checking remote for: %s%s%s", ui.ColorCyan, albumFolder, ui.ColorReset))
-	exists, err := deps.RemotePathExists(remoteShowPath, cfg, false)
+	exists, err := deps.CheckRemotePathExists(remoteShowPath, cfg, false)
 	if err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to check remote: %v", err))
-		// Continue with download even if remote check fails
 	} else if exists {
 		ui.PrintSuccess(fmt.Sprintf("Show found on remote %s skipping", ui.SymbolArrow))
-		return nil
+		return "", "", true, nil
 	}
-
-	err = helpers.MakeDirs(albumPath)
-	if err != nil {
+	if err := helpers.MakeDirs(albumPath); err != nil {
 		ui.PrintError("Failed to make album folder")
-		return err
+		return "", "", false, err
 	}
+	return artistFolder, albumPath, false, nil
+}
 
-	// Pre-calculate total show size (unless disabled)
+func calculateAlbumShowSize(tracks []model.Track, streamParams *model.StreamParams, cfg *model.Config) (int64, string) {
 	totalShowSize := int64(0)
-	showTotalStr := "calculating..."
-	if !cfg.SkipSizePreCalculation {
-		ui.PrintInfo("Pre-calculating total show size...")
-		calculatedSize, calcErr := PreCalculateShowSize(tracks, streamParams, cfg)
-		if calcErr == nil && calculatedSize > 0 {
-			totalShowSize = calculatedSize
-			showTotalStr = humanize.Bytes(uint64(totalShowSize))
-		}
+	showTotalStr := model.CalculatingSizeLabel
+	if cfg.SkipSizePreCalculation {
+		return totalShowSize, showTotalStr
 	}
+	ui.PrintInfo("Pre-calculating total show size...")
+	calculatedSize, err := PreCalculateShowSize(tracks, streamParams, cfg)
+	if err == nil && calculatedSize > 0 {
+		totalShowSize = calculatedSize
+		showTotalStr = humanize.Bytes(uint64(totalShowSize))
+	}
+	return totalShowSize, showTotalStr
+}
 
-	// Reuse existing progress box (for batch operations) or create new one (for single downloads)
-	showNumStr := meta.PerformanceDateShort
+func buildAlbumShowNumber(meta *model.AlbArtResp, batchState *model.BatchProgressState) string {
 	if batchState != nil && batchState.TotalAlbums > 1 {
-		showNumStr = fmt.Sprintf("Show %d/%d: %s", batchState.CurrentAlbum, batchState.TotalAlbums, meta.PerformanceDateShort)
+		return fmt.Sprintf(model.BatchShowNumberFormat, batchState.CurrentAlbum, batchState.TotalAlbums, meta.PerformanceDateShort)
 	}
+	return meta.PerformanceDateShort
+}
 
-	// Track if we created a new progress box (for cleanup)
-	createdNewProgressBox := progressBox == nil
-
+func prepareAlbumProgressBox(meta *model.AlbArtResp, cfg *model.Config, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, trackTotal int, totalShowSize int64, showTotalStr string, deps *Deps) (*model.ProgressBoxState, bool) {
+	showNumStr := buildAlbumShowNumber(meta, batchState)
+	created := progressBox == nil
 	if progressBox == nil {
-		// Single download - create new progress box
 		progressBox = &model.ProgressBoxState{
 			ShowTitle:      meta.ContainerInfo,
 			ShowNumber:     showNumStr,
 			RcloneEnabled:  cfg.RcloneEnabled,
-			ShowDownloaded: "0 B",
+			ShowDownloaded: model.ZeroBytesLabel,
 			ShowTotal:      showTotalStr,
 			BatchState:     batchState,
 			StartTime:      time.Now(),
 			TrackTotal:     trackTotal,
 			RenderInterval: model.DefaultProgressRenderInterval,
 		}
-		// Tier 3: Register global progress box for crawl control access
 		if deps.SetCurrentProgressBox != nil {
 			deps.SetCurrentProgressBox(progressBox)
 		}
+		return progressBox, created
+	}
+	progressBox.ResetForNewAlbum(meta.ContainerInfo, showNumStr, trackTotal, totalShowSize)
+	progressBox.Mu.Lock()
+	progressBox.ShowDownloaded = model.ZeroBytesLabel
+	progressBox.ShowTotal = showTotalStr
+	progressBox.Mu.Unlock()
+	return progressBox, created
+}
+
+func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, artistFolder string, cfg *model.Config, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, downloadVideo bool, deps *Deps) error {
+	trackTotal := len(tracks)
+	for trackNum, track := range tracks {
+		if deps.WaitIfPausedOrCancelled != nil {
+			if err := deps.WaitIfPausedOrCancelled(); err != nil {
+				return err
+			}
+		}
+		trackNum++
+		err := ProcessTrack(ctx, albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox, deps)
+		if err != nil {
+			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
+				return err
+			}
+			progressBox.Mu.Lock()
+			progressBox.ErrorTracks++
+			progressBox.Mu.Unlock()
+			helpers.HandleErr("Track failed.", err, false)
+		}
+	}
+	progressBox.IsComplete = true
+	progressBox.CompletionTime = time.Now()
+	progressBox.TotalDuration = time.Since(progressBox.StartTime)
+	if cfg.RcloneEnabled {
+		if err := deps.UploadPath(albumPath, artistFolder, cfg, progressBox, false); err != nil {
+			helpers.HandleErr("Upload failed.", err, false)
+		}
+	}
+	if !downloadVideo && deps.RenderCompletionSummary != nil {
+		deps.RenderCompletionSummary(progressBox)
+		fmt.Println("")
+	}
+	return nil
+}
+
+func downloadAlbumVideo(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, meta *model.AlbArtResp, progressBox *model.ProgressBoxState, hadAudio bool, deps *Deps) {
+	if hadAudio {
+		fmt.Println("")
+		ui.PrintInfo("Downloading video...")
+	}
+	err := Video(ctx, albumID, "", cfg, streamParams, meta, false, progressBox, deps)
+	if err != nil {
+		helpers.HandleErr("Video download failed.", err, false)
+	}
+}
+
+// Album downloads an album or show from Nugs.net using the provided albumID.
+// If albumID is empty, uses the provided artResp metadata instead of fetching it.
+func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, artResp *model.AlbArtResp, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
+	meta, tracks, err := resolveAlbumMetaAndTracks(ctx, albumID, artResp)
+	if err != nil {
+		return err
+	}
+	trackTotal := len(tracks)
+	skuID := GetVideoSku(meta.Products)
+	if skuID == 0 && trackTotal < 1 {
+		return errors.New("release has no tracks or videos")
+	}
+	downloadAudio, downloadVideo := resolveAlbumDownloadModes(cfg, meta)
+	handled, err := handleVideoOnlyAlbum(ctx, albumID, cfg, streamParams, meta, trackTotal, skuID, downloadVideo, deps)
+	if handled {
+		return err
+	}
+
+	artistFolder, albumPath, skipped, err := prepareAlbumPaths(cfg, meta, deps)
+	if err != nil || skipped {
+		return err
+	}
+
+	totalShowSize, showTotalStr := calculateAlbumShowSize(tracks, streamParams, cfg)
+	progressBox, created := prepareAlbumProgressBox(meta, cfg, batchState, progressBox, trackTotal, totalShowSize, showTotalStr, deps)
+	if created {
 		defer func() {
-			if createdNewProgressBox && deps.SetCurrentProgressBox != nil {
+			if deps.SetCurrentProgressBox != nil {
 				deps.SetCurrentProgressBox(nil)
 			}
 		}()
-	} else {
-		// Batch download - reuse existing progress box with clean reset
-		progressBox.ResetForNewAlbum(meta.ContainerInfo, showNumStr, trackTotal, totalShowSize)
-
-		// Set show totals (not part of generic reset since they're album-specific)
-		progressBox.Mu.Lock()
-		progressBox.ShowDownloaded = "0 B"
-		progressBox.ShowTotal = showTotalStr
-		progressBox.Mu.Unlock()
 	}
-
-	// Download audio tracks if requested
 	if downloadAudio && trackTotal > 0 {
-		for trackNum, track := range tracks {
-			if deps.WaitIfPausedOrCancelled != nil {
-				if err := deps.WaitIfPausedOrCancelled(); err != nil {
-					return err
-				}
-			}
-			trackNum++
-			err := ProcessTrack(ctx,
-				albumPath, trackNum, trackTotal, cfg, &track, streamParams, progressBox, deps)
-			if err != nil {
-				if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
-					return err
-				}
-				// Track error count
-				progressBox.Mu.Lock()
-				progressBox.ErrorTracks++
-				progressBox.Mu.Unlock()
-				helpers.HandleErr("Track failed.", err, false)
-			}
-		}
-
-		// Mark audio completion (but don't show summary yet if uploading or downloading video)
-		if trackTotal > 0 {
-			progressBox.IsComplete = true
-			progressBox.CompletionTime = time.Now()
-			progressBox.TotalDuration = time.Since(progressBox.StartTime)
-		}
-
-		// Upload to rclone if enabled
-		if cfg.RcloneEnabled && deps.UploadToRclone != nil {
-			err = deps.UploadToRclone(albumPath, artistFolder, cfg, progressBox, false)
-			if err != nil {
-				helpers.HandleErr("Upload failed.", err, false)
-			}
-		}
-
-		// Show completion summary AFTER upload (or immediately if no upload) and no video pending
-		if trackTotal > 0 && !downloadVideo {
-			if deps.RenderCompletionSummary != nil {
-				deps.RenderCompletionSummary(progressBox)
-			}
-			fmt.Println("") // Final newline after completion summary
+		if err := downloadAlbumAudio(ctx, tracks, albumPath, artistFolder, cfg, streamParams, progressBox, downloadVideo, deps); err != nil {
+			return err
 		}
 	}
-
-	// Download video if requested
 	if downloadVideo && skuID != 0 {
-		if downloadAudio && trackTotal > 0 {
-			fmt.Println("") // Spacing between audio and video
-			ui.PrintInfo("Downloading video...")
-		}
-		err = Video(ctx, albumID, "", cfg, streamParams, meta, false, progressBox, deps)
-		if err != nil {
-			helpers.HandleErr("Video download failed.", err, false)
-		}
+		downloadAlbumVideo(ctx, albumID, cfg, streamParams, meta, progressBox, downloadAudio && trackTotal > 0, deps)
 	}
-
 	return nil
 }
 

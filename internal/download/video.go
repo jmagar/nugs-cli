@@ -38,7 +38,7 @@ var resFallback = map[string]string{
 func GetVideoSku(products []model.Product) int {
 	for _, product := range products {
 		formatStr := product.FormatStr
-		if formatStr == "VIDEO ON DEMAND" || formatStr == "LIVE HD VIDEO" {
+		if formatStr == model.VideoOnDemandFormatLabel || formatStr == model.LiveHDVideoFormatLabel {
 			return product.SkuID
 		}
 	}
@@ -54,8 +54,8 @@ func GetShowMediaType(show *model.AlbArtResp) model.MediaType {
 	if len(show.Products) > 0 {
 		hasVideo = GetVideoSku(show.Products) != 0
 		for _, product := range show.Products {
-			if product.FormatStr != "VIDEO ON DEMAND" &&
-				product.FormatStr != "LIVE HD VIDEO" {
+			if product.FormatStr != model.VideoOnDemandFormatLabel &&
+				product.FormatStr != model.LiveHDVideoFormatLabel {
 				hasAudio = true
 				break
 			}
@@ -72,8 +72,8 @@ func GetShowMediaType(show *model.AlbArtResp) model.MediaType {
 			if format == nil {
 				continue
 			}
-			if format.FormatStr != "VIDEO ON DEMAND" &&
-				format.FormatStr != "LIVE HD VIDEO" {
+			if format.FormatStr != model.VideoOnDemandFormatLabel &&
+				format.FormatStr != model.LiveHDVideoFormatLabel {
 				hasAudio = true
 				break
 			}
@@ -100,7 +100,7 @@ func GetShowMediaType(show *model.AlbArtResp) model.MediaType {
 // GetLstreamSku finds the livestream SKU ID from a product format list.
 func GetLstreamSku(products []*model.ProductFormatList) int {
 	for _, product := range products {
-		if product.FormatStr == "LIVE HD VIDEO" {
+		if product.FormatStr == model.LiveHDVideoFormatLabel {
 			return product.SkuID
 		}
 	}
@@ -119,10 +119,10 @@ func GetVidVariant(variants []*m3u8.Variant, wantRes string) *m3u8.Variant {
 
 // FormatRes formats a resolution string for display.
 func FormatRes(res string) string {
-	if res == "2160" {
-		return "4K"
+	if res == model.Res2160 {
+		return model.Res4K
 	}
-	return res + "p"
+	return res + model.Resp
 }
 
 // ChooseVariant selects the best video variant from a manifest URL.
@@ -145,7 +145,7 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	sort.Slice(master.Variants, func(x, y int) bool {
 		return master.Variants[x].Bandwidth > master.Variants[y].Bandwidth
 	})
-	if wantRes == "2160" {
+	if wantRes == model.Res2160 {
 		variant := master.Variants[0]
 		parts := strings.SplitN(variant.Resolution, "x", 2)
 		if len(parts) != 2 {
@@ -155,7 +155,7 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 		return variant, varRes, nil
 	}
 	// Guard against infinite loop: max 10 fallback attempts
-	maxFallbacks := 10
+	maxFallbacks := model.MaxFormatFallbackAttempts
 	for i := 0; i < maxFallbacks; i++ {
 		wantVariant = GetVidVariant(master.Variants, wantRes)
 		if wantVariant != nil {
@@ -170,7 +170,7 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 				if len(parts) == 2 {
 					wantRes = FormatRes(parts[1])
 				} else {
-					wantRes = "unknown"
+					wantRes = model.UnknownResolutionLabel
 				}
 			}
 			break
@@ -184,7 +184,7 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 		if len(parts) == 2 {
 			wantRes = FormatRes(parts[1])
 		} else {
-			wantRes = "unknown"
+			wantRes = model.UnknownResolutionLabel
 		}
 	}
 	if wantRes != origWantRes {
@@ -294,12 +294,12 @@ func (s *simpleWriteCounter) Write(p []byte) (int, error) {
 	n := len(p)
 	s.wc.Downloaded += int64(n)
 	if s.wc.Total > 0 {
-		percentage := float64(s.wc.Downloaded) / float64(s.wc.Total) * float64(100)
+		percentage := float64(s.wc.Downloaded) / float64(s.wc.Total) * float64(model.MaxProgressPercent)
 		s.wc.Percentage = int(percentage)
 	}
 	toDivideBy := time.Now().UnixMilli() - s.wc.StartTime
 	if toDivideBy != 0 {
-		speed = int64(s.wc.Downloaded) / toDivideBy * 1000
+		speed = int64(s.wc.Downloaded) / toDivideBy * model.KBpsDivisor
 	}
 	if s.wc.OnProgress != nil {
 		s.wc.OnProgress(s.wc.Downloaded, s.wc.Total, speed)
@@ -501,7 +501,7 @@ func TsToMp4(vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
 func GetLstreamContainer(containers []*model.AlbArtResp) *model.AlbArtResp {
 	for i := len(containers) - 1; i >= 0; i-- {
 		c := containers[i]
-		if c.AvailabilityTypeStr == "AVAILABLE" && c.ContainerTypeStr == "Show" {
+		if c.AvailabilityTypeStr == model.AvailableAvailabilityType && c.ContainerTypeStr == model.ShowContainerType {
 			return c
 		}
 	}
@@ -533,7 +533,7 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 		return progressBox, false
 	}
 
-	showNumber := "Video"
+	showNumber := model.VideoShowNumberDefault
 	if meta.PerformanceDateShort != "" {
 		showNumber = meta.PerformanceDateShort
 	}
@@ -543,9 +543,9 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 		ShowNumber:     showNumber,
 		TrackNumber:    1,
 		TrackTotal:     1,
-		TrackName:      "Video Stream",
-		ShowDownloaded: "0 B",
-		ShowTotal:      "Unknown",
+		TrackName:      model.VideoTrackNameDefault,
+		ShowDownloaded: model.ZeroBytesLabel,
+		ShowTotal:      model.UnknownSizeLabel,
 		RcloneEnabled:  cfg.RcloneEnabled,
 		StartTime:      time.Now(),
 		RenderInterval: model.DefaultProgressRenderInterval,
@@ -596,11 +596,10 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		chapsAvail = len(meta.VideoChapters) > 0
 	}
 
-	videoFname := helpers.BuildAlbumFolderName(meta.ArtistName, meta.ContainerInfo, 110)
+	videoFname := helpers.BuildAlbumFolderName(meta.ArtistName, meta.ContainerInfo, model.VideoNameMaxRunes)
 	fmt.Println(videoFname)
-	if len([]rune(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " "))) > 110 {
-		fmt.Println(
-			"Video filename was chopped because it exceeds 110 characters.")
+	if len([]rune(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " "))) > model.VideoNameMaxRunes {
+		fmt.Printf("Video filename was chopped because it exceeds %d characters.\n", model.VideoNameMaxRunes)
 	}
 	if isLstream {
 		skuID = GetLstreamSku(meta.ProductFormatList)
@@ -653,7 +652,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 	if cfg.RcloneEnabled {
 		remoteVideoPath := path.Join(artistFolder, filepath.Base(vidPath))
 		ui.PrintInfo(fmt.Sprintf("Checking remote for video: %s%s%s", ui.ColorCyan, filepath.Base(vidPath), ui.ColorReset))
-		remoteExists, checkErr := deps.RemotePathExists(remoteVideoPath, cfg, true)
+		remoteExists, checkErr := deps.CheckRemotePathExists(remoteVideoPath, cfg, true)
 		if checkErr != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to check remote video path: %v", checkErr))
 		} else if remoteExists {
@@ -682,19 +681,19 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		fmt.Printf("%.3f FPS, ", variant.FrameRate)
 	}
 	fmt.Printf("%d Kbps, %s (%s)\n",
-		variant.Bandwidth/1000, retRes, variant.Resolution)
+		variant.Bandwidth/model.KBpsDivisor, retRes, variant.Resolution)
 
 	if progressBox != nil {
 		progressBox.Mu.Lock()
 		progressBox.TrackName = filepath.Base(vidPath)
-		progressBox.TrackFormat = fmt.Sprintf("%d Kbps, %s (%s)", variant.Bandwidth/1000, retRes, variant.Resolution)
-		progressBox.Downloaded = "0 B"
-		progressBox.DownloadTotal = "Unknown"
-		progressBox.ShowDownloaded = "0 B"
-		progressBox.ShowTotal = "Unknown"
+		progressBox.TrackFormat = fmt.Sprintf("%d Kbps, %s (%s)", variant.Bandwidth/model.KBpsDivisor, retRes, variant.Resolution)
+		progressBox.Downloaded = model.ZeroBytesLabel
+		progressBox.DownloadTotal = model.UnknownSizeLabel
+		progressBox.ShowDownloaded = model.ZeroBytesLabel
+		progressBox.ShowTotal = model.UnknownSizeLabel
 		progressBox.SetPhaseLocked(model.PhaseDownload)
 		progressBox.Mu.Unlock()
-		progressBox.SetMessage(model.MessagePriorityStatus, "Downloading video stream", 5*time.Second)
+		progressBox.SetMessage(model.MessagePriorityStatus, model.VideoDownloadStatusLabel, model.StatusMessageDuration)
 		if deps.RenderProgressBox != nil {
 			deps.RenderProgressBox(progressBox)
 		}
@@ -707,7 +706,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 			}
 			percent := 0
 			if segTotal > 0 {
-				percent = int(float64(segNum) / float64(segTotal) * 100)
+				percent = int(float64(segNum) / float64(segTotal) * float64(model.MaxProgressPercent))
 			}
 			progressBox.Mu.Lock()
 			progressBox.DownloadPercent = percent
@@ -726,11 +725,11 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 			if progressBox == nil {
 				return
 			}
-			totalStr := "Unknown"
+			totalStr := model.UnknownSizeLabel
 			percent := 0
 			if total > 0 {
 				totalStr = humanize.Bytes(uint64(total))
-				percent = int(float64(downloaded) / float64(total) * 100)
+				percent = int(float64(downloaded) / float64(total) * float64(model.MaxProgressPercent))
 			}
 
 			progressBox.Mu.Lock()
@@ -771,7 +770,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 	ui.PrintInfo("Putting into MP4 container...")
 	if progressBox != nil {
 		progressBox.SetPhase(model.PhaseVerify)
-		progressBox.SetMessage(model.MessagePriorityStatus, "Converting TS to MP4", 5*time.Second)
+		progressBox.SetMessage(model.MessagePriorityStatus, model.VideoConvertStatusLabel, model.StatusMessageDuration)
 		if deps.RenderProgressBox != nil {
 			deps.RenderProgressBox(progressBox)
 		}
@@ -787,16 +786,16 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 	}
 
 	// Upload to rclone if enabled
-	if cfg.RcloneEnabled && deps.UploadToRclone != nil {
+	if cfg.RcloneEnabled {
 		if progressBox != nil {
 			progressBox.SetPhase(model.PhaseUpload)
-			progressBox.SetMessage(model.MessagePriorityStatus, "Uploading video to rclone", 5*time.Second)
+			progressBox.SetMessage(model.MessagePriorityStatus, model.VideoUploadStatusLabel, model.StatusMessageDuration)
 			if deps.RenderProgressBox != nil {
 				deps.RenderProgressBox(progressBox)
 			}
 		}
 		// Upload the video file to the artist folder on remote
-		err = deps.UploadToRclone(vidPath, artistFolder, cfg, progressBox, true)
+		err = deps.UploadPath(vidPath, artistFolder, cfg, progressBox, true)
 		if err != nil {
 			helpers.HandleErr("Upload failed.", err, false)
 		}

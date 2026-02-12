@@ -26,6 +26,10 @@ type ArtistPresenceIndex struct {
 
 var remoteCheckWarnOnce sync.Once
 
+var (
+	ErrRemoteArtistFolderListFailed = errors.New("failed to list remote artist folders")
+)
+
 // WarnRemoteCheckError prints a one-time warning about remote check failures.
 func WarnRemoteCheckError(err error) {
 	remoteCheckWarnOnce.Do(func() {
@@ -48,7 +52,7 @@ func ListAllRemoteArtistFolders(cfg *model.Config) (map[string]struct{}, error) 
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
 			return folders, nil
 		}
-		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)
+		return nil, fmt.Errorf("%w: %w", ErrRemoteArtistFolderListFailed, err)
 	}
 
 	for _, line := range strings.Split(string(output), "\n") {
@@ -75,8 +79,8 @@ func NormalizeArtistFolderKey(name string) string {
 
 // ShowExists checks if a show has been downloaded locally or exists on remote storage.
 func ShowExists(show *model.AlbArtResp, cfg *model.Config, deps *Deps) bool {
-	albumFolder := helpers.BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
-	albumPath := filepath.Join(cfg.OutPath, helpers.Sanitise(show.ArtistName), albumFolder)
+	resolver := helpers.NewConfigPathResolver(cfg)
+	albumPath := resolver.LocalShowPath(show, model.MediaTypeAudio)
 
 	// Check local existence
 	_, err := os.Stat(albumPath)
@@ -86,7 +90,7 @@ func ShowExists(show *model.AlbArtResp, cfg *model.Config, deps *Deps) bool {
 
 	// Check remote if rclone enabled
 	if cfg.RcloneEnabled && deps.RemotePathExists != nil {
-		remotePath := filepath.Join(helpers.Sanitise(show.ArtistName), albumFolder)
+		remotePath := resolver.RemoteShowPath(show)
 		remoteExists, err := deps.RemotePathExists(remotePath, cfg, false)
 		if err != nil {
 			WarnRemoteCheckError(err)
@@ -124,34 +128,8 @@ func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, 
 		RemoteFolders: make(map[string]struct{}),
 	}
 
-	// Determine which path(s) to check based on media filter
-	pathsToCheck := []string{}
-
-	// For Unknown filter, check both paths (covers all content)
-	if mediaFilter == model.MediaTypeUnknown {
-		pathsToCheck = append(pathsToCheck, cfg.OutPath)
-		if cfg.VideoOutPath != "" && cfg.VideoOutPath != cfg.OutPath {
-			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
-		}
-	} else if mediaFilter == model.MediaTypeBoth {
-		// Both filter: check audio and video paths
-		pathsToCheck = append(pathsToCheck, cfg.OutPath)
-		if cfg.VideoOutPath != "" && cfg.VideoOutPath != cfg.OutPath {
-			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
-		}
-	} else if mediaFilter == model.MediaTypeAudio {
-		// Audio only: check OutPath
-		pathsToCheck = append(pathsToCheck, cfg.OutPath)
-	} else if mediaFilter == model.MediaTypeVideo {
-		// Video only: check VideoOutPath if set, otherwise OutPath
-		if cfg.VideoOutPath != "" {
-			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
-		} else {
-			pathsToCheck = append(pathsToCheck, cfg.OutPath)
-		}
-	}
-
-	// Fallback: if no paths determined, default to OutPath
+	resolver := helpers.NewConfigPathResolver(cfg)
+	pathsToCheck := resolver.LocalBasesForFilter(mediaFilter)
 	if len(pathsToCheck) == 0 {
 		pathsToCheck = append(pathsToCheck, cfg.OutPath)
 	}

@@ -3,7 +3,11 @@
 // imported directly (ProgressBox rendering, crawl control, etc.).
 package download
 
-import "github.com/jmagar/nugs-cli/internal/model"
+import (
+	"context"
+
+	"github.com/jmagar/nugs-cli/internal/model"
+)
 
 // Deps holds callbacks to root-package functions that the download package needs.
 // These cannot be imported directly because they live in the root (main) package.
@@ -31,6 +35,9 @@ type Deps struct {
 	// RemotePathExists checks if a path exists on the rclone remote.
 	RemotePathExists func(remotePath string, cfg *model.Config, isVideo bool) (bool, error)
 
+	// Storage can be injected for tests or alternate storage backends.
+	Storage model.StorageProvider
+
 	// PrintProgress renders a progress bar line for simple downloads.
 	PrintProgress func(percentage int, speed, downloaded, total string)
 
@@ -39,4 +46,30 @@ type Deps struct {
 
 	// CalculateETA calculates estimated time remaining based on speed history.
 	CalculateETA func(speedHistory []float64, remaining int64) string
+}
+
+// UploadPath uploads local content via legacy callback or the injected storage provider.
+func (d *Deps) UploadPath(localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error {
+	if d != nil && d.UploadToRclone != nil {
+		return d.UploadToRclone(localPath, artistFolder, cfg, progressBox, isVideo)
+	}
+	if d != nil && d.Storage != nil {
+		return d.Storage.Upload(context.Background(), cfg, model.UploadRequest{
+			LocalPath:    localPath,
+			ArtistFolder: artistFolder,
+			IsVideo:      isVideo,
+		}, model.StorageHooks{})
+	}
+	return nil
+}
+
+// CheckRemotePathExists checks remote path existence via legacy callback or storage provider.
+func (d *Deps) CheckRemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
+	if d != nil && d.RemotePathExists != nil {
+		return d.RemotePathExists(remotePath, cfg, isVideo)
+	}
+	if d != nil && d.Storage != nil {
+		return d.Storage.PathExists(context.Background(), cfg, remotePath, isVideo)
+	}
+	return false, nil
 }

@@ -10,6 +10,15 @@ import (
 	"strings"
 )
 
+var (
+	// ErrScriptFilenameUnavailable indicates the runtime caller path could not be resolved.
+	ErrScriptFilenameUnavailable = errors.New("failed to get script filename")
+	// ErrOpenTextFile indicates opening a text file failed.
+	ErrOpenTextFile = errors.New("failed to open text file")
+	// ErrScanTextFile indicates scanner iteration over a text file failed.
+	ErrScanTextFile = errors.New("failed to scan text file")
+)
+
 // HandleErr prints an error to stderr. The _panic parameter is deprecated and
 // retained only for API compatibility — it now calls os.Exit(1) instead of panic.
 func HandleErr(errText string, err error, _panic bool) {
@@ -41,12 +50,12 @@ func GetScriptDir() (string, error) {
 	if runFromSrc {
 		_, fname, _, ok = runtime.Caller(0)
 		if !ok {
-			return "", errors.New("failed to get script filename")
+			return "", ErrScriptFilenameUnavailable
 		}
 	} else {
 		fname, err = os.Executable()
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("resolve executable path: %w", err)
 		}
 	}
 	return filepath.Dir(fname), nil
@@ -57,7 +66,7 @@ func ReadTxtFile(path string) ([]string, error) {
 	var lines []string
 	f, err := os.OpenFile(path, os.O_RDONLY, 0755)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w %q: %w", ErrOpenTextFile, path, err)
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
@@ -68,7 +77,7 @@ func ReadTxtFile(path string) ([]string, error) {
 		}
 	}
 	if scanner.Err() != nil {
-		return nil, scanner.Err()
+		return nil, fmt.Errorf("%w %q: %w", ErrScanTextFile, path, scanner.Err())
 	}
 	return lines, nil
 }

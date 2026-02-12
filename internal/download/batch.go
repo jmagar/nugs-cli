@@ -145,9 +145,9 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 	}
 
 	// Upload to rclone if enabled
-	if cfg.RcloneEnabled && deps.UploadToRclone != nil {
+	if cfg.RcloneEnabled {
 		// Playlists don't have artist folder structure
-		err = deps.UploadToRclone(plistPath, "", cfg, progressBox, false)
+		err = deps.UploadPath(plistPath, "", cfg, progressBox, false)
 		if err != nil {
 			helpers.HandleErr("Upload failed.", err, false)
 		}

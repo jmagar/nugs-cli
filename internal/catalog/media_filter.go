@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -14,21 +13,20 @@ import (
 
 // ShowExistsForMedia checks if a show exists locally or remotely for a specific media type.
 func ShowExistsForMedia(show *model.AlbArtResp, cfg *model.Config, mediaType model.MediaType, deps *Deps) bool {
-	albumFolder := helpers.BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+	resolver := helpers.NewConfigPathResolver(cfg)
 
 	// Determine if we're looking for video or audio content
 	isVideo := mediaType.HasVideo()
 
 	// Check local path (using media-specific base path)
-	localBase := helpers.GetOutPathForMedia(cfg, mediaType)
-	localPath := filepath.Join(localBase, helpers.Sanitise(show.ArtistName), albumFolder)
+	localPath := resolver.LocalShowPath(show, mediaType)
 	if _, err := os.Stat(localPath); err == nil {
 		return true
 	}
 
 	// Check remote path (if rclone enabled)
 	if cfg.RcloneEnabled && deps.RemotePathExists != nil {
-		remotePath := filepath.Join(helpers.Sanitise(show.ArtistName), albumFolder)
+		remotePath := resolver.RemoteShowPath(show)
 		exists, err := deps.RemotePathExists(remotePath, cfg, isVideo)
 		if err != nil {
 			WarnRemoteCheckError(err)
@@ -45,6 +43,7 @@ func ShowExistsForMedia(show *model.AlbArtResp, cfg *model.Config, mediaType mod
 // ShowExistsForMediaIndexed checks if a show exists using pre-built folder index (fast).
 func ShowExistsForMediaIndexed(show *model.AlbArtResp, cfg *model.Config, mediaType model.MediaType, idx *ArtistPresenceIndex, deps *Deps) bool {
 	albumFolder := helpers.BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
+	resolver := helpers.NewConfigPathResolver(cfg)
 
 	// Fast path: check local index
 	if _, exists := idx.LocalFolders[albumFolder]; exists {
@@ -62,7 +61,7 @@ func ShowExistsForMediaIndexed(show *model.AlbArtResp, cfg *model.Config, mediaT
 	// Fallback: remote index errored or rclone disabled, use slow per-show check
 	if cfg.RcloneEnabled && idx.RemoteListErr != nil && deps.RemotePathExists != nil {
 		isVideo := mediaType.HasVideo()
-		remotePath := filepath.Join(helpers.Sanitise(show.ArtistName), albumFolder)
+		remotePath := resolver.RemoteShowPath(show)
 		exists, err := deps.RemotePathExists(remotePath, cfg, isVideo)
 		if err != nil {
 			WarnRemoteCheckError(err)
