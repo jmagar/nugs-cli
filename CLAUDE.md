@@ -53,11 +53,13 @@ Nugs CLI is a Go-based command-line tool for downloading and managing music from
 
 - Go 1.16 or later
 - FFmpeg (for video downloads)
-- Make (optional, for using Makefile)
+- Make (required for building)
 
 ### Build Commands
 
-**Using Make (recommended):**
+**⚠️ CRITICAL: ALWAYS use `make build` - NEVER use `go build` directly**
+
+**Using Make (REQUIRED):**
 
 ```bash
 make build
@@ -65,18 +67,28 @@ make build
 
 This builds the binary and installs it to `~/.local/bin/nugs`.
 
-**Manual build:**
+**Why `make build` is required:**
+- Direct `go build` commands create binaries in the project root (nugs, nugs.exe, etc.)
+- These clutter the workspace even though they're gitignored
+- The Makefile handles the correct build target and output location
+- `make build` ensures consistent builds across all environments
+
+**Cross-compilation verification ONLY:**
+
+These commands are for verification purposes only. For actual building, use `make build` above.
 
 ```bash
-# Build and install to ~/.local/bin (preferred)
-mkdir -p ~/.local/bin
-go build -o ~/.local/bin/nugs
+# Cross-compile check for macOS (does NOT create local binary)
+GOOS=darwin go build ./cmd/nugs
 
-# Build for specific platform
-GOOS=linux GOARCH=amd64 go build -o nugs-linux-amd64
-GOOS=darwin GOARCH=amd64 go build -o nugs-darwin-amd64
-GOOS=windows GOARCH=amd64 go build -o nugs-windows-amd64.exe
+# Cross-compile check for Windows (does NOT create local binary)
+GOOS=windows go build ./cmd/nugs
+
+# Cross-compile check for Linux ARM
+GOOS=linux GOARCH=arm64 go build ./cmd/nugs
 ```
+
+**Note:** These cross-compilation checks don't create local binaries when using a different target OS.
 
 **Clean build artifacts:**
 
@@ -144,6 +156,28 @@ nugs/
 ---
 
 ## Development Patterns
+
+### ⚠️ Build Command Rule
+
+**CRITICAL: Always use `make build` - Never use `go build` directly**
+
+- ❌ `go build ./cmd/nugs` - Creates binaries in project root (nugs, nugs.exe, etc.)
+- ✅ `make build` - Correctly builds to `~/.local/bin/nugs`
+
+**Why:** Direct `go build` commands create binaries in the project root which clutter the workspace even though they're gitignored. The Makefile handles the correct build target and output location.
+
+**Verification commands are OK:**
+- `go test ./... -count=1` - Run tests
+- `go vet ./...` - Linting
+- `GOOS=darwin go build ./cmd/nugs` - Cross-compile check (doesn't create local binary)
+
+**For actual building:**
+```bash
+make build          # Build and install
+make clean          # Remove build artifacts
+```
+
+---
 
 ### Configuration Management
 
@@ -311,8 +345,14 @@ if cfg.RcloneEnabled && remotePathExists(remotePath, cfg) {
 **Build and test:**
 
 ```bash
-# Build
+# Build (ALWAYS use make, never go build directly)
 make build
+
+# Verify tests pass
+go test ./... -count=1
+
+# Verify linting
+go vet ./...
 
 # Test download
 nugs 23329
@@ -365,6 +405,12 @@ nugs refresh set
 - Comment exported functions
 - Keep functions under 50 lines where possible
 - Handle errors explicitly
+
+**Build Requirements:**
+- **ALWAYS** use `make build` to build the project
+- **NEVER** use `go build` directly (creates unwanted binaries in project root)
+- Use `GOOS=<os> go build ./cmd/nugs` ONLY for cross-compilation verification
+- Use `make clean` to remove build artifacts
 
 **Example:**
 
