@@ -60,6 +60,31 @@ func TestGetShowMediaType_Both(t *testing.T) {
 	}
 }
 
+func TestGetShowMediaType_FromProductFormatList_VideoOnly(t *testing.T) {
+	show := &AlbArtResp{
+		ProductFormatList: []*ProductFormatList{
+			{FormatStr: "LIVE HD VIDEO", SkuID: 10},
+		},
+	}
+	got := getShowMediaType(show)
+	if got != MediaTypeVideo {
+		t.Fatalf("expected MediaTypeVideo from productFormatList, got %v", got)
+	}
+}
+
+func TestGetShowMediaType_FromProductFormatList_Both(t *testing.T) {
+	show := &AlbArtResp{
+		ProductFormatList: []*ProductFormatList{
+			{FormatStr: "ALAC", SkuID: 2},
+			{FormatStr: "LIVE HD VIDEO", SkuID: 10},
+		},
+	}
+	got := getShowMediaType(show)
+	if got != MediaTypeBoth {
+		t.Fatalf("expected MediaTypeBoth from productFormatList, got %v", got)
+	}
+}
+
 func TestMatchesMediaFilter(t *testing.T) {
 	tests := []struct {
 		name      string

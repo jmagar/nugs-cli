@@ -47,21 +47,36 @@ func GetVideoSku(products []model.Product) int {
 
 // GetShowMediaType determines what media types a show offers (audio/video/both).
 func GetShowMediaType(show *model.AlbArtResp) model.MediaType {
-	// When Products is empty, the API didn't return product details.
-	// Default to audio since every show on Nugs.net has audio.
-	if len(show.Products) == 0 {
-		return model.MediaTypeAudio
-	}
-
-	hasVideo := GetVideoSku(show.Products) != 0
+	hasVideo := false
 	hasAudio := false
 
-	// Check for audio products (non-video formats)
-	for _, product := range show.Products {
-		if product.FormatStr != "VIDEO ON DEMAND" &&
-			product.FormatStr != "LIVE HD VIDEO" {
-			hasAudio = true
-			break
+	// Primary source: products (present on catalog.container responses).
+	if len(show.Products) > 0 {
+		hasVideo = GetVideoSku(show.Products) != 0
+		for _, product := range show.Products {
+			if product.FormatStr != "VIDEO ON DEMAND" &&
+				product.FormatStr != "LIVE HD VIDEO" {
+				hasAudio = true
+				break
+			}
+		}
+	}
+
+	// Fallback source: productFormatList (present on catalog.containersAll responses).
+	// This is critical for list media filtering because products are often null there.
+	if len(show.ProductFormatList) > 0 {
+		if GetLstreamSku(show.ProductFormatList) != 0 {
+			hasVideo = true
+		}
+		for _, format := range show.ProductFormatList {
+			if format == nil {
+				continue
+			}
+			if format.FormatStr != "VIDEO ON DEMAND" &&
+				format.FormatStr != "LIVE HD VIDEO" {
+				hasAudio = true
+				break
+			}
 		}
 	}
 

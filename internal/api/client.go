@@ -261,15 +261,14 @@ func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
 	return &obj, nil
 }
 
-// GetArtistMeta retrieves all pages of artist metadata.
-func GetArtistMeta(ctx context.Context, artistId string) ([]*model.ArtistMeta, error) {
+func getArtistMetaByAvailType(ctx context.Context, artistId string, availType int) ([]*model.ArtistMeta, error) {
 	var allArtistMeta []*model.ArtistMeta
 	offset := 1
 	query := url.Values{}
 	query.Set("method", "catalog.containersAll")
 	query.Set("limit", "100")
 	query.Set("artistList", artistId)
-	query.Set("availType", "1")
+	query.Set("availType", strconv.Itoa(availType))
 	query.Set("vdisp", "1")
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
@@ -301,6 +300,16 @@ func GetArtistMeta(ctx context.Context, artistId string) ([]*model.ArtistMeta, e
 		offset += retLen
 	}
 	return allArtistMeta, nil
+}
+
+// GetArtistMeta retrieves all pages of artist metadata (audio catalog view).
+func GetArtistMeta(ctx context.Context, artistId string) ([]*model.ArtistMeta, error) {
+	return getArtistMetaByAvailType(ctx, artistId, 1)
+}
+
+// GetArtistMetaWithAvailType retrieves all pages of artist metadata for a specific availability type.
+func GetArtistMetaWithAvailType(ctx context.Context, artistId string, availType int) ([]*model.ArtistMeta, error) {
+	return getArtistMetaByAvailType(ctx, artistId, availType)
 }
 
 // GetArtistList retrieves the list of all artists.

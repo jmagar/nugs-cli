@@ -43,3 +43,4 @@ Thumbs.db
 
 # Serena agent files
 .serena/
+.full-review/

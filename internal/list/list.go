@@ -255,7 +255,11 @@ func ListArtistShows(ctx context.Context, artistId string, jsonLevel string, dep
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist shows...")
 	}
-	allMeta, err := api.GetArtistMeta(ctx, artistId)
+	availType := 1
+	if mf == model.MediaTypeVideo || mf == model.MediaTypeBoth {
+		availType = 2
+	}
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, availType)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
