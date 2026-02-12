@@ -13,6 +13,9 @@ import (
 // HandleErr prints an error to stderr. The _panic parameter is deprecated and
 // retained only for API compatibility — it now calls os.Exit(1) instead of panic.
 func HandleErr(errText string, err error, _panic bool) {
+	if err == nil {
+		return
+	}
 	errString := errText + "\n" + err.Error()
 	if _panic {
 		fmt.Fprintln(os.Stderr, errString)

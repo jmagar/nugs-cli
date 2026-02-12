@@ -122,7 +122,7 @@ func AnalyzeArtistCatalogMediaAware(ctx context.Context, artistID string, cfg *m
 		}
 	}
 
-	presenceIdx := BuildArtistPresenceIndex(artistName, cfg, deps)
+	presenceIdx := BuildArtistPresenceIndex(artistName, cfg, deps, mediaFilter)
 	if presenceIdx.RemoteListErr != nil && jsonLevel == "" {
 		ui.PrintWarning(fmt.Sprintf("Remote artist folder bulk check failed, falling back to per-show checks: %v", presenceIdx.RemoteListErr))
 	}

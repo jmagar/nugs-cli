@@ -112,21 +112,60 @@ func CollectArtistShows(artistMetas []*model.ArtistMeta) (allShows []*model.AlbA
 }
 
 // BuildArtistPresenceIndex builds a pre-computed index of local and remote
-// show folders for an artist.
-func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps) ArtistPresenceIndex {
+// show folders for an artist. The mediaFilter determines which local paths
+// are scanned:
+//   - Audio: checks OutPath only
+//   - Video: checks VideoOutPath (or OutPath if VideoOutPath not set)
+//   - Both/Unknown: checks both OutPath and VideoOutPath (if different)
+func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, mediaFilter model.MediaType) ArtistPresenceIndex {
 	idx := ArtistPresenceIndex{
 		ArtistFolder:  helpers.Sanitise(artistName),
 		LocalFolders:  make(map[string]struct{}),
 		RemoteFolders: make(map[string]struct{}),
 	}
 
-	localArtistPath := filepath.Join(cfg.OutPath, idx.ArtistFolder)
-	if entries, err := os.ReadDir(localArtistPath); err == nil {
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
+	// Determine which path(s) to check based on media filter
+	pathsToCheck := []string{}
+
+	// For Unknown filter, check both paths (covers all content)
+	if mediaFilter == model.MediaTypeUnknown {
+		pathsToCheck = append(pathsToCheck, cfg.OutPath)
+		if cfg.VideoOutPath != "" && cfg.VideoOutPath != cfg.OutPath {
+			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
+		}
+	} else if mediaFilter == model.MediaTypeBoth {
+		// Both filter: check audio and video paths
+		pathsToCheck = append(pathsToCheck, cfg.OutPath)
+		if cfg.VideoOutPath != "" && cfg.VideoOutPath != cfg.OutPath {
+			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
+		}
+	} else if mediaFilter == model.MediaTypeAudio {
+		// Audio only: check OutPath
+		pathsToCheck = append(pathsToCheck, cfg.OutPath)
+	} else if mediaFilter == model.MediaTypeVideo {
+		// Video only: check VideoOutPath if set, otherwise OutPath
+		if cfg.VideoOutPath != "" {
+			pathsToCheck = append(pathsToCheck, cfg.VideoOutPath)
+		} else {
+			pathsToCheck = append(pathsToCheck, cfg.OutPath)
+		}
+	}
+
+	// Fallback: if no paths determined, default to OutPath
+	if len(pathsToCheck) == 0 {
+		pathsToCheck = append(pathsToCheck, cfg.OutPath)
+	}
+
+	// Build combined index from all relevant paths
+	for _, basePath := range pathsToCheck {
+		localArtistPath := filepath.Join(basePath, idx.ArtistFolder)
+		if entries, err := os.ReadDir(localArtistPath); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() {
+					continue
+				}
+				idx.LocalFolders[entry.Name()] = struct{}{}
 			}
-			idx.LocalFolders[entry.Name()] = struct{}{}
 		}
 	}
 

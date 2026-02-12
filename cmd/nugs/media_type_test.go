@@ -5,8 +5,10 @@ import "testing"
 func TestGetShowMediaType_EmptyProducts(t *testing.T) {
 	show := &AlbArtResp{Products: nil}
 	got := getShowMediaType(show)
-	if got != MediaTypeAudio {
-		t.Fatalf("expected MediaTypeAudio for empty Products, got %v", got)
+	// Empty products now returns MediaTypeBoth to be inclusive and avoid filtering
+	// out shows with incomplete metadata (see video.go:87-89)
+	if got != MediaTypeBoth {
+		t.Fatalf("expected MediaTypeBoth for empty Products, got %v", got)
 	}
 }
 

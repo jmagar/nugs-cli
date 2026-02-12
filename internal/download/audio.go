@@ -34,6 +34,7 @@ var trackFallback = map[int]int{
 	2: 5,
 	3: 2,
 	4: 3,
+	5: 1, // AAC fallback to ALAC
 }
 
 // WriteCounterWrite implements the io.Writer interface for WriteCounter.
@@ -65,7 +66,7 @@ func WriteCounterWrite(wc *model.WriteCounter, p []byte, deps *Deps) (int, error
 }
 
 // DownloadTrack downloads a single audio track file from the given URL.
-func DownloadTrack(trackPath, _url string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
+func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
 	if deps.WaitIfPausedOrCancelled != nil {
 		if err := deps.WaitIfPausedOrCancelled(); err != nil {
 			return err
@@ -76,7 +77,7 @@ func DownloadTrack(trackPath, _url string, onProgress func(downloaded, total, sp
 		return err
 	}
 	defer f.Close()
-	req, err := http.NewRequest(http.MethodGet, _url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, _url, nil)
 	if err != nil {
 		return err
 	}
@@ -147,6 +148,9 @@ func ParseHlsMaster(qual *model.Quality) error {
 		return err
 	}
 	master := playlist.(*m3u8.MasterPlaylist)
+	if len(master.Variants) == 0 {
+		return errors.New("HLS master playlist has no variants")
+	}
 	sort.Slice(master.Variants, func(x, y int) bool {
 		return master.Variants[x].Bandwidth > master.Variants[y].Bandwidth
 	})
@@ -204,6 +208,10 @@ func DecryptTrack(tempPath string, key, iv []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Verify data length is multiple of AES block size before decryption
+	if len(encData)%aes.BlockSize != 0 {
+		return nil, fmt.Errorf("encrypted data length %d is not multiple of AES block size %d", len(encData), aes.BlockSize)
+	}
 	ecb := cipher.NewCBCDecrypter(block, iv)
 	decrypted := make([]byte, len(encData))
 	ui.PrintInfo("Decrypting...")
@@ -226,7 +234,7 @@ func TsToAac(decData []byte, outPath, ffmpegNameStr string) error {
 }
 
 // HlsOnly downloads an HLS-only track (encrypted), decrypts it, and converts to AAC.
-func HlsOnly(trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
+func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
 	req, err := api.Client.Get(manUrl)
 	if err != nil {
 		return err
@@ -240,6 +248,14 @@ func HlsOnly(trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded
 		return err
 	}
 	media := playlist.(*m3u8.MediaPlaylist)
+
+	// Validate media playlist has segments and key before accessing
+	if len(media.Segments) == 0 {
+		return errors.New("HLS media playlist has no segments")
+	}
+	if media.Key == nil {
+		return errors.New("HLS media playlist has no encryption key")
+	}
 
 	manBase, q, err := GetManifestBase(manUrl)
 	if err != nil {
@@ -266,7 +282,7 @@ func HlsOnly(trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded
 	tempFile.Close()
 	defer os.Remove(tempPath)
 
-	err = DownloadTrack(tempPath, tsUrl, onProgress, printNewline, deps)
+	err = DownloadTrack(ctx, tempPath, tsUrl, onProgress, printNewline, deps)
 	if err != nil {
 		return err
 	}
@@ -332,13 +348,20 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			return err
 		}
 	} else {
-		for {
+		// Guard against infinite loop: max 10 fallback attempts
+		maxFallbacks := 10
+		for i := 0; i < maxFallbacks; i++ {
 			chosenQual = api.GetTrackQual(quals, wantFmt)
 			if chosenQual != nil {
 				break
 			}
 			// Fallback quality.
-			wantFmt = trackFallback[wantFmt]
+			nextFmt := trackFallback[wantFmt]
+			// Guard: if no fallback exists or fallback doesn't progress, break
+			if nextFmt == 0 || nextFmt == wantFmt {
+				break
+			}
+			wantFmt = nextFmt
 		}
 		// chosenQual is guaranteed non-nil after loop exit
 		if wantFmt != origWantFmt && origWantFmt != 4 {
@@ -363,7 +386,9 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 	if exists {
 		ui.PrintInfo(fmt.Sprintf("Track exists %s skipping", ui.SymbolArrow))
 		if progressBox != nil {
+			progressBox.Mu.Lock()
 			progressBox.SkippedTracks++
+			progressBox.Mu.Unlock()
 			// Tier 3: Set skip indicator message
 			skipMsg := fmt.Sprintf("Skipped track %d - already exists", trackNum)
 			progressBox.SetMessage(model.MessagePriorityStatus, skipMsg, 3*time.Second)
@@ -458,9 +483,9 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 	}
 
 	if isHlsOnly {
-		err = HlsOnly(trackPath, chosenQual.URL, cfg.FfmpegNameStr, showProgress, false, deps)
+		err = HlsOnly(ctx, trackPath, chosenQual.URL, cfg.FfmpegNameStr, showProgress, false, deps)
 	} else {
-		err = DownloadTrack(trackPath, chosenQual.URL, showProgress, false, deps)
+		err = DownloadTrack(ctx, trackPath, chosenQual.URL, showProgress, false, deps)
 	}
 	if err != nil {
 		ui.PrintError("Failed to download track")
@@ -474,8 +499,10 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		if stat, statErr := os.Stat(trackPath); statErr == nil {
 			trackSize = stat.Size()
 		}
+		progressBox.Mu.Lock()
 		progressBox.AccumulatedBytes += trackSize
 		progressBox.AccumulatedTracks++
+		progressBox.Mu.Unlock()
 	}
 
 	return nil
@@ -727,7 +754,9 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 					return err
 				}
 				// Track error count
+				progressBox.Mu.Lock()
 				progressBox.ErrorTracks++
+				progressBox.Mu.Unlock()
 				helpers.HandleErr("Track failed.", err, false)
 			}
 		}

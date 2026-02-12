@@ -31,7 +31,7 @@ func ReadCacheMeta() (*model.CacheMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	metaPath := filepath.Join(cacheDir, "catalog_meta.json")
+	metaPath := filepath.Join(cacheDir, "catalog-meta.json")
 
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
@@ -108,7 +108,7 @@ func WriteCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Dur
 			artistSet[item.ArtistID] = true
 		}
 
-		// Write catalog_meta.json atomically
+		// Write catalog-meta.json atomically
 		meta := model.CacheMeta{
 			LastUpdated:    time.Now(),
 			CacheVersion:   "v1.0.0",
@@ -117,7 +117,7 @@ func WriteCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Dur
 			ApiMethod:      "catalog.latest",
 			UpdateDuration: formatDurationFn(updateDuration),
 		}
-		metaPath := filepath.Join(cacheDir, "catalog_meta.json")
+		metaPath := filepath.Join(cacheDir, "catalog-meta.json")
 		metaData, err := json.MarshalIndent(meta, "", "  ")
 		if err != nil {
 			return fmt.Errorf("failed to marshal metadata: %w", err)

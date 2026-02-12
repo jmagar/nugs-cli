@@ -16,7 +16,8 @@ import (
 
 // Artist downloads all albums for an artist.
 func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
-	meta, err := api.GetArtistMeta(ctx, artistId)
+	// Use availType=2 to get complete catalog (both audio and video shows)
+	meta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err

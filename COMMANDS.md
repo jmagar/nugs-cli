@@ -103,10 +103,10 @@ nugs list artists shows <operator><number>
 
 Filter artists by number of shows. Operators: `>`, `<`, `>=`, `<=`, `=`
 
-```
-nugs list >100               # Artists with more than 100 shows
-nugs list <=50               # Artists with 50 or fewer shows
-nugs list =25                # Artists with exactly 25 shows
+```bash
+nugs list ">100"             # Artists with more than 100 shows
+nugs list "<=50"             # Artists with 50 or fewer shows
+nugs list "=25"              # Artists with exactly 25 shows
 ```
 
 ### List Artist Shows
@@ -197,7 +197,6 @@ nugs latest                  # Latest 15 additions
 nugs latest 50               # Latest 50 additions
 ```
 
-Note: Media type filters are not supported for `catalog latest` (data source lacks format details).
 
 ### Gap Detection
 

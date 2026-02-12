@@ -52,7 +52,7 @@ func WriteArtistMetaCache(artistID string, pages []*model.ArtistMeta) error {
 		CachedAt: time.Now(),
 		Pages:    pages,
 	}
-	data, err := json.MarshalIndent(cached, "", "  ")
+	data, err := json.Marshal(cached)
 	if err != nil {
 		return fmt.Errorf("failed to marshal artist cache: %w", err)
 	}

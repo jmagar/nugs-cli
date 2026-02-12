@@ -73,6 +73,10 @@ func getTrackQual(quals []*Quality, wantFmt int) *Quality {
 // getArtistMetaCached bridges api and cache packages.
 // It stays in root because it imports both internal/api and internal/cache.
 func getArtistMetaCached(ctx context.Context, artistID string, ttl time.Duration) (pages []*ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error) {
+	// Catalog commands need ALL shows (both audio and video) for accurate analysis.
+	// Using availType=2 ensures we get the full show list from the API.
+	const availType = 2 // Fetch with video availability to get complete catalog
+
 	cachedPages, cachedAt, readErr := readArtistMetaCache(artistID)
 	if readErr == nil && len(cachedPages) > 0 {
 		if time.Since(cachedAt) <= ttl {
@@ -80,7 +84,7 @@ func getArtistMetaCached(ctx context.Context, artistID string, ttl time.Duration
 		}
 	}
 
-	freshPages, fetchErr := getArtistMeta(ctx, artistID)
+	freshPages, fetchErr := api.GetArtistMetaWithAvailType(ctx, artistID, availType)
 	if fetchErr == nil {
 		_ = writeArtistMetaCache(artistID, freshPages)
 		return freshPages, false, false, nil

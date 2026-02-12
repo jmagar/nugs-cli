@@ -383,8 +383,11 @@ func RunRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, up
 	go consume(stdoutPipe, &wg)
 	go consume(stderrPipe, &wg)
 
-	waitErr := cmd.Wait()
+	// Wait for pipe readers to finish first (per Go docs requirement)
 	wg.Wait()
+
+	// Then wait for process to exit
+	waitErr := cmd.Wait()
 	if waitErr != nil && diagnostics.Len() > 0 {
 		return fmt.Errorf("%w\n%s", waitErr, strings.TrimSpace(diagnostics.String()))
 	}
@@ -421,7 +424,10 @@ func RemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool,
 	remoteDest := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, isVideo)
 	fullPath := remoteDest + "/" + remotePath
 
-	cmd := exec.Command("rclone", "lsf", fullPath)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "rclone", "lsf", fullPath)
 	err := cmd.Run()
 
 	if err != nil {

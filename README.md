@@ -445,7 +445,7 @@ nugs gaps 1125 video --ids-only  # Video gaps only
 nugs gaps 1125 audio --ids-only | xargs -n1 nugs grab
 
 # Download all video gaps
-nugs gaps 1125 video --ids-only | xargs -n1 nugs grab video
+nugs gaps 1125 video --ids-only | xargs -I {} nugs grab {} video
 
 # Download first 10 gaps
 nugs gaps 1125 --ids-only | head -10 | xargs -n1 nugs grab

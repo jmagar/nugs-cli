@@ -448,7 +448,8 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 		fmt.Printf("Fetching shows at venues matching \"%s\"...\n", venueFilter)
 	}
 
-	allMeta, err := api.GetArtistMeta(ctx, artistId)
+	// Use availType=2 to get complete catalog (both audio and video shows)
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -602,7 +603,8 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 		fmt.Printf("Fetching latest %d shows...\n", limit)
 	}
 
-	allMeta, err := api.GetArtistMeta(ctx, artistId)
+	// Use availType=2 to get complete catalog (both audio and video shows)
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err

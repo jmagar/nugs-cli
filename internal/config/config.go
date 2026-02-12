@@ -413,6 +413,7 @@ func ReadConfig() (*model.Config, error) {
 	}
 
 	configPaths := []string{
+		"./config.json", // Local config (highest priority)
 		filepath.Join(homeDir, ".nugs", "config.json"),
 		filepath.Join(homeDir, ".config", "nugs", "config.json"),
 	}

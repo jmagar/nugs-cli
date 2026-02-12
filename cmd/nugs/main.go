@@ -70,7 +70,7 @@ func bootstrap() (*Config, string) {
 			if i+1 >= len(os.Args) {
 				fmt.Println("Error: --json flag requires a level argument (minimal, standard, extended, raw)")
 				printInfo("Usage: nugs list artists --json <level>")
-				os.Exit(0)
+				os.Exit(1)
 			}
 			jsonLevel = os.Args[i+1]
 			os.Args = append(os.Args[:i], os.Args[i+2:]...)
@@ -81,7 +81,7 @@ func bootstrap() (*Config, string) {
 	// Validate json level
 	if jsonLevel != "" && jsonLevel != JSONLevelMinimal && jsonLevel != JSONLevelStandard && jsonLevel != JSONLevelExtended && jsonLevel != JSONLevelRaw {
 		fmt.Printf("Invalid JSON level: %s. Valid options: %s, %s, %s, %s\n", jsonLevel, JSONLevelMinimal, JSONLevelStandard, JSONLevelExtended, JSONLevelRaw)
-		os.Exit(0)
+		os.Exit(1)
 	}
 
 	cfg, err := parseCfg()
@@ -188,7 +188,7 @@ func run(cfg *Config, jsonLevel string) {
 	}
 
 	// Handle "<artistID> latest/full" shorthand
-	if len(cfg.Urls) == 2 {
+	if len(cfg.Urls) == 2 || len(cfg.Urls) == 3 {
 		if handled := handleArtistShorthand(cfg); handled {
 			return
 		}

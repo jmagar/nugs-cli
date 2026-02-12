@@ -80,6 +80,14 @@ func GetShowMediaType(show *model.AlbArtResp) model.MediaType {
 		}
 	}
 
+	// If both format lists are empty, we can't determine the media type.
+	// However, since catalog.containersAll with availType includes shows based on availability,
+	// if we have no format data, assume the show has both audio and video to be inclusive.
+	// This ensures shows with incomplete metadata aren't incorrectly filtered out.
+	if len(show.Products) == 0 && len(show.ProductFormatList) == 0 {
+		return model.MediaTypeBoth
+	}
+
 	if hasVideo && hasAudio {
 		return model.MediaTypeBoth
 	}
@@ -139,8 +147,11 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	})
 	if wantRes == "2160" {
 		variant := master.Variants[0]
-		varRes := strings.SplitN(variant.Resolution, "x", 2)[1]
-		varRes = FormatRes(varRes)
+		parts := strings.SplitN(variant.Resolution, "x", 2)
+		if len(parts) != 2 {
+			return nil, "", fmt.Errorf("invalid resolution format: %s", variant.Resolution)
+		}
+		varRes := FormatRes(parts[1])
 		return variant, varRes, nil
 	}
 	// Guard against infinite loop: max 10 fallback attempts
@@ -155,8 +166,12 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 		if nextRes == "" || nextRes == wantRes {
 			if len(master.Variants) > 0 {
 				wantVariant = master.Variants[0] // Highest bandwidth variant
-				wantRes = strings.SplitN(wantVariant.Resolution, "x", 2)[1]
-				wantRes = FormatRes(wantRes)
+				parts := strings.SplitN(wantVariant.Resolution, "x", 2)
+				if len(parts) == 2 {
+					wantRes = FormatRes(parts[1])
+				} else {
+					wantRes = "unknown"
+				}
 			}
 			break
 		}
@@ -165,8 +180,12 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	// Final fallback: if still no variant after max attempts, use highest available
 	if wantVariant == nil && len(master.Variants) > 0 {
 		wantVariant = master.Variants[0]
-		wantRes = strings.SplitN(wantVariant.Resolution, "x", 2)[1]
-		wantRes = FormatRes(wantRes)
+		parts := strings.SplitN(wantVariant.Resolution, "x", 2)
+		if len(parts) == 2 {
+			wantRes = FormatRes(parts[1])
+		} else {
+			wantRes = "unknown"
+		}
 	}
 	if wantRes != origWantRes {
 		ui.PrintInfo("Unavailable in your chosen format")
@@ -242,7 +261,10 @@ func DownloadVideoFile(videoPath, _url string, onProgress func(downloaded, total
 
 	if startByte > 0 {
 		fmt.Printf("TS already exists locally, resuming from byte %d...\n", startByte)
-		startByte = 0
+		// Seek to the correct position before writing resumed data
+		if _, err := f.Seek(int64(startByte), io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to resume position: %w", err)
+		}
 	}
 
 	totalBytes := do.ContentLength
@@ -355,15 +377,18 @@ func GetDuration(tsPath, ffmpegNameStr string) (int, error) {
 	cmd.Stderr = &errBuffer
 	// Return code's always 1 as we're not providing any output files.
 	err := cmd.Run()
-	if err.Error() != "exit status 1" {
-		return 0, err
+	// Check error properly - err can be nil on success
+	if err != nil && err.Error() != "exit status 1" {
+		return 0, fmt.Errorf("ffmpeg execution failed: %w", err)
 	}
 	errStr := errBuffer.String()
 	ok := strings.HasSuffix(
 		strings.TrimSpace(errStr), "At least one output file must be specified")
 	if !ok {
-		errString := fmt.Sprintf("%s\n%s", err, errStr)
-		return 0, errors.New(errString)
+		if err != nil {
+			return 0, fmt.Errorf("ffmpeg error: %s\n%s", err.Error(), errStr)
+		}
+		return 0, fmt.Errorf("unexpected ffmpeg output: %s", errStr)
 	}
 	dur := ExtractDuration(errStr)
 	if dur == "" {
@@ -484,8 +509,11 @@ func GetLstreamContainer(containers []*model.AlbArtResp) *model.AlbArtResp {
 }
 
 // ParseLstreamMeta parses livestream metadata into album metadata format.
-func ParseLstreamMeta(_meta *model.ArtistMeta) *model.AlbumMeta {
+func ParseLstreamMeta(_meta *model.ArtistMeta) (*model.AlbumMeta, error) {
 	meta := GetLstreamContainer(_meta.Response.Containers)
+	if meta == nil {
+		return nil, errors.New("no available livestream container found")
+	}
 	parsed := &model.AlbumMeta{
 		Response: &model.AlbArtResp{
 			ArtistName:        meta.ArtistName,
@@ -496,7 +524,7 @@ func ParseLstreamMeta(_meta *model.ArtistMeta) *model.AlbumMeta {
 			ProductFormatList: meta.ProductFormatList,
 		},
 	}
-	return parsed
+	return parsed, nil
 }
 
 // PrepareVideoProgressBox creates or reuses a progress box for video downloads.

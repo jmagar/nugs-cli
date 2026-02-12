@@ -80,7 +80,7 @@ func Auth(ctx context.Context, email, pwd string) (string, error) {
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return "", errors.New(do.Status)
+		return "", fmt.Errorf("API authentication failed: %s", do.Status)
 	}
 	var obj model.Auth
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -104,7 +104,7 @@ func GetUserInfo(ctx context.Context, token string) (string, error) {
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return "", errors.New(do.Status)
+		return "", fmt.Errorf("API GetUserInfo failed: %s", do.Status)
 	}
 	var obj model.UserInfo
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -128,7 +128,7 @@ func GetSubInfo(ctx context.Context, token string) (*model.SubInfo, error) {
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return nil, errors.New(do.Status)
+		return nil, fmt.Errorf("API GetSubInfo failed: %s", do.Status)
 	}
 	var obj model.SubInfo
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -183,7 +183,7 @@ func GetAlbumMeta(ctx context.Context, albumId string) (*model.AlbumMeta, error)
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return nil, errors.New(do.Status)
+		return nil, fmt.Errorf("API GetAlbumMeta failed: %s", do.Status)
 	}
 	var obj model.AlbumMeta
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -224,7 +224,7 @@ func GetPlistMeta(ctx context.Context, plistId, email, legacyToken string, cat b
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return nil, errors.New(do.Status)
+		return nil, fmt.Errorf("API GetPlistMeta failed: %s", do.Status)
 	}
 	var obj model.PlistMeta
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -251,7 +251,7 @@ func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return nil, errors.New(do.Status)
+		return nil, fmt.Errorf("API GetLatestCatalog failed: %s", do.Status)
 	}
 	var obj model.LatestCatalogResp
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -284,7 +284,7 @@ func getArtistMetaByAvailType(ctx context.Context, artistId string, availType in
 		}
 		if do.StatusCode != http.StatusOK {
 			do.Body.Close()
-			return nil, errors.New(do.Status)
+			return nil, fmt.Errorf("API getArtistMetaByAvailType failed: %s", do.Status)
 		}
 		var obj model.ArtistMeta
 		err = json.NewDecoder(do.Body).Decode(&obj)
@@ -329,7 +329,7 @@ func GetArtistList(ctx context.Context) (*model.ArtistListResp, error) {
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return nil, errors.New(do.Status)
+		return nil, fmt.Errorf("API GetArtistList failed: %s", do.Status)
 	}
 	var obj model.ArtistListResp
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -359,7 +359,7 @@ func GetPurchasedManURL(ctx context.Context, skuID int, showID, userID, uguID st
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return "", errors.New(do.Status)
+		return "", fmt.Errorf("API GetPurchasedManURL failed: %s", do.Status)
 	}
 	var obj model.PurchasedManResp
 	err = json.NewDecoder(do.Body).Decode(&obj)
@@ -398,7 +398,7 @@ func GetStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams
 	}
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK {
-		return "", errors.New(do.Status)
+		return "", fmt.Errorf("API GetStreamMeta failed: %s", do.Status)
 	}
 	var obj model.StreamMeta
 	err = json.NewDecoder(do.Body).Decode(&obj)
