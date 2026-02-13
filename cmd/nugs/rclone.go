@@ -145,6 +145,6 @@ func remotePathExists(remotePath string, cfg *Config, isVideo bool) (bool, error
 	return rclone.RemotePathExists(remotePath, cfg, isVideo)
 }
 
-func listRemoteArtistFolders(artistFolder string, cfg *Config) (map[string]struct{}, error) {
-	return rclone.ListRemoteArtistFolders(artistFolder, cfg)
+func listRemoteArtistFolders(artistFolder string, cfg *Config, isVideo bool) (map[string]struct{}, error) {
+	return rclone.ListRemoteArtistFolders(artistFolder, cfg, isVideo)
 }

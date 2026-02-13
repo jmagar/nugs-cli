@@ -64,17 +64,28 @@ func IsLikelyLivestreamSegments(segURLs []string) (bool, error) {
 }
 
 // ParseTimestamps converts date strings to Unix timestamps.
-func ParseTimestamps(start, end string) (string, string) {
-	startTime, _ := time.Parse(Layout, start)
-	endTime, _ := time.Parse(Layout, end)
+// Returns an error if either timestamp cannot be parsed.
+func ParseTimestamps(start, end string) (string, string, error) {
+	startTime, err := time.Parse(Layout, start)
+	if err != nil {
+		return "", "", errors.New("failed to parse start timestamp: " + err.Error())
+	}
+	endTime, err := time.Parse(Layout, end)
+	if err != nil {
+		return "", "", errors.New("failed to parse end timestamp: " + err.Error())
+	}
 	parsedStart := strconv.FormatInt(startTime.Unix(), 10)
 	parsedEnd := strconv.FormatInt(endTime.Unix(), 10)
-	return parsedStart, parsedEnd
+	return parsedStart, parsedEnd, nil
 }
 
 // ParseStreamParams builds stream parameters from user and subscription info.
-func ParseStreamParams(userId string, subInfo *model.SubInfo, isPromo bool) *model.StreamParams {
-	startStamp, endStamp := ParseTimestamps(subInfo.StartedAt, subInfo.EndsAt)
+// Returns nil and an error if timestamp parsing fails.
+func ParseStreamParams(userId string, subInfo *model.SubInfo, isPromo bool) (*model.StreamParams, error) {
+	startStamp, endStamp, err := ParseTimestamps(subInfo.StartedAt, subInfo.EndsAt)
+	if err != nil {
+		return nil, err
+	}
 	streamParams := &model.StreamParams{
 		SubscriptionID:          subInfo.LegacySubscriptionID,
 		SubCostplanIDAccessList: subInfo.Plan.PlanID,
@@ -87,10 +98,12 @@ func ParseStreamParams(userId string, subInfo *model.SubInfo, isPromo bool) *mod
 	} else {
 		streamParams.SubCostplanIDAccessList = subInfo.Plan.PlanID
 	}
-	return streamParams
+	return streamParams, nil
 }
 
 // CheckURL matches a URL against known Nugs.net patterns.
+// Returns the extracted ID and the pattern index.
+// Returns ("", -1) if no pattern matches the URL.
 func CheckURL(_url string) (string, int) {
 	for i, re := range compiledRegexes {
 		match := re.FindStringSubmatch(_url)
@@ -98,5 +111,5 @@ func CheckURL(_url string) (string, int) {
 			return match[1], i
 		}
 	}
-	return "", 0
+	return "", -1
 }

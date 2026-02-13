@@ -41,7 +41,7 @@ func NewConfigPathResolver(cfg *model.Config) PathResolver {
 // Sanitise cleans a filename by replacing invalid characters.
 func Sanitise(filename string) string {
 	san := sanRegex.ReplaceAllString(filename, "_")
-	return strings.TrimSuffix(san, "	")
+	return strings.TrimSpace(san)
 }
 
 // BuildAlbumFolderName constructs a sanitized folder name for an album

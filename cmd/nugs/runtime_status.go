@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/jmagar/nugs-cli/internal/runtime"
+	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
 func getRuntimeStatusPath() (string, error)            { return runtime.GetRuntimeStatusPath() }
@@ -27,9 +28,9 @@ func printActiveRuntimeHint(currentPID int, currentCommand []string) {
 }
 
 func updateRuntimeProgress(label string, percentage int, speed, current, total string) {
-	runtime.UpdateRuntimeProgress(label, percentage, speed, current, total, int(runErrorCount.Load()), int(runWarningCount.Load()))
+	runtime.UpdateRuntimeProgress(label, percentage, speed, current, total, int(ui.RunErrorCount.Load()), int(ui.RunWarningCount.Load()))
 }
 
 func finalizeRuntimeStatus(state string) {
-	runtime.FinalizeRuntimeStatus(state, int(runErrorCount.Load()), int(runWarningCount.Load()))
+	runtime.FinalizeRuntimeStatus(state, int(ui.RunErrorCount.Load()), int(ui.RunWarningCount.Load()))
 }

@@ -752,8 +752,8 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 	return nil
 }
 
-// ResolveCatPlistId resolves a catalog playlist URL to its GUID.
-func ResolveCatPlistId(plistUrl string) (string, error) {
+// ResolveCatPlistID resolves a catalog playlist URL to its GUID.
+func ResolveCatPlistID(plistUrl string) (string, error) {
 	req, err := api.Client.Get(plistUrl)
 	if err != nil {
 		return "", err
@@ -780,7 +780,7 @@ func ResolveCatPlistId(plistUrl string) (string, error) {
 
 // CatalogPlist downloads a catalog playlist.
 func CatalogPlist(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
-	resolvedId, err := ResolveCatPlistId(plistId)
+	resolvedId, err := ResolveCatPlistID(plistId)
 	if err != nil {
 		fmt.Println("Failed to resolve playlist ID.")
 		return err

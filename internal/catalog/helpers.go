@@ -148,7 +148,12 @@ func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, 
 	}
 
 	if cfg.RcloneEnabled && deps.ListRemoteArtistFolders != nil {
-		remoteFolders, err := deps.ListRemoteArtistFolders(idx.ArtistFolder, cfg)
+		// For remote, determine isVideo based on mediaFilter:
+		// - Audio: check audio path (isVideo=false)
+		// - Video: check video path (isVideo=true)
+		// - Both/Unknown: check audio path (isVideo=false) as primary
+		isVideo := mediaFilter == model.MediaTypeVideo
+		remoteFolders, err := deps.ListRemoteArtistFolders(idx.ArtistFolder, cfg, isVideo)
 		if err != nil {
 			idx.RemoteListErr = err
 		} else {

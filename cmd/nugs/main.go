@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
 func init() {
@@ -225,7 +227,10 @@ func run(cfg *Config, jsonLevel string) {
 		planDesc = "no active subscription"
 	}
 	printSuccess(fmt.Sprintf("Signed in - %s%s%s", colorCyan, planDesc, colorReset))
-	streamParams := parseStreamParams(userId, subInfo, isPromo)
+	streamParams, err := parseStreamParams(userId, subInfo, isPromo)
+	if err != nil {
+		handleErr("Failed to parse subscription timestamps.", err, true)
+	}
 
 	// Handle "catalog gaps <artist_id> [...] fill" (requires auth)
 	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
@@ -597,8 +602,8 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 				return true
 			}
 		}
-		errorsBefore := runErrorCount.Load()
-		warningsBefore := runWarningCount.Load()
+		errorsBefore := ui.RunErrorCount.Load()
+		warningsBefore := ui.RunWarningCount.Load()
 		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
 		itemId, mediaType := checkUrl(_url)
 		if itemId == "" {
@@ -631,8 +636,8 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 			handleErr("Item failed.", itemErr, false)
 		}
 		completedItems++
-		itemErrors := runErrorCount.Load() - errorsBefore
-		itemWarnings := runWarningCount.Load() - warningsBefore
+		itemErrors := ui.RunErrorCount.Load() - errorsBefore
+		itemWarnings := ui.RunWarningCount.Load() - warningsBefore
 		itemStatus := fmt.Sprintf("Item %d/%d complete", albumNum+1, albumTotal)
 		if itemErr != nil || itemErrors > 0 {
 			itemStatus = fmt.Sprintf("Item %d/%d completed with issues", albumNum+1, albumTotal)
@@ -643,6 +648,6 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 	fmt.Println()
 	printSection("Run Summary")
 	printInfo(fmt.Sprintf("Completed %d/%d items", completedItems, albumTotal))
-	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", runErrorCount.Load(), runWarningCount.Load()))
+	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", ui.RunErrorCount.Load(), ui.RunWarningCount.Load()))
 	return false
 }

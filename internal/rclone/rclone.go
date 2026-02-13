@@ -354,6 +354,6 @@ func RemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool,
 }
 
 // ListRemoteArtistFolders returns show folder names under one artist folder on remote storage.
-func ListRemoteArtistFolders(artistFolder string, cfg *model.Config) (map[string]struct{}, error) {
-	return defaultStorageProvider.ListArtistFolders(context.Background(), cfg, artistFolder, false)
+func ListRemoteArtistFolders(artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error) {
+	return defaultStorageProvider.ListArtistFolders(context.Background(), cfg, artistFolder, isVideo)
 }

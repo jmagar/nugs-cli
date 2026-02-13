@@ -6,26 +6,14 @@ package main
 import (
 	"fmt"
 	"strings"
-	"sync/atomic"
 
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-// runErrorCount and runWarningCount track errors/warnings during a run.
-// These are atomic because PrintError/PrintWarning can be called from download goroutines.
-var runErrorCount atomic.Int64
-var runWarningCount atomic.Int64
-
 func printSuccess(msg string) { ui.PrintSuccess(msg) }
-func printError(msg string) {
-	runErrorCount.Add(1)
-	ui.PrintError(msg)
-}
-func printInfo(msg string) { ui.PrintInfo(msg) }
-func printWarning(msg string) {
-	runWarningCount.Add(1)
-	ui.PrintWarning(msg)
-}
+func printError(msg string)   { ui.PrintError(msg) }
+func printInfo(msg string)    { ui.PrintInfo(msg) }
+func printWarning(msg string) { ui.PrintWarning(msg) }
 func printDownload(msg string) { ui.PrintDownload(msg) }
 func printUpload(msg string)   { ui.PrintUpload(msg) }
 func printMusic(msg string)    { ui.PrintMusic(msg) }

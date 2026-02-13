@@ -15,11 +15,11 @@ func isLikelyLivestreamSegments(segURLs []string) (bool, error) {
 	return api.IsLikelyLivestreamSegments(segURLs)
 }
 
-func parseTimestamps(start, end string) (string, string) {
+func parseTimestamps(start, end string) (string, string, error) {
 	return api.ParseTimestamps(start, end)
 }
 
-func parseStreamParams(userId string, subInfo *SubInfo, isPromo bool) *StreamParams {
+func parseStreamParams(userId string, subInfo *SubInfo, isPromo bool) (*StreamParams, error) {
 	return api.ParseStreamParams(userId, subInfo, isPromo)
 }
 

@@ -18,7 +18,7 @@ type Deps struct {
 
 	// ListRemoteArtistFolders returns show folder names under an artist
 	// folder on remote storage.
-	ListRemoteArtistFolders func(artistFolder string, cfg *model.Config) (map[string]struct{}, error)
+	ListRemoteArtistFolders func(artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error)
 
 	// Album downloads a single album/show by container ID.
 	// Used by gap-fill to download missing shows.
