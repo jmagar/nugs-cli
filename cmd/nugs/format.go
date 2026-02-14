@@ -1,9 +1,10 @@
 package main
 
 // Format wrappers delegating to internal/ui during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
-// renderProgressBox and renderCompletionSummary remain here because they depend on
-// root-level runtime functions (updateRuntimeProgress) and color variables.
+// Migration plan: Phase 12 will move renderProgressBox and renderCompletionSummary
+// into internal/ui, eliminating the aliases below. These functions remain here
+// because they depend on root-level runtime callbacks (updateRuntimeProgress)
+// and package-level color variables from structs.go.
 
 import (
 	"fmt"
@@ -110,217 +111,231 @@ func calculateBoxWidth() int {
 	return boxWidth
 }
 
-// renderProgressBox draws the complete progress box with dual progress bars
+// progressSnapshot holds all state needed to render the progress box.
+type progressSnapshot struct {
+	ShowNumber      string
+	ShowTitle       string
+	CurrentPhase    string
+	TrackNumber     int
+	TrackTotal      int
+	TrackName       string
+	TrackFormat     string
+	DownloadPercent int
+	DownloadSpeed   string
+	DownloadETA     string
+	Downloaded      string
+	DownloadTotal   string
+	SpeedHistory    []float64
+	UploadPercent   int
+	UploadSpeed     string
+	UploadETA       string
+	Uploaded        string
+	UploadTotal     string
+	RcloneEnabled   bool
+	ShowDownloaded  string
+	ShowTotal       string
+	ShowPercent     int
+	DisplayMessage  string
+	LinesDrawn      int
+	// Batch state (nil if not in batch)
+	BatchCurrentAlbum int
+	BatchTotalAlbums  int
+	BatchComplete     int
+	BatchFailed       int
+	BatchElapsed      time.Duration
+	HasBatch          bool
+}
+
+// snapshotProgressState copies all fields from ProgressBoxState under lock.
+func snapshotProgressState(state *ProgressBoxState) (progressSnapshot, bool) {
+	state.Mu.Lock()
+	defer state.Mu.Unlock()
+
+	if !state.ShouldRenderLocked(time.Now()) {
+		return progressSnapshot{}, false
+	}
+
+	snap := progressSnapshot{
+		ShowNumber:      state.ShowNumber,
+		ShowTitle:       state.ShowTitle,
+		CurrentPhase:    state.CurrentPhase,
+		TrackNumber:     state.TrackNumber,
+		TrackTotal:      state.TrackTotal,
+		TrackName:       state.TrackName,
+		TrackFormat:     state.TrackFormat,
+		DownloadPercent: state.DownloadPercent,
+		DownloadSpeed:   state.DownloadSpeed,
+		DownloadETA:     state.DownloadETA,
+		Downloaded:      state.Downloaded,
+		DownloadTotal:   state.DownloadTotal,
+		UploadPercent:   state.UploadPercent,
+		UploadSpeed:     state.UploadSpeed,
+		UploadETA:       state.UploadETA,
+		Uploaded:        state.Uploaded,
+		UploadTotal:     state.UploadTotal,
+		RcloneEnabled:   state.RcloneEnabled,
+		ShowDownloaded:  state.ShowDownloaded,
+		ShowTotal:       state.ShowTotal,
+		ShowPercent:     state.ShowPercent,
+		DisplayMessage:  state.GetDisplayMessage(colorRed, colorYellow, colorCyan, colorReset, symbolCross, symbolWarning, symbolInfo),
+		LinesDrawn:      state.LinesDrawn,
+	}
+	// Copy speed history slice to avoid data race
+	if len(state.SpeedHistory) > 0 {
+		snap.SpeedHistory = make([]float64, len(state.SpeedHistory))
+		copy(snap.SpeedHistory, state.SpeedHistory)
+	}
+	if state.BatchState != nil {
+		state.BatchState.Validate()
+		snap.HasBatch = true
+		snap.BatchCurrentAlbum = state.BatchState.CurrentAlbum
+		snap.BatchTotalAlbums = state.BatchState.TotalAlbums
+		snap.BatchComplete = state.BatchState.Complete
+		snap.BatchFailed = state.BatchState.Failed
+		snap.BatchElapsed = time.Since(state.BatchState.StartTime)
+	}
+	return snap, true
+}
+
+// renderProgressBox draws the complete progress box with dual progress bars.
 func renderProgressBox(state *ProgressBoxState) {
 	if state == nil {
 		return
 	}
 
-	// Lock for reading state (released after we copy all values we need)
-	state.Mu.Lock()
-	if !state.ShouldRenderLocked(time.Now()) {
-		state.Mu.Unlock()
+	snap, ok := snapshotProgressState(state)
+	if !ok {
 		return
 	}
 
-	width := calculateBoxWidth() // Dynamic width based on terminal size (Tier 1 enhancement)
+	// All I/O below uses snap -- no lock held
+	width := calculateBoxWidth()
+	lineCount := renderProgressBoxFromSnapshot(snap, width)
 
-	// Clear previous box (move up and clear lines)
-	linesToClear := state.LinesDrawn
-	state.Mu.Unlock() // Release lock before I/O operations
-
-	if linesToClear > 0 {
-		for i := 0; i < linesToClear; i++ {
-			fmt.Print("\033[A\033[2K") // Move up one line and clear it
-		}
-	}
-
-	// Re-acquire lock to read all state for rendering
 	state.Mu.Lock()
-	defer state.Mu.Unlock()
+	state.LinesDrawn = lineCount
+	state.Mu.Unlock()
+}
 
-	lineCount := 0
+// renderProgressBoxFromSnapshot renders the progress box from a snapshot and returns the line count.
+func renderProgressBoxFromSnapshot(snap progressSnapshot, width int) int {
 	innerWidth := width - 2
 	contentWidth := width - 4
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
 	fitLine := func(line string) string {
-		return padRight(truncateWithEllipsis(line, contentWidth), innerWidth)
+		return fitLineForWidth(line, contentWidth, innerWidth)
 	}
 
-	// Top border with double lines
-	fmt.Printf("%s%s%s%s%s\n",
-		colorCyan, boxDoubleTopLeft,
-		strings.Repeat(boxDoubleHorizontal, width),
-		boxDoubleTopRight, colorReset)
+	// Clear previous box
+	if snap.LinesDrawn > 0 {
+		for i := 0; i < snap.LinesDrawn; i++ {
+			fmt.Print("\033[A\033[2K")
+		}
+	}
+
+	lineCount := 0
+
+	// Top border
+	fmt.Printf("%s%s%s%s%s\n", colorCyan, boxDoubleTopLeft, strings.Repeat(boxDoubleHorizontal, width), boxDoubleTopRight, colorReset)
 	lineCount++
 
-	// Batch header (Tier 4 enhancement) - only show if we're in a batch operation
-	if state.BatchState != nil {
-		batch := state.BatchState
-		batch.Validate() // Ensure batch counters are consistent before rendering
-		elapsed := time.Since(batch.StartTime)
-		batchHeader := fmt.Sprintf("  📦 Batch Progress: %d/%d albums │ Complete: %d │ Failed: %d │ Time: %s",
-			batch.CurrentAlbum, batch.TotalAlbums, batch.Complete, batch.Failed, formatDuration(elapsed))
-		fmt.Printf("%s%s%s %s %s%s%s\n",
-			colorPurple, boxVertical, colorReset,
-			fitLine(batchHeader),
-			colorPurple, boxVertical, colorReset)
-		lineCount++
-
-		// Separator line between batch and album
-		fmt.Printf("%s%s%s%s%s\n",
-			colorCyan, boxTeeLeft,
-			strings.Repeat(boxHorizontal, width),
-			boxTeeRight, colorReset)
+	// Batch header
+	if snap.HasBatch {
+		batchHeader := fmt.Sprintf("  \U0001f4e6 Batch Progress: %d/%d albums │ Complete: %d │ Failed: %d │ Time: %s",
+			snap.BatchCurrentAlbum, snap.BatchTotalAlbums, snap.BatchComplete, snap.BatchFailed, formatDuration(snap.BatchElapsed))
+		lineCount += printBoxLine(fitLine(batchHeader), colorPurple, innerWidth)
+		fmt.Printf("%s%s%s%s%s\n", colorCyan, boxTeeLeft, strings.Repeat(boxHorizontal, width), boxTeeRight, colorReset)
 		lineCount++
 	}
 
-	// Show header line (download number and date)
-	header := fmt.Sprintf("  %s %s", symbolDownload, state.ShowNumber)
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		fitLine(header),
-		colorCyan, boxVertical, colorReset)
+	// Show header and title
+	lineCount += printBoxLine(fitLine(fmt.Sprintf("  %s %s", symbolDownload, snap.ShowNumber)), colorCyan, innerWidth)
+	lineCount += printBoxLine(fitLine(fmt.Sprintf("  %s", snap.ShowTitle)), colorCyan, innerWidth)
+
+	// Separator
+	fmt.Printf("%s\u2560%s\u2563%s\n", colorCyan, strings.Repeat(boxDoubleHorizontal, width), colorReset)
 	lineCount++
 
-	// Show title line (artist - venue, location)
-	titleLine := fmt.Sprintf("  %s", state.ShowTitle)
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		fitLine(titleLine),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
+	lineCount += printEmptyBoxLine(innerWidth)
 
-	// Middle separator with double lines
-	fmt.Printf("%s%s%s%s%s\n",
-		colorCyan, "╠",
-		strings.Repeat(boxDoubleHorizontal, width),
-		"╣", colorReset)
-	lineCount++
-
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
-
-	// Track info line OR upload phase indicator
-	var infoLine string
-	if state.CurrentPhase == model.PhaseUpload {
-		infoLine = fmt.Sprintf("  ⬆ Uploading to remote storage...")
+	// Track info or upload phase
+	if snap.CurrentPhase == model.PhaseUpload {
+		lineCount += printBoxLine(fitLine("  \u2b06 Uploading to remote storage..."), colorCyan, innerWidth)
 	} else {
-		infoLine = fmt.Sprintf("  %s Track %d/%d: %s - %s",
-			symbolDownload, state.TrackNumber, state.TrackTotal, state.TrackName, state.TrackFormat)
-	}
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		fitLine(infoLine),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
-
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
-
-	// Download progress bar with ETA and sparkline
-	dlBar := buildProgressBar(state.DownloadPercent, 30, colorGreen)
-	sparkline := generateSparkline(state.SpeedHistory, 7)
-	dlLine := ""
-	if state.DownloadETA != "" {
-		if sparkline != "" {
-			dlLine = fmt.Sprintf("  Download [%s] %3d%% @ %s/s %s │ ETA %s",
-				dlBar, state.DownloadPercent, state.DownloadSpeed, sparkline, state.DownloadETA)
-		} else {
-			dlLine = fmt.Sprintf("  Download [%s] %3d%% @ %s/s │ ETA %s",
-				dlBar, state.DownloadPercent, state.DownloadSpeed, state.DownloadETA)
-		}
-	} else {
-		if sparkline != "" {
-			dlLine = fmt.Sprintf("  Download [%s] %3d%% @ %s/s %s │ %s/%s",
-				dlBar, state.DownloadPercent, state.DownloadSpeed, sparkline, state.Downloaded, state.DownloadTotal)
-		} else {
-			dlLine = fmt.Sprintf("  Download [%s] %3d%% @ %s/s │ %s/%s",
-				dlBar, state.DownloadPercent, state.DownloadSpeed, state.Downloaded, state.DownloadTotal)
-		}
-	}
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		fitLine(dlLine),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
-
-	// Upload progress bar (only if rclone enabled) with ETA
-	if state.RcloneEnabled {
-		ulBar := buildProgressBar(state.UploadPercent, 30, colorBlue)
-		ulLine := ""
-		if state.UploadETA != "" {
-			ulLine = fmt.Sprintf("  Upload   [%s] %3d%% @ %s/s │ ETA %s",
-				ulBar, state.UploadPercent, state.UploadSpeed, state.UploadETA)
-		} else {
-			ulLine = fmt.Sprintf("  Upload   [%s] %3d%% @ %s/s │ %s/%s",
-				ulBar, state.UploadPercent, state.UploadSpeed, state.Uploaded, state.UploadTotal)
-		}
-		fmt.Printf("%s%s%s %s %s%s%s\n",
-			colorCyan, boxVertical, colorReset,
-			fitLine(ulLine),
-			colorCyan, boxVertical, colorReset)
-		lineCount++
+		lineCount += printBoxLine(fitLine(fmt.Sprintf("  %s Track %d/%d: %s - %s",
+			symbolDownload, snap.TrackNumber, snap.TrackTotal, snap.TrackName, snap.TrackFormat)), colorCyan, innerWidth)
 	}
 
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
+	lineCount += printEmptyBoxLine(innerWidth)
 
-	// Message line (errors, warnings, status) - Tier 3 enhancement
-	if msg := state.GetDisplayMessage(colorRed, colorYellow, colorCyan, colorReset, symbolCross, symbolWarning, symbolInfo); msg != "" {
-		msgLine := fmt.Sprintf("  %s", msg)
-		fmt.Printf("%s%s%s %s %s%s%s\n",
-			colorCyan, boxVertical, colorReset,
-			fitLine(msgLine),
-			colorCyan, boxVertical, colorReset)
-		lineCount++
+	// Download progress bar
+	lineCount += printBoxLine(fitLine(buildDownloadLine(snap)), colorCyan, innerWidth)
 
-		// Empty line after message for spacing
-		fmt.Printf("%s%s%s %s %s%s%s\n",
-			colorCyan, boxVertical, colorReset,
-			strings.Repeat(" ", innerWidth),
-			colorCyan, boxVertical, colorReset)
-		lineCount++
+	// Upload progress bar (only if rclone enabled)
+	if snap.RcloneEnabled {
+		lineCount += printBoxLine(fitLine(buildUploadLine(snap)), colorCyan, innerWidth)
 	}
 
-	// Show progress line
+	lineCount += printEmptyBoxLine(innerWidth)
+
+	// Message line
+	if snap.DisplayMessage != "" {
+		lineCount += printBoxLine(fitLine(fmt.Sprintf("  %s", snap.DisplayMessage)), colorCyan, innerWidth)
+		lineCount += printEmptyBoxLine(innerWidth)
+	}
+
+	// Show progress
 	showLine := fmt.Sprintf("  Show Progress: Track %02d/%02d │ %s/%s total (%d%%)",
-		state.TrackNumber, state.TrackTotal, state.ShowDownloaded, state.ShowTotal, state.ShowPercent)
+		snap.TrackNumber, snap.TrackTotal, snap.ShowDownloaded, snap.ShowTotal, snap.ShowPercent)
+	lineCount += printBoxLine(fitLine(showLine), colorCyan, innerWidth)
+
+	lineCount += printEmptyBoxLine(innerWidth)
+
+	// Bottom border
+	fmt.Printf("%s%s%s%s%s\n", colorCyan, boxDoubleBottomLeft, strings.Repeat(boxDoubleHorizontal, width), boxDoubleBottomRight, colorReset)
+	lineCount++
+
+	return lineCount
+}
+
+// printBoxLine prints a single content line inside the box, returns 1.
+func printBoxLine(content, borderColor string, innerWidth int) int {
 	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		fitLine(showLine),
+		borderColor, boxVertical, colorReset,
+		content,
 		colorCyan, boxVertical, colorReset)
-	lineCount++
+	return 1
+}
 
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
+// buildDownloadLine constructs the download progress bar string.
+func buildDownloadLine(snap progressSnapshot) string {
+	dlBar := buildProgressBar(snap.DownloadPercent, 30, colorGreen)
+	sparkline := generateSparkline(snap.SpeedHistory, 7)
 
-	// Bottom border with double lines
-	fmt.Printf("%s%s%s%s%s\n",
-		colorCyan, boxDoubleBottomLeft,
-		strings.Repeat(boxDoubleHorizontal, width),
-		boxDoubleBottomRight, colorReset)
-	lineCount++
+	sparkPart := ""
+	if sparkline != "" {
+		sparkPart = " " + sparkline
+	}
 
-	state.LinesDrawn = lineCount
+	if snap.DownloadETA != "" {
+		return fmt.Sprintf("  Download [%s] %3d%% @ %s/s%s │ ETA %s",
+			dlBar, snap.DownloadPercent, snap.DownloadSpeed, sparkPart, snap.DownloadETA)
+	}
+	return fmt.Sprintf("  Download [%s] %3d%% @ %s/s%s │ %s/%s",
+		dlBar, snap.DownloadPercent, snap.DownloadSpeed, sparkPart, snap.Downloaded, snap.DownloadTotal)
+}
+
+// buildUploadLine constructs the upload progress bar string.
+func buildUploadLine(snap progressSnapshot) string {
+	ulBar := buildProgressBar(snap.UploadPercent, 30, colorBlue)
+	if snap.UploadETA != "" {
+		return fmt.Sprintf("  Upload   [%s] %3d%% @ %s/s │ ETA %s",
+			ulBar, snap.UploadPercent, snap.UploadSpeed, snap.UploadETA)
+	}
+	return fmt.Sprintf("  Upload   [%s] %3d%% @ %s/s │ %s/%s",
+		ulBar, snap.UploadPercent, snap.UploadSpeed, snap.Uploaded, snap.UploadTotal)
 }
 
 // buildProgressBar creates a colored progress bar string
@@ -429,25 +444,62 @@ func generateSparkline(values []float64, maxWidth int) string {
 	return sparkline.String()
 }
 
+// completionSnapshot holds all state needed to render the completion summary.
+type completionSnapshot struct {
+	ShowTitle        string
+	AccumulatedTracks int
+	TrackTotal       int
+	ShowTotal        string
+	TotalDuration    time.Duration
+	AccumulatedBytes int64
+	SkippedTracks    int
+	ErrorTracks      int
+	RcloneEnabled    bool
+	UploadDuration   time.Duration
+	UploadTotal      string
+	LinesDrawn       int
+}
+
 // renderCompletionSummary displays final summary when all tracks complete
 func renderCompletionSummary(state *ProgressBoxState) {
-	// Lock to read final state
+	// Snapshot all state under a single lock acquisition
 	state.Mu.Lock()
-	defer state.Mu.Unlock()
+	snap := completionSnapshot{
+		ShowTitle:         state.ShowTitle,
+		AccumulatedTracks: state.AccumulatedTracks,
+		TrackTotal:        state.TrackTotal,
+		ShowTotal:         state.ShowTotal,
+		TotalDuration:     state.TotalDuration,
+		AccumulatedBytes:  state.AccumulatedBytes,
+		SkippedTracks:     state.SkippedTracks,
+		ErrorTracks:       state.ErrorTracks,
+		RcloneEnabled:     state.RcloneEnabled,
+		UploadDuration:    state.UploadDuration,
+		UploadTotal:       state.UploadTotal,
+		LinesDrawn:        state.LinesDrawn,
+	}
+	state.Mu.Unlock()
 
-	width := calculateBoxWidth() // Match progress box width
+	// All I/O below uses snap -- no lock held
+	width := calculateBoxWidth()
+	lineCount := renderCompletionBox(snap, width)
+
+	state.Mu.Lock()
+	state.LinesDrawn = lineCount
+	state.Mu.Unlock()
+}
+
+// renderCompletionBox renders the completion summary box and returns the line count.
+func renderCompletionBox(snap completionSnapshot, width int) int {
 	innerWidth := width - 2
 	contentWidth := width - 4
 	if contentWidth < 1 {
 		contentWidth = 1
 	}
-	fitLine := func(line string) string {
-		return padRight(truncateWithEllipsis(line, contentWidth), innerWidth)
-	}
 
 	// Clear previous box
-	if state.LinesDrawn > 0 {
-		for i := 0; i < state.LinesDrawn; i++ {
+	if snap.LinesDrawn > 0 {
+		for i := 0; i < snap.LinesDrawn; i++ {
 			fmt.Print("\033[A\033[2K")
 		}
 	}
@@ -461,92 +513,46 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		boxDoubleTopRight, colorReset)
 	lineCount++
 
-	// Header: COMPLETED (change if upload was involved)
+	// Header
 	headerText := "DOWNLOAD COMPLETE"
-	if state.RcloneEnabled && state.UploadDuration > 0 {
+	if snap.RcloneEnabled && snap.UploadDuration > 0 {
 		headerText = "COMPLETE"
 	}
 	header := fmt.Sprintf("  %s %s", symbolCheck, headerText)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		fitLine(header),
+		fitLineForWidth(header, contentWidth, innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
 	// Show title
-	titleLine := fmt.Sprintf("  %s", state.ShowTitle)
+	titleLine := fmt.Sprintf("  %s", snap.ShowTitle)
 	fmt.Printf("%s%s%s %s %s%s%s\n",
 		colorCyan, boxVertical, colorReset,
-		fitLine(titleLine),
+		fitLineForWidth(titleLine, contentWidth, innerWidth),
 		colorCyan, boxVertical, colorReset)
 	lineCount++
 
 	// Separator
 	fmt.Printf("%s%s%s%s%s\n",
-		colorCyan, "╠",
+		colorCyan, "\u2560",
 		strings.Repeat(boxDoubleHorizontal, width),
-		"╣", colorReset)
+		"\u2563", colorReset)
 	lineCount++
 
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
+	lineCount += printEmptyBoxLine(innerWidth)
 
 	// Stats lines
-	completedTracks := state.AccumulatedTracks
-	stats := []string{
-		fmt.Sprintf("  Tracks Downloaded:  %d/%d", completedTracks, state.TrackTotal),
-		fmt.Sprintf("  Total Size:         %s", state.ShowTotal),
-		fmt.Sprintf("  Duration:           %s", formatDuration(state.TotalDuration)),
-	}
-
-	// Add skipped/error stats if any
-	if state.SkippedTracks > 0 {
-		stats = append(stats, fmt.Sprintf("  Skipped:            %d", state.SkippedTracks))
-	}
-	if state.ErrorTracks > 0 {
-		stats = append(stats, fmt.Sprintf("  Errors:             %d", state.ErrorTracks))
-	}
-
-	// Calculate average speed if duration > 0
-	if state.TotalDuration.Seconds() > 0 {
-		avgSpeed := float64(state.AccumulatedBytes) / state.TotalDuration.Seconds()
-		stats = append(stats, fmt.Sprintf("  Avg Speed:          %s/s", humanize.Bytes(uint64(avgSpeed))))
-	}
-
-	// Add upload stats if rclone was enabled and upload completed
-	if state.RcloneEnabled && state.UploadDuration > 0 {
-		stats = append(stats, "") // Empty line separator
-		stats = append(stats, fmt.Sprintf("  Upload Size:        %s", state.UploadTotal))
-		stats = append(stats, fmt.Sprintf("  Upload Duration:    %s", formatDuration(state.UploadDuration)))
-		// Only calculate speed if duration is at least 1ms (prevents division by zero and instant upload issues)
-		if state.UploadDuration.Seconds() >= 0.001 {
-			uploadBytes := parseHumanizedBytes(state.UploadTotal)
-			// Only show speed if we have valid size data
-			if uploadBytes > 0 {
-				uploadAvgSpeed := float64(uploadBytes) / state.UploadDuration.Seconds()
-				stats = append(stats, fmt.Sprintf("  Upload Avg Speed:   %s/s", humanize.Bytes(uint64(uploadAvgSpeed))))
-			}
-		}
-	}
-
+	stats := buildCompletionStats(snap)
 	for _, stat := range stats {
 		fmt.Printf("%s%s%s %s %s%s%s\n",
 			colorCyan, boxVertical, colorReset,
-			fitLine(stat),
+			fitLineForWidth(stat, contentWidth, innerWidth),
 			colorCyan, boxVertical, colorReset)
 		lineCount++
 	}
 
-	// Empty line
-	fmt.Printf("%s%s%s %s %s%s%s\n",
-		colorCyan, boxVertical, colorReset,
-		strings.Repeat(" ", innerWidth),
-		colorCyan, boxVertical, colorReset)
-	lineCount++
+	lineCount += printEmptyBoxLine(innerWidth)
 
 	// Bottom border
 	fmt.Printf("%s%s%s%s%s\n",
@@ -555,5 +561,59 @@ func renderCompletionSummary(state *ProgressBoxState) {
 		boxDoubleBottomRight, colorReset)
 	lineCount++
 
-	state.LinesDrawn = lineCount
+	return lineCount
+}
+
+// buildCompletionStats constructs the stats lines for the completion summary.
+func buildCompletionStats(snap completionSnapshot) []string {
+	stats := []string{
+		fmt.Sprintf("  Tracks Downloaded:  %d/%d", snap.AccumulatedTracks, snap.TrackTotal),
+		fmt.Sprintf("  Total Size:         %s", snap.ShowTotal),
+		fmt.Sprintf("  Duration:           %s", formatDuration(snap.TotalDuration)),
+	}
+
+	if snap.SkippedTracks > 0 {
+		stats = append(stats, fmt.Sprintf("  Skipped:            %d", snap.SkippedTracks))
+	}
+	if snap.ErrorTracks > 0 {
+		stats = append(stats, fmt.Sprintf("  Errors:             %d", snap.ErrorTracks))
+	}
+	if shouldCalculateSpeed(snap.TotalDuration, snap.AccumulatedBytes) {
+		avgSpeed := float64(snap.AccumulatedBytes) / snap.TotalDuration.Seconds()
+		stats = append(stats, fmt.Sprintf("  Avg Speed:          %s/s", humanize.Bytes(uint64(avgSpeed))))
+	}
+
+	if snap.RcloneEnabled && snap.UploadDuration > 0 {
+		stats = append(stats, "")
+		stats = append(stats, fmt.Sprintf("  Upload Size:        %s", snap.UploadTotal))
+		stats = append(stats, fmt.Sprintf("  Upload Duration:    %s", formatDuration(snap.UploadDuration)))
+		if snap.UploadDuration.Seconds() >= 0.001 {
+			uploadBytes := parseHumanizedBytes(snap.UploadTotal)
+			if uploadBytes > 0 {
+				uploadAvgSpeed := float64(uploadBytes) / snap.UploadDuration.Seconds()
+				stats = append(stats, fmt.Sprintf("  Upload Avg Speed:   %s/s", humanize.Bytes(uint64(uploadAvgSpeed))))
+			}
+		}
+	}
+
+	return stats
+}
+
+// fitLineForWidth truncates and pads a line for box rendering.
+func fitLineForWidth(line string, contentWidth, innerWidth int) string {
+	return padRight(truncateWithEllipsis(line, contentWidth), innerWidth)
+}
+
+// printEmptyBoxLine prints an empty line inside the box and returns 1.
+func printEmptyBoxLine(innerWidth int) int {
+	fmt.Printf("%s%s%s %s %s%s%s\n",
+		colorCyan, boxVertical, colorReset,
+		strings.Repeat(" ", innerWidth),
+		colorCyan, boxVertical, colorReset)
+	return 1
+}
+
+// shouldCalculateSpeed returns true if there is enough data for a meaningful speed calculation.
+func shouldCalculateSpeed(duration time.Duration, bytes int64) bool {
+	return duration.Seconds() >= 0.001 && bytes > 0
 }

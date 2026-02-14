@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/api"
@@ -86,7 +88,9 @@ func getArtistMetaCached(ctx context.Context, artistID string, ttl time.Duration
 
 	freshPages, fetchErr := api.GetArtistMetaWithAvailType(ctx, artistID, availType)
 	if fetchErr == nil {
-		_ = writeArtistMetaCache(artistID, freshPages)
+		if cacheErr := writeArtistMetaCache(artistID, freshPages); cacheErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: failed to write artist meta cache for %s: %v\n", artistID, cacheErr)
+		}
 		return freshPages, false, false, nil
 	}
 

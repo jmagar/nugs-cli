@@ -102,7 +102,7 @@ func TestMatchesMediaFilter(t *testing.T) {
 		{"video filter matches video", MediaTypeVideo, MediaTypeVideo, true},
 		{"video filter matches both", MediaTypeBoth, MediaTypeVideo, true},
 		{"video filter rejects audio", MediaTypeAudio, MediaTypeVideo, false},
-		{"audio filter matches unknown-as-audio", MediaTypeAudio, MediaTypeAudio, true},
+		{"unknown show rejected by audio filter", MediaTypeUnknown, MediaTypeAudio, false},
 	}
 
 	for _, tc := range tests {
@@ -185,7 +185,7 @@ func TestParseMediaModifier(t *testing.T) {
 				t.Errorf("parseMediaModifier(%v) mediaType = %v, want %v", tc.args, gotMediaType, tc.wantMediaType)
 			}
 			if len(gotRemaining) != len(tc.wantRemaining) {
-				t.Errorf("parseMediaModifier(%v) remaining length = %d, want %d", tc.args, len(gotRemaining), len(tc.wantRemaining))
+				t.Fatalf("parseMediaModifier(%v) remaining length = %d, want %d", tc.args, len(gotRemaining), len(tc.wantRemaining))
 			}
 			for i, arg := range gotRemaining {
 				if i >= len(tc.wantRemaining) || arg != tc.wantRemaining[i] {

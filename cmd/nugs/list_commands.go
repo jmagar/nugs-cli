@@ -14,9 +14,7 @@ func buildListDeps() *list.Deps {
 	return &list.Deps{
 		GetShowMediaType:   getShowMediaType,
 		MatchesMediaFilter: matchesMediaFilter,
-		Playlist: func(ctx context.Context, plistId, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
-			return playlist(ctx, plistId, legacyToken, cfg, streamParams, cat)
-		},
+		Playlist:           playlist,
 	}
 }
 

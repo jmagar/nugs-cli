@@ -9,12 +9,12 @@ import (
 	"github.com/jmagar/nugs-cli/internal/download"
 )
 
-func artist(ctx context.Context, artistId string, cfg *Config, streamParams *StreamParams) error {
-	return download.Artist(ctx, artistId, cfg, streamParams, buildDownloadDeps())
+func artist(ctx context.Context, artistID string, cfg *Config, streamParams *StreamParams) error {
+	return download.Artist(ctx, artistID, cfg, streamParams, buildDownloadDeps())
 }
 
-func playlist(ctx context.Context, plistId, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
-	return download.Playlist(ctx, plistId, legacyToken, cfg, streamParams, cat, buildDownloadDeps())
+func playlist(ctx context.Context, plistID, legacyToken string, cfg *Config, streamParams *StreamParams, cat bool) error {
+	return download.Playlist(ctx, plistID, legacyToken, cfg, streamParams, cat, buildDownloadDeps())
 }
 
 func paidLstream(ctx context.Context, query, uguID string, cfg *Config, streamParams *StreamParams) error {

@@ -5,6 +5,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/jmagar/nugs-cli/internal/model"
 )
@@ -88,97 +89,71 @@ func init() {
 }
 
 func argsDescription() string {
-	return fmt.Sprintf(`%s♪ Download music and videos from Nugs.net%s
+	var b strings.Builder
 
-%s◆ LIST COMMANDS%s
-%s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %slist%s                              List all available artists
-  %s•%s %slist >100%s                         Filter artists by show count (>, <, >=, <=, =)
-  %s•%s %slist <artist_id>%s                  List all shows for a specific artist
-  %s•%s %slist <artist_id> video%s            List shows filtered by media type (audio/video/both)
-  %s•%s %slist <artist_id> "venue"%s          Filter shows by venue name
-  %s•%s %slist <artist_id> latest <N>%s       Show latest N shows for an artist
-  %s•%s %sgrab <artist_id> latest%s           Download latest shows from an artist
+	heading := func(title string) {
+		fmt.Fprintf(&b, "\n%s◆ %s%s\n", colorBold, title, colorReset)
+		fmt.Fprintf(&b, "%s─────────────────────────────────────────────────────────────────────────────%s\n", colorCyan, colorReset)
+	}
+	headingWithNote := func(title, note string) {
+		fmt.Fprintf(&b, "\n%s◆ %s%s %s%s%s\n", colorBold, title, colorReset, colorCyan, note, colorReset)
+		fmt.Fprintf(&b, "%s─────────────────────────────────────────────────────────────────────────────%s\n", colorCyan, colorReset)
+	}
+	cmd := func(syntax, description string) {
+		fmt.Fprintf(&b, "  %s•%s %s%s%s %s\n", colorGreen, colorReset, colorCyan, syntax, colorReset, description)
+	}
+	example := func(syntax string) {
+		fmt.Fprintf(&b, "  %s▸%s %s%s%s\n", colorYellow, colorReset, colorCyan, syntax, colorReset)
+	}
+	exampleWithDesc := func(syntax, desc string) {
+		fmt.Fprintf(&b, "  %s▸%s %s%s%s %s\n", colorYellow, colorReset, colorCyan, syntax, colorReset, desc)
+	}
 
-%s◆ CATALOG COMMANDS%s
-%s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %supdate%s                            Fetch and cache latest catalog
-  %s•%s %scache%s                             Show cache status and metadata
-  %s•%s %sstats%s                             Display catalog statistics
-  %s•%s %slatest [limit]%s                    Show latest additions (default 15)
-  %s•%s %sgaps <id> [...]%s                   List missing shows only (one or more artists)
-  %s•%s %sgaps <id> video%s                   Filter gaps by media type (audio/video/both)
-  %s•%s %sgaps <id> --ids-only%s              Output just IDs for piping
-  %s•%s %sgaps <id> fill%s                    Auto-download all missing shows
-  %s•%s %scoverage [ids...]%s                 Show download coverage statistics
-  %s•%s %srefresh enable|disable|set%s        Configure auto-refresh
+	fmt.Fprintf(&b, "%s♪ Download music and videos from Nugs.net%s\n", colorBold, colorReset)
 
-%s◆ JSON OUTPUT LEVELS%s %s(--json <level>)%s
-%s─────────────────────────────────────────────────────────────────────────────%s
-  %s•%s %sminimal%s                           Essential fields only
-  %s•%s %sstandard%s                          Adds location details (for shows)
-  %s•%s %sextended%s                          All available metadata
-  %s•%s %sraw%s                               Unmodified API response
+	heading("LIST COMMANDS")
+	cmd("list", "                             List all available artists")
+	cmd("list >100", "                        Filter artists by show count (>, <, >=, <=, =)")
+	cmd("list <artist_id>", "                 List all shows for a specific artist")
+	cmd("list <artist_id> video", "           List shows filtered by media type (audio/video/both)")
+	cmd(`list <artist_id> "venue"`, "         Filter shows by venue name")
+	cmd("list <artist_id> latest <N>", "      Show latest N shows for an artist")
+	cmd("grab <artist_id> latest", "          Download latest shows from an artist")
 
-%s◆ EXAMPLES%s
-%s─────────────────────────────────────────────────────────────────────────────%s
-  %s▸%s %snugs help%s
-  %s▸%s %snugs list%s
-  %s▸%s %snugs list 461%s
-  %s▸%s %snugs list 461 "Red Rocks"%s
-  %s▸%s %snugs list 1125 latest 5%s
-  %s▸%s %snugs list ">100"%s
-  %s▸%s %snugs 12345%s                        Download show by ID
-  %s▸%s %snugs grab 461 latest%s              Download latest shows from artist
-  %s▸%s %snugs update%s                       Update local catalog cache
-  %s▸%s %snugs gaps 1125%s                    Find missing shows for artist
-  %s▸%s %snugs gaps 1125 fill%s               Auto-download all missing shows
-  %s▸%s %snugs coverage 1125 461%s            Check download coverage
+	heading("CATALOG COMMANDS")
+	cmd("update", "                           Fetch and cache latest catalog")
+	cmd("cache", "                            Show cache status and metadata")
+	cmd("stats", "                            Display catalog statistics")
+	cmd("latest [limit]", "                   Show latest additions (default 15)")
+	cmd("gaps <id> [...]", "                  List missing shows only (one or more artists)")
+	cmd("gaps <id> video", "                  Filter gaps by media type (audio/video/both)")
+	cmd("gaps <id> --ids-only", "             Output just IDs for piping")
+	cmd("gaps <id> fill", "                   Auto-download all missing shows")
+	cmd("coverage [ids...]", "                Show download coverage statistics")
+	cmd("refresh enable|disable|set", "       Configure auto-refresh")
 
-  %s→%s Full URLs also work: %snugs https://play.nugs.net/release/12345%s
-`,
-		colorBold, colorReset,
-		colorBold, colorReset,
-		colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorBold, colorReset,
-		colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorBold, colorReset, colorCyan, colorReset,
-		colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorGreen, colorReset, colorCyan, colorReset,
-		colorBold, colorReset,
-		colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorYellow, colorReset, colorCyan, colorReset,
-		colorCyan, colorReset, colorYellow, colorReset,
-	)
+	headingWithNote("JSON OUTPUT LEVELS", "(--json <level>)")
+	cmd("minimal", "                          Essential fields only")
+	cmd("standard", "                         Adds location details (for shows)")
+	cmd("extended", "                         All available metadata")
+	cmd("raw", "                              Unmodified API response")
+
+	heading("EXAMPLES")
+	example("nugs help")
+	example("nugs list")
+	example("nugs list 461")
+	example(`nugs list 461 "Red Rocks"`)
+	example("nugs list 1125 latest 5")
+	example(`nugs list ">100"`)
+	exampleWithDesc("nugs 12345", "                       Download show by ID")
+	example("nugs grab 461 latest")
+	example("nugs update")
+	example("nugs gaps 1125")
+	example("nugs gaps 1125 fill")
+	example("nugs coverage 1125 461")
+
+	fmt.Fprintf(&b, "\n  %s→%s Full URLs also work: %snugs https://play.nugs.net/release/12345%s\n",
+		colorCyan, colorReset, colorYellow, colorReset)
+
+	return b.String()
 }

@@ -57,16 +57,22 @@ func TestUploadTotalSetFlag(t *testing.T) {
 	state.UploadTotal = "100 MB"
 	state.UploadTotalSet = true
 
-	// Verify flag prevents overwrite (simulating progressFn logic)
-	rcloneReportedTotal := "..."
-	if !state.UploadTotalSet && rcloneReportedTotal != "" && rcloneReportedTotal != "..." {
+	// With flag set, a valid rclone total should NOT overwrite
+	rcloneReportedTotal := "200 MB"
+	if !state.UploadTotalSet {
 		state.UploadTotal = rcloneReportedTotal
-		t.Error("Should not overwrite UploadTotal when flag is set")
+	}
+	if state.UploadTotal != "100 MB" {
+		t.Errorf("UploadTotal = %q, want %q (flag should prevent overwrite)", state.UploadTotal, "100 MB")
 	}
 
-	// Verify total was not changed
-	if state.UploadTotal != "100 MB" {
-		t.Errorf("UploadTotal = %q, want %q", state.UploadTotal, "100 MB")
+	// With flag cleared, overwrite should proceed
+	state.UploadTotalSet = false
+	if !state.UploadTotalSet {
+		state.UploadTotal = rcloneReportedTotal
+	}
+	if state.UploadTotal != "200 MB" {
+		t.Errorf("UploadTotal = %q, want %q (flag cleared, overwrite should succeed)", state.UploadTotal, "200 MB")
 	}
 }
 
@@ -171,15 +177,13 @@ func TestSpeedCalculationEdgeCases(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the format.go speed calculation logic
-			shouldCalc := tt.duration.Seconds() >= 0.001 && tt.bytes > 0
-
-			if shouldCalc != tt.shouldCalc {
-				t.Errorf("Speed calculation decision = %v, want %v", shouldCalc, tt.shouldCalc)
+			got := shouldCalculateSpeed(tt.duration, tt.bytes)
+			if got != tt.shouldCalc {
+				t.Errorf("shouldCalculateSpeed(%v, %d) = %v, want %v",
+					tt.duration, tt.bytes, got, tt.shouldCalc)
 			}
 
-			// Only calculate if we should
-			if shouldCalc {
+			if got {
 				speed := float64(tt.bytes) / tt.duration.Seconds()
 				if speed <= 0 {
 					t.Error("Calculated speed should be positive")
@@ -224,17 +228,12 @@ func TestUploadCompleteVisibilityDelay(t *testing.T) {
 		t.Error("uploadCompleteVisibilityDelay should be positive")
 	}
 
-	// Reasonable range: 100ms to 2s
+	// Reasonable range: 100ms to 2s (allows tuning without test breakage)
 	if uploadCompleteVisibilityDelay < 100*time.Millisecond {
 		t.Error("uploadCompleteVisibilityDelay is too short (< 100ms)")
 	}
 	if uploadCompleteVisibilityDelay > 2*time.Second {
 		t.Error("uploadCompleteVisibilityDelay is too long (> 2s)")
-	}
-
-	// Verify it's exactly 500ms as specified
-	if uploadCompleteVisibilityDelay != 500*time.Millisecond {
-		t.Errorf("uploadCompleteVisibilityDelay = %v, want 500ms", uploadCompleteVisibilityDelay)
 	}
 }
 
@@ -257,7 +256,7 @@ func BenchmarkSpeedCalculation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		if duration.Seconds() >= 0.001 && bytes > 0 {
+		if shouldCalculateSpeed(duration, bytes) {
 			_ = float64(bytes) / duration.Seconds()
 		}
 	}

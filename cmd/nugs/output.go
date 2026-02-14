@@ -50,6 +50,10 @@ func printStartupEnvironment(cfg *Config, jsonLevel string) {
 	}
 	printKeyValue("Rclone Audio Path", rcloneAudioPath, colorCyan)
 	printKeyValue("Rclone Video Path", rcloneVideoPath, colorCyan)
-	printKeyValue("Rclone Status", checkRclonePathOnline(cfg), colorYellow)
+	if cfg.RcloneEnabled {
+		printKeyValue("Rclone Status", checkRclonePathOnline(cfg), colorYellow)
+	} else {
+		printKeyValue("Rclone Status", "Disabled", colorYellow)
+	}
 	fmt.Println("")
 }

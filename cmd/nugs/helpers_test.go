@@ -17,6 +17,10 @@ func TestBuildAlbumFolderName_TruncatesByRunes(t *testing.T) {
 	if got := len([]rune(name)); got > 120 {
 		t.Fatalf("expected <= 120 runes, got %d", got)
 	}
+	// Verify the name contains the artist
+	if !strings.Contains(name, artist) {
+		t.Errorf("expected folder name to contain artist %q, got %q", artist, name)
+	}
 }
 
 func TestGetVideoOutPath_DefaultsToOutPath(t *testing.T) {

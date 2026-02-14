@@ -615,21 +615,21 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 			continue
 		}
 		switch mediaType {
-		case 0:
+		case urlTypeAlbum:
 			itemErr = album(ctx, itemId, cfg, streamParams, nil, nil, nil)
-		case 1, 2:
+		case urlTypePlaylist, urlTypeLibraryPlaylist:
 			itemErr = playlist(ctx, itemId, legacyToken, cfg, streamParams, false)
-		case 3:
+		case urlTypeShortenedURL:
 			itemErr = catalogPlist(ctx, itemId, legacyToken, cfg, streamParams)
-		case 4, 10:
+		case urlTypeVideo, urlTypeLibraryWebcast:
 			itemErr = video(ctx, itemId, "", cfg, streamParams, nil, false, nil)
-		case 5:
+		case urlTypeArtist:
 			itemErr = artist(ctx, itemId, cfg, streamParams)
-		case 6, 7, 8:
+		case urlTypeLivestreamExcl, urlTypeLivestreamWatch, urlTypeLivestreamArch:
 			itemErr = video(ctx, itemId, "", cfg, streamParams, nil, true, nil)
-		case 9:
+		case urlTypePaidLivestream:
 			itemErr = paidLstream(ctx, itemId, uguID, cfg, streamParams)
-		case 11:
+		case urlTypeNumericID:
 			itemErr = album(ctx, itemId, cfg, streamParams, nil, nil, nil)
 		}
 		if itemErr != nil {

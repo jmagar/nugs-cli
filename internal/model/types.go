@@ -32,7 +32,10 @@ type Config struct {
 	SkipSizePreCalculation bool     `json:"skipSizePreCalculation,omitempty"`
 }
 
-// ArgsDescriptionFunc is set by the root package to provide colored help text.
+// ArgsDescriptionFunc is set by package main's init() (in cmd/nugs/model_aliases.go)
+// to provide colored help text. This is a startup-time side effect that wires the
+// root package's argsDescription() into the model layer. Tests that call
+// Description() should set this explicitly or accept the empty-string default.
 // If nil, Description() returns an empty string (go-arg will use default help).
 var ArgsDescriptionFunc func() string
 

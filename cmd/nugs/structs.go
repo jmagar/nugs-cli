@@ -7,7 +7,9 @@ package main
 
 import "github.com/jmagar/nugs-cli/internal/ui"
 
-// Color variable wrappers - these are value copies from ui after its init runs.
+// Color variable wrappers - package-level copies from ui, snapshotted in init().
+// This avoids qualifying every reference as ui.ColorRed etc. in the root package
+// and will be removed in Phase 12 when rendering moves fully into internal/ui.
 var (
 	colorReset  string
 	colorRed    string
