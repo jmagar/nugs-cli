@@ -1,21 +1,82 @@
 # Nugs CLI Development Guide
 
-This document contains development information for contributors working on Nugs CLI.
+This is the main development guide for contributors. For specialized topics, see the detailed guides below.
+
+## 📚 Documentation Index
+
+- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Package structure, dependencies, design patterns
+- **[CONFIG.md](./CONFIG.md)** - Complete configuration reference (all 23 fields)
+- **[README.md](./README.md)** - User documentation and command reference
+- **[COMMANDS.md](./COMMANDS.md)** - Comprehensive command examples
 
 ## Table of Contents
 
+- [Quick Start](#quick-start)
 - [Architecture Overview](#architecture-overview)
 - [Building from Source](#building-from-source)
-- [Code Structure](#code-structure)
-- [Development Patterns](#development-patterns)
+- [Development Workflow](#development-workflow)
+- [Download Flow](#download-flow-critical-path)
 - [Testing](#testing)
-- [Contributing](#contributing)
+- [Common Gotchas](#common-gotchas)
+- [Recent Improvements](#recent-improvements)
+- [Troubleshooting](#troubleshooting)
+
+---
+
+## Quick Start
+
+**Prerequisites:**
+- Go 1.16 or later
+- FFmpeg (for video downloads)
+- Make (required for building)
+
+**Build and test:**
+```bash
+# Build (ALWAYS use make, never go build directly)
+make build
+
+# Run tests
+make test
+go test ./... -count=1 -v
+
+# Test download
+nugs 23329
+
+# Test catalog
+nugs update
+nugs stats
+nugs gaps 1125
+```
+
+**Test Data:**
+- **Artist IDs:** `1125` (Billy Strings), `461` (Grateful Dead), `1045` (Dead & Company)
+- **Show IDs:** `23329`, `23790`, `24105`
 
 ---
 
 ## Architecture Overview
 
-Nugs CLI is a Go-based command-line tool for downloading and managing music from Nugs.net.
+Nugs CLI is a Go-based monorepo with a clean 4-tier architecture:
+
+### High-Level Structure
+
+```text
+Tier 0: Foundation (model, testutil)
+  ↓
+Tier 1: Core Utilities (helpers, ui, api, cache)
+  ↓
+Tier 2: Infrastructure (config, rclone, runtime)
+  ↓
+Tier 3: Business Logic (catalog, download, list)
+  ↓
+Root: Command Orchestration (cmd/nugs/main.go)
+```
+
+**Key Stats:**
+- **50 Go source files** across 13 internal packages
+- **Module:** `github.com/jmagar/nugs-cli`
+- **Entry Point:** `cmd/nugs/main.go` (648 lines)
+- **No Circular Dependencies** - Strict upward dependency flow
 
 ### Core Components
 
@@ -32,11 +93,7 @@ Nugs CLI is a Go-based command-line tool for downloading and managing music from
 
 **Catalog System**
 - Local caching of entire Nugs.net catalog (~13,000 shows)
-- Four index files for fast lookups:
-  - `catalog.json` - Full show metadata
-  - `catalog-meta.json` - Cache statistics
-  - `by-artist.json` - Shows grouped by artist
-  - `by-date.json` - Shows sorted chronologically
+- Four index files for fast lookups
 - Cache location: `~/.cache/nugs/`
 - File locking for concurrent safety
 
@@ -45,423 +102,449 @@ Nugs CLI is a Go-based command-line tool for downloading and managing music from
 - Timezone-aware refresh times
 - Automatic updates at startup if needed
 
+**For detailed architecture:** See [ARCHITECTURE.md](./ARCHITECTURE.md)
+
+**For configuration details:** See [CONFIG.md](./CONFIG.md)
+
 ---
 
 ## Building from Source
 
-### Prerequisites
+### ⚠️ Build Command Rule
 
-- Go 1.16 or later
-- FFmpeg (for video downloads)
-- Make (optional, for using Makefile)
+**CRITICAL: Always use `make build` - Never use `go build` directly**
+
+- ❌ `go build ./cmd/nugs` - Creates binaries in project root (nugs, nugs.exe, etc.)
+- ✅ `make build` - Correctly builds to `~/.local/bin/nugs`
+
+**Why:** Direct `go build` commands create binaries in the project root which clutter the workspace even though they're gitignored. The Makefile handles the correct build target and output location.
 
 ### Build Commands
 
-**Using Make (recommended):**
+**Using Make (REQUIRED):**
 
 ```bash
-make build
+make build          # Build and install to ~/.local/bin/nugs
+make clean          # Remove build artifacts
+make test           # Run all tests
 ```
 
 This builds the binary and installs it to `~/.local/bin/nugs`.
 
-**Manual build:**
+**Verification commands (cross-compilation checks ONLY):**
 
 ```bash
-# Build only
-go build -o nugs
-
-# Build and install to ~/.local/bin
-mkdir -p ~/.local/bin
-go build -o ~/.local/bin/nugs
-
-# Build for specific platform
-GOOS=linux GOARCH=amd64 go build -o nugs-linux-amd64
-GOOS=darwin GOARCH=amd64 go build -o nugs-darwin-amd64
-GOOS=windows GOARCH=amd64 go build -o nugs-windows-amd64.exe
+# These commands are for verification only - use make build for actual building
+GOOS=darwin go build ./cmd/nugs        # macOS cross-compile check
+GOOS=windows go build ./cmd/nugs       # Windows cross-compile check
+GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 ```
 
-**Clean build artifacts:**
-
-```bash
-make clean
-```
+**Note:** Cross-compilation still creates a local binary in the current directory (or the `-o` path), but it will not be runnable on the current OS. Clean up with `make clean`.
 
 ---
 
-## Code Structure
+## Development Workflow
 
-```
-nugs/
-├── main.go                    # Entry point, CLI dispatcher, download logic
-├── structs.go                 # Data structures, config, API responses
-├── catalog_handlers.go        # Catalog commands (update, cache, stats, latest, gaps)
-├── catalog_autorefresh.go     # Auto-refresh logic and configuration
-├── filelock.go                # POSIX file locking for concurrent safety
-├── config.json                # User configuration (gitignored)
-├── README.md                  # User documentation
-├── CLAUDE.md                  # This file - development documentation
-├── .docs/                     # Session logs and planning docs
-│   ├── sessions/              # Development session documentation
-│   ├── deployment-log.md      # Deployment history
-│   └── services-ports.md      # Port registry
-├── .cache/                    # Temporary files (gitignored)
-└── .gitignore                 # Git ignore rules
-```
+### Where New Code Goes
 
-### Key Files
+| Feature Type | Package | Example |
+|-------------|---------|---------|
+| API endpoint | `internal/api/` | New Nugs.net API method |
+| Data type | `internal/model/` | New response struct |
+| Path logic | `internal/helpers/` | Filename sanitization |
+| Display | `internal/ui/` | Progress rendering |
+| Catalog cmd | `internal/catalog/` | New gap analysis |
+| Download | `internal/download/` | New format support |
+| Config field | `internal/config/` | New option parsing |
+| Cloud upload | `internal/rclone/` | Upload verification |
+| Process ctrl | `internal/runtime/` | New signal handler |
+| Cache logic | `internal/cache/` | Index optimization |
 
-**main.go** (~2900 lines)
-- CLI argument parsing
-- Command dispatcher
-- Download orchestration
-- API client functions
-- Cache I/O functions
-- List commands (artists, shows)
+### Adding New Functionality
 
-**structs.go** (~200 lines)
-- Configuration struct (`Config`)
-- API response structs (`LatestCatalogResp`, `ArtistMeta`, `ShowMeta`)
-- Cache metadata (`CacheMeta`)
-- CLI arguments (`Args`)
+1. Determine which package owns the feature
+2. Add code to appropriate `internal/` package
+3. Import from `cmd/nugs/main.go` if user-facing
+4. Update package `deps.go` if adding new dependencies
 
-**catalog_handlers.go** (375 lines)
-- `catalogUpdate()` - Update catalog cache
-- `catalogCacheStatus()` - View cache information
-- `catalogStats()` - Show catalog statistics
-- `catalogLatest()` - Display latest additions
-- `catalogGaps()` - Find missing shows in collection
-
-**catalog_autorefresh.go** (220 lines)
-- `shouldAutoRefresh()` - Check if refresh needed
-- `autoRefreshIfNeeded()` - Execute auto-refresh if conditions met
-- `enableAutoRefresh()` - Enable auto-refresh with defaults
-- `disableAutoRefresh()` - Disable auto-refresh
-- `configureAutoRefresh()` - Interactive configuration
-
-**filelock.go** (107 lines)
-- `AcquireLock()` - POSIX file locking with retry logic
-- `Release()` - Release acquired lock
-- `WithCacheLock()` - Helper for catalog cache locking
+**For detailed patterns:** See [ARCHITECTURE.md - Where New Code Goes](./ARCHITECTURE.md#where-new-code-goes)
 
 ---
 
-## Development Patterns
+## Download Flow (Critical Path)
 
-### Configuration Management
+### End-to-End Flow
 
-**Config File Location:**
-
-Config files are searched in this order:
-1. `./config.json` (current directory)
-2. `~/.nugs/config.json` (recommended, user home)
-3. `~/.config/nugs/config.json` (XDG standard)
-
-**Reading Config:**
-
-```go
-func readConfig() (*Config, error) {
-    // Checks all three locations in order
-    // Returns first found config
-    // Warns if permissions are insecure (not 0600)
-}
+```text
+1. CLI Command
+   ↓
+2. bootstrap() → parse config/args
+   ↓
+3. run() → authenticate, parse URLs
+   ↓
+4. URL Parser → extract media type & ID
+   ↓
+5. Dispatch to handler (album/video/artist/playlist)
+   ↓
+6. Album/Video Handler
+   ├─ Fetch metadata (API call)
+   ├─ Check local/remote existence (skip if exists)
+   ├─ Create directories (artist/album folders)
+   ├─ Pre-calculate size (optional, 8 concurrent HEAD requests)
+   ├─ Initialize/reuse progress box
+   └─ Download loop (sequential)
+      ├─ For each track/segment:
+      │  ├─ Check pause/cancel state
+      │  ├─ Query available formats (API calls)
+      │  ├─ Select format (quality matching + fallback)
+      │  ├─ Download file (HTTP GET with progress callback)
+      │  ├─ Decrypt (if HLS-only) + FFmpeg convert
+      │  └─ Update progress box (track + show level)
+      └─ All tracks complete
+         ↓
+7. Upload Phase (if rcloneEnabled)
+   ├─ Calculate upload size
+   ├─ Build rclone command (copy/copyto)
+   ├─ Execute with progress parsing
+   ├─ Update progress box (upload percent/speed/ETA)
+   ├─ Verify upload (if deleteAfterUpload)
+   └─ Delete local files (if verified)
+      ↓
+8. Completion
+   ├─ Set phase to Complete
+   ├─ Calculate total duration
+   ├─ Render completion summary
+   └─ Return (next URL or exit)
 ```
 
-**Default Config Values:**
-- `catalogAutoRefresh`: `true` (enabled by default)
-- `catalogRefreshTime`: `"05:00"` (5am)
-- `catalogRefreshTimezone`: `"America/New_York"` (EST)
-- `catalogRefreshInterval`: `"daily"`
+### Format Selection
 
-**Writing Config:**
+**Audio formats (1-5):**
+- 1 = 16-bit 44.1kHz ALAC
+- 2 = 16-bit 44.1kHz FLAC (most common)
+- 3 = 24-bit 48kHz MQA
+- 4 = 360 Reality Audio (default)
+- 5 = 150 Kbps AAC (HLS-only fallback)
 
-```go
-func writeConfig(cfg *Config) error {
-    // Always writes to ./config.json
-    // Used by auto-refresh config commands
-}
+**Fallback chain:** ALAC→FLAC→AAC, MQA→FLAC, 360RA→MQA
+
+**Video formats (1-5):**
+- 1 = 480p
+- 2 = 720p
+- 3 = 1080p
+- 4 = 1440p
+- 5 = 4K / best available (default)
+
+**Fallback chain:** 1440p→1080p, 1080p→720p, 720p→480p
+
+### FFmpeg Integration
+
+**Audio (HLS-only streams):**
+```bash
+# Decrypt AES-128 encrypted .ts → Convert to AAC
+ffmpeg -i pipe: -c:a copy output.m4a
 ```
 
-### Cache Management
+**Video (TS to MP4 conversion):**
+```bash
+# Without chapters:
+ffmpeg -hide_banner -i input.ts -c copy output.mp4
 
-**Cache Structure:**
-
-```
-~/.cache/nugs/
-├── catalog.json           # Full show metadata (7-8 MB)
-├── catalog-meta.json      # Cache statistics
-├── by-artist.json         # Shows grouped by artist ID
-└── by-date.json           # Shows sorted by date
-```
-
-**Cache I/O:**
-
-```go
-// Read cache with automatic fallback
-catalog, err := readCatalogCache()
-
-// Write cache with file locking
-err := writeCatalogCache(catalog, updateDuration)
-
-// Atomic write pattern
-tmpPath := cachePath + ".tmp"
-os.WriteFile(tmpPath, data, 0644)
-os.Rename(tmpPath, cachePath)  // Atomic!
+# With chapters:
+ffmpeg -hide_banner \
+  -i input.ts \
+  -f ffmetadata -i chapters.txt \
+  -map_metadata 1 \
+  -c copy \
+  output.mp4
 ```
 
-### File Locking
+### Progress Tracking
 
-**Why:** Prevents cache corruption when multiple `nugs` processes run concurrently.
+**Global progress box state** (`model.ProgressBoxState`):
+- **Show-level:** percent, downloaded/total, track count
+- **Track-level:** track number, name, format, percent, speed, ETA
+- **Upload-level:** percent, uploaded/total, speed, ETA, duration
+- **Phase transitions:** Download → Upload → Complete
+- **Thread-safe:** Protected by `Mu` (sync.Mutex)
 
-**Implementation:**
+### Concurrent Operations
 
-```go
-// Acquire lock (POSIX flock with retry)
-lock, err := AcquireLock(lockPath, 50)  // 50 retries = 5s timeout
-defer lock.Release()
+**Sequential track downloads** (NOT parallel):
+- Prevents API rate limits
+- Single progress box per album
+- **Exception:** Size pre-calculation uses 8 concurrent HEAD requests (60s timeout)
 
-// Helper for catalog operations
-err := WithCacheLock(func() error {
-    // Your cache operation here
-})
-```
+### Error Handling
 
-**Lock Details:**
-- Uses `syscall.Flock()` with `LOCK_EX | LOCK_NB`
-- Retries 50 times with 100ms delay (5s total timeout)
-- Lock file: `~/.cache/nugs/.catalog.lock`
+**Track-level errors** (batch continues):
+- Network timeouts → logged, continue to next track
+- Format unavailable → fallback to next format
 
-### JSON Output
+**Album-level errors** (track continues):
+- Invalid show ID → error, skip to next album
+- Missing FFmpeg → error, skip video conversion
 
-**Levels:**
-- `minimal` - Essential fields only
-- `standard` - Adds location details
-- `extended` - All metadata
-- `raw` - Unmodified API response
-
-**Implementation:**
-
-```go
-if jsonLevel != "" {
-    // Suppress banner/headers
-    data := prepareJSONOutput(result, jsonLevel)
-    jsonBytes, _ := json.MarshalIndent(data, "", "  ")
-    fmt.Println(string(jsonBytes))
-    return
-}
-// Normal table output
-```
-
-### API Integration
-
-**Authentication:**
-
-```go
-// Login with email/password
-token, err := auth(email, password)
-
-// Or use pre-configured token
-token := cfg.Token
-```
-
-**Catalog API:**
-
-```go
-// Fetch latest catalog
-resp, err := http.Get("https://play.nugs.net/api/v1/catalog.latest")
-var catalog LatestCatalogResp
-json.NewDecoder(resp.Body).Decode(&catalog)
-```
-
-### Rclone Integration
-
-**Upload after download:**
-
-```go
-if cfg.RcloneEnabled {
-    remotePath := cfg.RclonePath + "/" + albumFolder
-    cmd := exec.Command("rclone", "copy", localPath, remotePath,
-        "--transfers", strconv.Itoa(cfg.RcloneTransfers))
-    cmd.Run()
-
-    if cfg.DeleteAfterUpload {
-        os.RemoveAll(localPath)
-    }
-}
-```
-
-**Gap detection with rclone:**
-
-```go
-// Check local path first
-if sanitise(localPath) {
-    downloaded = append(downloaded, show.ContainerID)
-    continue
-}
-
-// Then check remote if rclone enabled
-if cfg.RcloneEnabled && remotePathExists(remotePath, cfg) {
-    downloaded = append(downloaded, show.ContainerID)
-}
-```
+**Crawl-level errors** (fatal):
+- User cancellation (Shift-C) → stop all downloads
+- Authentication failure → exit immediately
 
 ---
 
 ## Testing
 
-### Manual Testing
+### Current Test Coverage
 
-**Build and test:**
+Run `go test ./... -cover` to get the latest coverage report.
 
-```bash
-# Build
-make build
+**Well-tested components:**
+- Media type detection
+- Upload progress tracking
+- FFmpeg binary resolution
 
-# Test download
-nugs 23329
+**Key areas needing coverage:**
+- `internal/api` - Authentication, API calls
+- `internal/download` - Download logic, FFmpeg
+- `internal/cache` - File locking, concurrency
+- `internal/catalog` - Catalog operations
+- `internal/config` - Config loading
 
-# Test catalog
-nugs update
-nugs stats
-nugs gaps 1125
+### Test Utilities
 
-# Test auto-refresh
-nugs refresh set
-```
+**Shared helpers** (`internal/testutil/testutil.go`):
+- `WithTempHome(t)` - Isolate HOME directory
+- `CaptureStdout(t, fn)` - Capture stdout
+- `ChdirTemp(t)` - Change to temp directory with cleanup
+- `WriteExecutable(t, path)` - Create executable script
 
-### Test Data
+### Testing Patterns
 
-**Artist IDs for testing:**
-- `1125` - Billy Strings (430 shows)
-- `461` - Grateful Dead (large catalog)
-- `1045` - Dead & Company
-- `22` - Umphrey's McGee
-
-**Show IDs for testing:**
-- `23329` - Valid album
-- `23790` - Valid album
-- `24105` - Valid album
-
-### Edge Cases
-
-**Test these scenarios:**
-- Empty config file
-- Invalid credentials
-- Missing FFmpeg
-- Concurrent catalog updates
-- Network interruptions
-- Invalid artist IDs
-- Invalid show IDs
-- Rclone not installed (when enabled)
-- Cache corruption
-- Disk full
-
----
-
-## Contributing
-
-### Code Style
-
-**Go Conventions:**
-- Follow standard Go formatting (`gofmt`)
-- Use meaningful variable names
-- Comment exported functions
-- Keep functions under 50 lines where possible
-- Handle errors explicitly
-
-**Example:**
-
+**Table-driven tests** (95% of tests):
 ```go
-// catalogUpdate fetches the latest catalog from Nugs.net API
-// and updates the local cache at ~/.cache/nugs/
-func catalogUpdate(jsonLevel string) error {
-    startTime := time.Now()
-
-    // Fetch catalog
-    catalog, err := fetchLatestCatalog()
-    if err != nil {
-        return fmt.Errorf("failed to fetch catalog: %w", err)
+func TestParseMediaModifier(t *testing.T) {
+    tests := []struct {
+        name          string
+        args          []string
+        wantMediaType MediaType
+        wantRemaining []string
+    }{
+        {
+            name:          "audio modifier first position",
+            args:          []string{"audio", "1125", "fill"},
+            wantMediaType: MediaTypeAudio,
+            wantRemaining: []string{"1125", "fill"},
+        },
+        // ... more test cases
     }
 
-    // Write cache with file locking
-    updateDuration := time.Since(startTime)
-    if err := writeCatalogCache(catalog, updateDuration); err != nil {
-        return fmt.Errorf("failed to write cache: %w", err)
+    for _, tc := range tests {
+        t.Run(tc.name, func(t *testing.T) {
+            gotMediaType, gotRemaining := parseMediaModifier(tc.args)
+            // ... assertions
+        })
     }
-
-    return nil
 }
 ```
 
-### Pull Request Process
+**Key principles:**
+- Fast unit tests (no network/API calls, completes in ~0.007s)
+- Test isolation (`t.TempDir()`, `t.Setenv()`, `t.Cleanup()`)
+- No mocking framework - direct testing with real data structures
 
-1. **Fork the repository**
-2. **Create a feature branch:** `git checkout -b feature/your-feature`
-3. **Make your changes**
-4. **Test thoroughly** (see Testing section above)
-5. **Commit with clear messages:**
+### Next Testing Priorities
 
-   ```
-   Add gap detection for missing shows
+1. **API client tests** with `httptest.Server` (mock responses)
+2. **Cache concurrency tests** (file locking, corruption recovery)
+3. **Config validation tests** (all 23 fields)
+4. **Download flow tests** with small test files (<1MB)
 
-   - Implement catalog gaps command
-   - Check both local and remote paths
-   - Support --ids-only flag for piping
-   ```
+### Manual Testing
 
-6. **Push to your fork:** `git push origin feature/your-feature`
-7. **Open a Pull Request** with:
-   - Clear description of changes
-   - Test results
-   - Any breaking changes noted
+```bash
+# Automated tests
+make test                    # All tests
+go test ./... -v             # Verbose
+go test ./... -cover         # With coverage
+go test ./... -race          # Race detector
+go test -bench=. ./cmd/nugs  # Benchmarks
 
-### Commit Guidelines
-
-**Format:**
-
-```
-<type>: <short summary>
-
-<detailed description>
-
-<optional footer>
+# Functional tests
+nugs 23329                   # Download
+nugs update                  # Catalog
+nugs stats                   # Statistics
+nugs gaps 1125               # Gap detection
+nugs refresh set             # Auto-refresh
 ```
 
-**Types:**
-- `feat:` - New feature
-- `fix:` - Bug fix
-- `docs:` - Documentation changes
-- `refactor:` - Code refactoring
-- `test:` - Test additions
-- `chore:` - Build/tooling changes
+### Edge Cases to Test
 
-**Examples:**
+- Empty config file
+- Invalid credentials
+- Missing FFmpeg (error: "ffmpeg not found in PATH")
+- Concurrent catalog updates (file locking)
+- Network interruptions (download resume)
+- Invalid artist/show IDs (error handling)
+- Rclone not installed when enabled
+- Cache corruption (fallback to API)
+- Disk full (error: "no space left on device")
+- Insecure config permissions (auto-fix warning)
+- Invalid config values (validation errors)
 
+---
+
+## Common Gotchas
+
+### Concurrency & State Management
+
+**1. Progress Box Must Be Locked**
+```go
+// ❌ BAD - Race condition
+progressBox.DownloadPercent = 50
+
+// ✅ GOOD - Thread-safe
+progressBox.Mu.Lock()
+progressBox.DownloadPercent = 50
+progressBox.Mu.Unlock()
 ```
-feat: Add catalog auto-refresh system
 
-- Implement configurable schedule (daily/weekly)
-- Add timezone-aware refresh times
-- Auto-update at startup if needed
-- Add config commands (enable/disable/set)
+**2. Cache Writes Require File Locking**
+```go
+// ❌ BAD - Can corrupt cache with concurrent access
+os.WriteFile(cachePath, data, 0644)
 
-Closes #123
+// ✅ GOOD - Atomic write with file locking
+err := cache.WithCacheLock(func() error {
+    tmpPath := cachePath + ".tmp"
+    os.WriteFile(tmpPath, data, 0644)
+    return os.Rename(tmpPath, cachePath)  // Atomic!
+})
 ```
 
-```
-fix: Prevent catalog cache corruption
+**3. Single-Threaded Download Loop**
+- Tracks download sequentially (NOT parallel)
+- Prevents API rate limiting
+- Progress box not designed for concurrent track updates
+- **Exception:** Size pre-calculation uses 8 concurrent HEAD requests
 
-Use POSIX file locking to prevent concurrent writes
-when multiple nugs processes run simultaneously.
+### Configuration Quirks
 
-- Implement filelock.go with retry logic
-- Add WithCacheLock() helper for catalog operations
-- Use atomic write pattern (temp file + rename)
+**4. Config Search Order Matters**
+
+```go
+// Searches in order (first found wins, no merging):
+// 1. ./config.json          (current directory)
+// 2. ~/.nugs/config.json
+// 3. ~/.config/nugs/config.json
 ```
+
+**5. Security Auto-Fix**
+- Config permissions checked on every read
+- Unix: Auto-fixes to `0600` if insecure
+- Windows: Permission check skipped (relies on NTFS ACLs)
+
+**6. Token Prefix Stripping**
+```go
+// Automatically strips "Bearer " prefix from tokens
+cfg.Token = strings.TrimPrefix(cfg.Token, "Bearer ")
+```
+
+### API & Network
+
+**7. Context Propagation Is Required**
+```go
+// ❌ BAD - Don't create context in libraries
+func FetchCatalog() (*Catalog, error) {
+    ctx := context.Background()  // ❌ Wrong
+}
+
+// ✅ GOOD - Accept context from caller
+func FetchCatalog(ctx context.Context) (*Catalog, error) {
+    // Can respect cancellation/timeout
+}
+```
+
+**8. Format Fallback Chain**
+- ALAC (1) → FLAC (2) → AAC (5)
+- MQA (3) → FLAC (2)
+- 360RA (4) → MQA (3)
+- Max 10 fallback attempts (prevents infinite loops)
+
+### File System
+
+**9. Path Sanitization**
+```go
+// ❌ BAD - Unsafe filename
+filename := track.SongTitle  // May contain / or other invalid chars
+
+// ✅ GOOD - Sanitized
+filename := helpers.Sanitise(track.SongTitle)
+```
+
+**10. Rclone Path Confusion**
+```go
+// Local downloads: ALWAYS use outPath/videoOutPath
+// Remote uploads: ONLY use rclonePath/rcloneVideoPath
+// These are separate - rclonePath does NOT affect local downloads
+```
+
+### Build & Platform
+
+**11. Build Tags Are Critical**
+```go
+// ❌ BAD - Will compile for all platforms
+func AcquireLock(path string) error
+
+// ✅ GOOD - Platform-specific implementations
+// filelock_unix.go:
+//go:build !windows
+
+// filelock_windows.go:
+//go:build windows
+```
+
+**12. Go Build vs Make Build**
+```bash
+# ❌ BAD - Creates binary in project root
+go build ./cmd/nugs
+
+# ✅ GOOD - Installs to ~/.local/bin/nugs
+make build
+```
+
+**For more gotchas:** See [ARCHITECTURE.md - Common Gotchas](./ARCHITECTURE.md#common-gotchas)
 
 ---
 
 ## Recent Improvements
+
+### Video First-Class Citizen (2026-02-08)
+
+**Implemented:**
+- `defaultOutputs` config field for media type preference
+- Media type modifiers for all catalog commands
+- Emoji indicators for media availability (🎵 audio, 🎬 video, 📹 both)
+- Video-aware gap detection and coverage
+- Both-format downloads
+
+**Command Examples:**
+```bash
+# List commands with media filters
+nugs list video                  # Only video artists
+nugs list 1125 video             # Billy Strings videos only
+
+# Gap detection
+nugs gaps 1125 video             # Video gaps only
+nugs gaps 1125 both              # Shows missing either format
+nugs gaps 1125 fill video        # Download all video gaps
+```
+
+**Files Modified:**
+- `internal/model/structs.go` - Added `defaultOutputs` to Config, MediaType enum
+- `internal/catalog/handlers.go` - Media-aware analysis functions
+- `internal/catalog/media_filter.go` - Media type detection and helpers
+- `internal/helpers/` - Path detection for audio/video formats
+- `cmd/nugs/main.go` - Media type command parsing and download integration
 
 ### Shell Completions (2026-02-06)
 
@@ -470,62 +553,19 @@ when multiple nugs processes run simultaneously.
 - Support for bash, zsh, fish, and PowerShell
 - Comprehensive command, flag, and argument completions
 
-**Features:**
-- Auto-complete all commands: `list`, `catalog`, `status`, `cancel`, `completion`, `help`
-- Auto-complete catalog subcommands: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `config`
-- Auto-complete flags: `-f`, `-F`, `-o`, `--json`, `--force-video`, etc.
-- Context-aware completions (e.g., format values 1-5, JSON levels)
-- Shell-specific installation instructions included in output
-
-**Files Created:**
-- `completions.go` (430 lines) - Completion script generators for all supported shells
-
-**Files Modified:**
-- `main.go` - Added completion command dispatcher (line ~3885)
-- `detach_common.go` - Added "completion" to read-only commands list
-- `README.md` - Added Shell Completions section with installation instructions
-- `CLAUDE.md` - This documentation
-
 **Installation:**
 ```bash
-# Bash
-nugs completion bash > ~/.bash_completion.d/nugs
-
-# Zsh (vanilla)
-nugs completion zsh > ~/.zsh/completion/_nugs
-
 # Zsh (oh-my-zsh) - most common setup
 mkdir -p ~/.oh-my-zsh/custom/completions
 nugs completion zsh > ~/.oh-my-zsh/custom/completions/_nugs
 # Add to .zshrc BEFORE oh-my-zsh.sh: fpath=($ZSH/custom/completions $fpath)
 
+# Bash
+nugs completion bash > ~/.bash_completion.d/nugs
+
 # Fish
 nugs completion fish > ~/.config/fish/completions/nugs.fish
-
-# PowerShell
-nugs completion powershell >> $PROFILE
 ```
-
-**Benefits:**
-- Faster command discovery and reduced typos
-- Tab-complete artist IDs, format codes, and flags
-- Shell-native completion behavior
-- Zero dependencies (pure Go string constants)
-
-### Artist Catalog Shortcuts (2026-02-05)
-
-**Implemented:**
-- `nugs <artist_id> full` - Download entire artist catalog
-- `nugs grab <artist_id> latest` - Download latest shows
-
-**Improved UX:**
-- Before: `nugs https://play.nugs.net/#/artist/461`
-- After: `nugs 461 full`
-
-**Implementation:**
-- Added shorthand parser in main.go (lines 2846-2861)
-- Constructs full artist URL: `https://play.nugs.net/#/artist/{id}`
-- Displays message: "Downloading entire catalog from artist {id}"
 
 ### Catalog Caching System (2026-02-05)
 
@@ -539,19 +579,9 @@ nugs completion powershell >> $PROFILE
 - File locking for concurrent safety
 
 **Files Created:**
-- `catalog_handlers.go` (375 lines)
-- `catalog_autorefresh.go` (220 lines)
-- `filelock.go` (107 lines)
-
-**Files Modified:**
-- `structs.go` - Added cache structures and config fields
-- `main.go` - Added catalog dispatcher and cache I/O
-- `README.md` - Comprehensive catalog documentation
-
-**Session Docs:**
-- `.docs/sessions/2026-02-05-catalog-caching-implementation.md`
-- `.docs/sessions/2026-02-05-improvements-summary.md`
-- `.docs/catalog-future-enhancements-plan.md`
+- `internal/catalog/handlers.go` - Catalog command implementations
+- `internal/catalog/autorefresh.go` - Auto-refresh logic
+- `internal/cache/filelock_unix.go` - POSIX file locking
 
 ### Code Quality Improvements (2026-02-05)
 
@@ -564,134 +594,52 @@ nugs completion powershell >> $PROFILE
 - POSIX file locking with `syscall.Flock`
 - Atomic write operations (temp file + rename)
 - Retry logic for lock acquisition
-- Grade improved from A- to A
 
-### Rclone Configuration Clarification (2026-02-05)
+---
 
-**Important Behavioral Note:**
-The `rclonePath` configuration field in `config.json` specifies the **remote storage path** only. It does NOT affect local download paths.
+## Breaking Changes & Migrations
 
-**Configuration Behavior:**
-- **Local downloads:** Always go to `outPath` (e.g., `/home/user/Music`)
-- **Remote uploads:** Go to `rcloneRemote:rclonePath` (e.g., `gdrive:/Music`)
-- **Artist folder structure:** Preserved in both local and remote locations
+### rclonePath Behavior Change (2026-02-05)
 
-**Example:**
+**⚠️ BREAKING CHANGE:** The `rclonePath` field no longer affects local download paths.
 
+**Before:** `rclonePath` was used as a fallback for local base path
+**After:** `rclonePath` ONLY affects remote storage uploads
+
+**Migration:**
 ```json
+// OLD CONFIG (relied on rclonePath for local paths)
 {
-  "outPath": "/home/user/Music",
+  "outPath": "/tmp/music",
+  "rclonePath": "/mnt/user/data/media/music",
+  "rcloneEnabled": false
+}
+
+// NEW CONFIG (explicit local path in outPath)
+{
+  "outPath": "/mnt/user/data/media/music",
   "rclonePath": "/Music",
+  "rcloneEnabled": true,
   "rcloneRemote": "gdrive"
 }
 ```
 
-Downloads create: `/home/user/Music/Artist Name/Album/`
-Uploads to: `gdrive:/Music/Artist Name/Album/`
-
-**Code Reference:**
-- See `structs.go` line 61 for field documentation
-- See `uploadToRclone()` in `main.go` for remote path construction
+**See [CONFIG.md - Migrations](./CONFIG.md#migrations) for full details.**
 
 ---
 
-### Breaking Changes & Migration Notes
-
-#### rclonePath Behavior Change (2026-02-05)
-
-**⚠️ BREAKING CHANGE:** The `rclonePath` field no longer affects local download paths.
-
-**Previous Behavior (before 2026-02-05):**
-
-```go
-// rclonePath was used as a fallback for local base path
-basePath := cfg.OutPath
-if cfg.RclonePath != "" {
-    basePath = cfg.RclonePath  // ❌ Confusing dual-purpose
-}
-```
-
-**New Behavior (after 2026-02-05):**
-
-```go
-// rclonePath ONLY affects remote storage uploads
-basePath := cfg.OutPath  // Always use outPath for local downloads
-remotePath := cfg.RclonePath  // Only for remote storage
-```
-
-**Migration Guide:**
-
-If you previously set `rclonePath` expecting it to control local download locations:
-
-1. **Update your config:**
-   - Move your desired local path to `outPath`
-   - Keep `rclonePath` for the remote storage path only
-
-2. **Example migration:**
-
-   ```json
-   // OLD CONFIG (relied on rclonePath for local paths)
-   {
-     "outPath": "/tmp/music",
-     "rclonePath": "/mnt/user/data/media/music",
-     "rcloneEnabled": false
-   }
-
-   // NEW CONFIG (explicit local path in outPath)
-   {
-     "outPath": "/mnt/user/data/media/music",
-     "rclonePath": "/Music",
-     "rcloneEnabled": true,
-     "rcloneRemote": "gdrive"
-   }
-   ```
-
-3. **Impact:**
-   - Local-only users: Update `outPath` to your preferred download location
-   - Rclone users: `outPath` for local, `rclonePath` for remote (clear separation)
-
-**Rationale:**
-This change eliminates a confusing "leaky abstraction" where a field named "rclone**Path**" (implying remote storage) was also controlling local filesystem behavior. The new design provides clear separation of concerns: `outPath` = local, `rclonePath` = remote.
-
----
-
-## Future Enhancements
-
-See `.docs/catalog-future-enhancements-plan.md` for detailed roadmap including:
-
-**Phase 1 (Quick Wins)**
-- Catalog snapshots and version management
-- Advanced search and filtering
-- Compression for faster updates
-
-**Phase 2 (Power Features)**
-- Catalog comparison (diff between dates)
-- Batch operations and bulk downloads
-- Enhanced statistics and analytics
-
-**Phase 3 (Integrations)**
-- Integration with music players (Plex, Subsonic)
-- Webhook support for new releases
-- Database backend option (PostgreSQL)
-
----
-
-## Troubleshooting Development
+## Troubleshooting
 
 ### Build Issues
 
 **"command not found: make"**
-
 ```bash
-# Install make
 sudo apt install make  # Linux
 brew install make      # macOS
 ```
 
 **"package not found"**
-
 ```bash
-# Update Go modules
 go mod tidy
 go mod download
 ```
@@ -699,21 +647,39 @@ go mod download
 ### Runtime Issues
 
 **Config file location confusion:**
-- Auto-refresh config commands write to `./config.json` (current directory)
-- Main app reads from `./config.json` OR `~/.nugs/config.json`
-- Keep config in current directory during development
+- Auto-refresh config commands write to `~/.nugs/config.json`
+- Main app reads from `./config.json`, `~/.nugs/config.json`, or `~/.config/nugs/config.json` (first found wins)
 
 **Cache permission errors:**
-
 ```bash
-# Fix cache directory permissions
 chmod -R 755 ~/.cache/nugs
 ```
 
 **File lock timeout:**
 - Default timeout: 5 seconds (50 retries × 100ms)
-- Increase retries in `AcquireLock()` if needed
 - Check for stale lock files: `~/.cache/nugs/.catalog.lock`
+
+**FFmpeg not found:**
+```bash
+# Install FFmpeg
+sudo apt install ffmpeg  # Linux
+brew install ffmpeg      # macOS
+
+# Or set custom path in config.json:
+"ffmpegNameStr": "/path/to/ffmpeg"
+```
+
+**Rclone not found:**
+
+```bash
+# Install rclone (see https://rclone.org/downloads/ for alternatives)
+# Review the script before running:
+curl -O https://rclone.org/install.sh
+sudo bash install.sh
+
+# Or disable in config.json:
+"rcloneEnabled": false
+```
 
 ---
 
