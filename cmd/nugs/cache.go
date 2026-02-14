@@ -37,11 +37,3 @@ func readCatalogCache() (*LatestCatalogResp, error) {
 func writeCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Duration) error {
 	return cache.WriteCatalogCache(catalog, updateDuration, formatDuration)
 }
-
-func buildArtistIndex(catalog *model.LatestCatalogResp) error {
-	return cache.BuildArtistIndex(catalog)
-}
-
-func buildContainerIndex(catalog *model.LatestCatalogResp) error {
-	return cache.BuildContainerIndex(catalog)
-}

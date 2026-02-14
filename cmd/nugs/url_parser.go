@@ -5,7 +5,7 @@ package main
 
 import "github.com/jmagar/nugs-cli/internal/api"
 
-var regexStrings = api.RegexStrings
+var regexStrings = api.GetRegexStrings()
 
 func parsePaidLstreamShowID(query string) (string, error) {
 	return api.ParsePaidLstreamShowID(query)

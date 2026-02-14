@@ -48,7 +48,26 @@ func mustCookieJar() *cookiejar.Jar {
 	return jar
 }
 
+// qualityPattern pairs a URL substring with its quality info.
+type qualityPattern struct {
+	Pattern string
+	Quality model.Quality
+}
+
+// qualityPatterns is checked in order; more specific patterns first.
+var qualityPatterns = []qualityPattern{
+	{".alac16/", model.Quality{Specs: "16-bit / 44.1 kHz ALAC", Extension: ".m4a", Format: 1}},
+	{".flac16/", model.Quality{Specs: "16-bit / 44.1 kHz FLAC", Extension: ".flac", Format: 2}},
+	{".mqa24/", model.Quality{Specs: "24-bit / 48 kHz MQA", Extension: ".flac", Format: 3}},
+	{".s360/", model.Quality{Specs: "360 Reality Audio", Extension: ".mp4", Format: 4}},
+	{".aac150/", model.Quality{Specs: "150 Kbps AAC", Extension: ".m4a", Format: 5}},
+	{".flac?", model.Quality{Specs: "FLAC", Extension: ".flac", Format: 2}},
+	{".m4a?", model.Quality{Specs: "AAC", Extension: ".m4a", Format: 5}},
+	{".m3u8?", model.Quality{Extension: ".m4a", Format: 6}},
+}
+
 // QualityMap maps URL path segments to quality info.
+// Deprecated: Use qualityPatterns for deterministic iteration order.
 var QualityMap = map[string]model.Quality{
 	".alac16/": {Specs: "16-bit / 44.1 kHz ALAC", Extension: ".m4a", Format: 1},
 	".flac16/": {Specs: "16-bit / 44.1 kHz FLAC", Extension: ".flac", Format: 2},
@@ -409,11 +428,13 @@ func GetStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams
 }
 
 // QueryQuality identifies the quality from a stream URL.
+// Patterns are checked in deterministic order with more specific patterns first.
 func QueryQuality(streamUrl string) *model.Quality {
-	for k, v := range QualityMap {
-		if strings.Contains(streamUrl, k) {
-			v.URL = streamUrl
-			return &v
+	for _, entry := range qualityPatterns {
+		if strings.Contains(streamUrl, entry.Pattern) {
+			q := entry.Quality
+			q.URL = streamUrl
+			return &q
 		}
 	}
 	return nil

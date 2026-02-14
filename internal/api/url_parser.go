@@ -11,8 +11,8 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
-// RegexStrings are patterns for recognizing Nugs.net URLs.
-var RegexStrings = []string{
+// regexStrings are patterns for recognizing Nugs.net URLs.
+var regexStrings = []string{
 	`^https://play.nugs.net/release/(\d+)$`,
 	`^https://play.nugs.net/#/playlists/playlist/(\d+)$`,
 	`^https://play.nugs.net/library/playlist/(\d+)$`,
@@ -28,14 +28,21 @@ var RegexStrings = []string{
 	`^(\d+)$`,
 }
 
-// compiledRegexes are pre-compiled versions of RegexStrings.
+// compiledRegexes are pre-compiled versions of regexStrings.
 var compiledRegexes []*regexp.Regexp
 
 func init() {
-	compiledRegexes = make([]*regexp.Regexp, len(RegexStrings))
-	for i, s := range RegexStrings {
+	compiledRegexes = make([]*regexp.Regexp, len(regexStrings))
+	for i, s := range regexStrings {
 		compiledRegexes[i] = regexp.MustCompile(s)
 	}
+}
+
+// GetRegexStrings returns a copy of the URL patterns used for matching.
+func GetRegexStrings() []string {
+	out := make([]string, len(regexStrings))
+	copy(out, regexStrings)
+	return out
 }
 
 // ParsePaidLstreamShowID extracts the showID parameter from a query string.
@@ -56,11 +63,17 @@ func ParsePaidLstreamShowID(query string) (string, error) {
 }
 
 // IsLikelyLivestreamSegments checks if segment URLs indicate a livestream.
+// Heuristic: consecutive distinct segment URLs suggest a livestream because
+// on-demand content reuses the same base URL for all segments. A single
+// segment is ambiguous, so we conservatively return false.
 func IsLikelyLivestreamSegments(segURLs []string) (bool, error) {
 	if len(segURLs) == 0 {
 		return false, errors.New("video manifest returned no segments")
 	}
-	return len(segURLs) > 1 && segURLs[0] != segURLs[1], nil
+	if len(segURLs) == 1 {
+		return false, nil
+	}
+	return segURLs[0] != segURLs[1], nil
 }
 
 // ParseTimestamps converts date strings to Unix timestamps.
@@ -87,11 +100,10 @@ func ParseStreamParams(userId string, subInfo *model.SubInfo, isPromo bool) (*mo
 		return nil, err
 	}
 	streamParams := &model.StreamParams{
-		SubscriptionID:          subInfo.LegacySubscriptionID,
-		SubCostplanIDAccessList: subInfo.Plan.PlanID,
-		UserID:                  userId,
-		StartStamp:              startStamp,
-		EndStamp:                endStamp,
+		SubscriptionID: subInfo.LegacySubscriptionID,
+		UserID:         userId,
+		StartStamp:     startStamp,
+		EndStamp:       endStamp,
 	}
 	if isPromo {
 		streamParams.SubCostplanIDAccessList = subInfo.Promo.Plan.PlanID

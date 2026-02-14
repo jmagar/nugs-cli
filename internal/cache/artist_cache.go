@@ -11,7 +11,13 @@ import (
 )
 
 // GetArtistMetaCachePath returns the path for an artist's cached metadata.
+// Validates artistID to prevent directory traversal attacks.
 func GetArtistMetaCachePath(artistID string) (string, error) {
+	safeID := filepath.Base(artistID)
+	if safeID != artistID || safeID == "." || safeID == ".." || safeID == "" {
+		return "", fmt.Errorf("invalid artist ID: %q", artistID)
+	}
+
 	cacheDir, err := GetCacheDir()
 	if err != nil {
 		return "", err
@@ -20,7 +26,7 @@ func GetArtistMetaCachePath(artistID string) (string, error) {
 	if err := os.MkdirAll(artistsDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create artist cache directory: %w", err)
 	}
-	return filepath.Join(artistsDir, fmt.Sprintf("artist_%s.json", artistID)), nil
+	return filepath.Join(artistsDir, fmt.Sprintf("artist_%s.json", safeID)), nil
 }
 
 // ReadArtistMetaCache reads cached artist metadata pages.
@@ -41,29 +47,24 @@ func ReadArtistMetaCache(artistID string) ([]*model.ArtistMeta, time.Time, error
 }
 
 // WriteArtistMetaCache writes artist metadata pages to cache.
+// Uses file locking and unique temp files for concurrent safety.
 func WriteArtistMetaCache(artistID string, pages []*model.ArtistMeta) error {
-	cachePath, err := GetArtistMetaCachePath(artistID)
-	if err != nil {
-		return err
-	}
+	return WithCacheLock(func() error {
+		cachePath, err := GetArtistMetaCachePath(artistID)
+		if err != nil {
+			return err
+		}
 
-	cached := model.ArtistMetaCache{
-		ArtistID: artistID,
-		CachedAt: time.Now(),
-		Pages:    pages,
-	}
-	data, err := json.Marshal(cached)
-	if err != nil {
-		return fmt.Errorf("failed to marshal artist cache: %w", err)
-	}
+		cached := model.ArtistMetaCache{
+			ArtistID: artistID,
+			CachedAt: time.Now(),
+			Pages:    pages,
+		}
+		data, err := json.Marshal(cached)
+		if err != nil {
+			return fmt.Errorf("failed to marshal artist cache: %w", err)
+		}
 
-	tmpPath := cachePath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write temp artist cache: %w", err)
-	}
-	if err := os.Rename(tmpPath, cachePath); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename artist cache: %w", err)
-	}
-	return nil
+		return atomicWriteFile(cachePath, data)
+	})
 }

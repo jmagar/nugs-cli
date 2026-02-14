@@ -48,8 +48,8 @@ func listArtistLatestShows(ctx context.Context, artistId string, limit int, json
 	return list.ListArtistLatestShows(ctx, artistId, limit, jsonLevel)
 }
 
-func resolveCatPlistId(plistUrl string) (string, error) {
-	return list.ResolveCatPlistID(plistUrl)
+func resolveCatPlistId(ctx context.Context, plistUrl string) (string, error) {
+	return list.ResolveCatPlistID(ctx, plistUrl)
 }
 
 func catalogPlist(ctx context.Context, plistId, legacyToken string, cfg *Config, streamParams *StreamParams) error {

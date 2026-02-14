@@ -11,6 +11,8 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
+// buildCatalog creates a test catalog using the actual model type to ensure
+// compile-time safety if the model struct changes.
 func buildCatalog(containerID, artistID int, artistName string) *model.LatestCatalogResp {
 	catalog := &model.LatestCatalogResp{MethodName: "catalog.latest"}
 	catalog.Response.RecentItems = append(catalog.Response.RecentItems, struct {
@@ -83,6 +85,9 @@ func TestWriteCatalogCache_ConcurrentWriters_Consistency(t *testing.T) {
 		t.Fatalf("GetCacheDir failed: %v", err)
 	}
 
+	// Cache index files use these names by design:
+	//   artists_index.json  - artist name -> ID lookup
+	//   containers_index.json - containerID -> artist mapping
 	files := []string{
 		"catalog.json",
 		"catalog-meta.json",

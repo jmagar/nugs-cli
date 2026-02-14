@@ -15,8 +15,14 @@ type FileLock struct {
 	path     string
 }
 
+// staleLockThreshold is the age beyond which a lock file is considered stale.
+// This handles the case where a process crashes without calling Release().
+const staleLockThreshold = 10 * time.Second
+
 // AcquireLock acquires an exclusive lock on a lock file.
 // On Windows this uses a simple file-existence check as a best-effort lock.
+// Includes stale lock detection: if the lock file is older than staleLockThreshold
+// after all retries are exhausted, it is removed and one final attempt is made.
 func AcquireLock(lockPath string, maxRetries int) (*FileLock, error) {
 	lockDir := filepath.Dir(lockPath)
 	if err := os.MkdirAll(lockDir, 0755); err != nil {
@@ -34,6 +40,19 @@ func AcquireLock(lockPath string, maxRetries int) (*FileLock, error) {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
+
+	// Check if the lock file is stale (older than threshold)
+	info, statErr := os.Stat(lockPath)
+	if statErr == nil && time.Since(info.ModTime()) > staleLockThreshold {
+		_ = os.Remove(lockPath)
+		// One final attempt after removing stale lock
+		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
+		if err == nil {
+			return &FileLock{lockFile: f, path: lockPath}, nil
+		}
+		lastErr = err
+	}
+
 	return nil, fmt.Errorf("failed to acquire lock after %d retries: %w", maxRetries, lastErr)
 }
 
@@ -42,10 +61,10 @@ func (fl *FileLock) Release() error {
 	if fl.lockFile == nil {
 		return nil
 	}
-	fl.lockFile.Close()
+	err := fl.lockFile.Close()
 	fl.lockFile = nil
 	_ = os.Remove(fl.path)
-	return nil
+	return err
 }
 
 // WithCacheLock executes a function with the catalog cache lock acquired.

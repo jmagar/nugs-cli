@@ -60,6 +60,160 @@ func ApplyShowFilter(artists []model.Artist, operator string, value int) []model
 	return filtered
 }
 
+// sortContainersByDateDesc sorts containers by date string in descending order,
+// with empty dates sorted to the end.
+func sortContainersByDateDesc(containers []model.ContainerWithDate) {
+	sort.Slice(containers, func(i, j int) bool {
+		dateI := containers[i].DateStr
+		dateJ := containers[j].DateStr
+		if dateI == "" && dateJ != "" {
+			return false
+		}
+		if dateI != "" && dateJ == "" {
+			return true
+		}
+		if dateI == "" && dateJ == "" {
+			return false
+		}
+		return dateI > dateJ
+	})
+}
+
+// resolveArtistName extracts the artist name from metadata responses.
+func resolveArtistName(allMeta []*model.ArtistMeta) string {
+	if len(allMeta) > 0 && len(allMeta[0].Response.Containers) > 0 {
+		return allMeta[0].Response.Containers[0].ArtistName
+	}
+	return "Unknown Artist"
+}
+
+// collectContainers gathers containers from metadata, applying optional media filtering.
+func collectContainers(allMeta []*model.ArtistMeta, deps *Deps, mf model.MediaType) []model.ContainerWithDate {
+	var containers []model.ContainerWithDate
+	for _, meta := range allMeta {
+		for _, container := range meta.Response.Containers {
+			var showMedia model.MediaType
+			if deps != nil && deps.GetShowMediaType != nil {
+				showMedia = deps.GetShowMediaType(container)
+			} else {
+				showMedia = model.MediaTypeAudio
+			}
+
+			if mf != model.MediaTypeUnknown {
+				if deps != nil && deps.MatchesMediaFilter != nil {
+					if !deps.MatchesMediaFilter(showMedia, mf) {
+						continue
+					}
+				}
+			}
+
+			dateStr := container.PerformanceDateShortYearFirst
+			if dateStr == "" {
+				dateStr = container.PerformanceDate
+			}
+			containers = append(containers, model.ContainerWithDate{
+				Container: container,
+				DateStr:   dateStr,
+				MediaType: showMedia,
+			})
+		}
+	}
+	return containers
+}
+
+// collectContainersBasic gathers containers from metadata without media filtering.
+func collectContainersBasic(allMeta []*model.ArtistMeta) []model.ContainerWithDate {
+	var containers []model.ContainerWithDate
+	for _, meta := range allMeta {
+		for _, container := range meta.Response.Containers {
+			dateStr := container.PerformanceDateShortYearFirst
+			if dateStr == "" {
+				dateStr = container.PerformanceDate
+			}
+			containers = append(containers, model.ContainerWithDate{
+				Container: container,
+				DateStr:   dateStr,
+				MediaType: model.MediaTypeUnknown,
+			})
+		}
+	}
+	return containers
+}
+
+// emptyShowListJSON outputs an empty show list as JSON.
+func emptyShowListJSON(artistId string, artistName string) error {
+	artistIdInt, _ := strconv.Atoi(artistId)
+	emptyOutput := model.ShowListOutput{
+		ArtistID:   artistIdInt,
+		ArtistName: artistName,
+		Shows:      []model.ShowOutput{},
+		Total:      0,
+	}
+	jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal empty output: %w", err)
+	}
+	fmt.Println(string(jsonData))
+	return nil
+}
+
+// renderShowsJSON renders containers as JSON output based on the JSON level.
+func renderShowsJSON(containers []model.ContainerWithDate, artistId string, artistName string, jsonLevel string, extra map[string]any) error {
+	artistIdInt, _ := strconv.Atoi(artistId)
+
+	if jsonLevel == model.JSONLevelExtended || jsonLevel == model.JSONLevelRaw {
+		shows := make([]*model.AlbArtResp, len(containers))
+		for i, item := range containers {
+			shows[i] = item.Container
+		}
+		output := map[string]any{
+			"artistID":   artistIdInt,
+			"artistName": artistName,
+			"shows":      shows,
+			"total":      len(containers),
+		}
+		for k, v := range extra {
+			output[k] = v
+		}
+		jsonData, err := json.MarshalIndent(output, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal JSON: %w", err)
+		}
+		fmt.Println(string(jsonData))
+		return nil
+	}
+
+	output := model.ShowListOutput{
+		ArtistID:   artistIdInt,
+		ArtistName: artistName,
+		Shows:      make([]model.ShowOutput, len(containers)),
+		Total:      len(containers),
+	}
+
+	for i, item := range containers {
+		show := model.ShowOutput{
+			ContainerID: item.Container.ContainerID,
+			Date:        item.DateStr,
+			Title:       item.Container.ContainerInfo,
+			Venue:       item.Container.VenueName,
+		}
+
+		if jsonLevel == model.JSONLevelStandard {
+			show.VenueCity = item.Container.VenueCity
+			show.VenueState = item.Container.VenueState
+		}
+
+		output.Shows[i] = show
+	}
+
+	jsonData, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+	fmt.Println(string(jsonData))
+	return nil
+}
+
 // ListArtists fetches and displays a formatted list of all artists.
 func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error {
 	if jsonLevel == "" {
@@ -270,80 +424,14 @@ func ListArtistShows(ctx context.Context, artistId string, jsonLevel string, dep
 		return nil
 	}
 
-	artistName := "Unknown Artist"
-	if len(allMeta) > 0 && len(allMeta[0].Response.Containers) > 0 {
-		artistName = allMeta[0].Response.Containers[0].ArtistName
-	}
-
-	var allContainers []model.ContainerWithDate
-
-	for _, meta := range allMeta {
-		for _, container := range meta.Response.Containers {
-			var showMedia model.MediaType
-			if deps.GetShowMediaType != nil {
-				showMedia = deps.GetShowMediaType(container)
-			} else {
-				showMedia = model.MediaTypeAudio
-			}
-
-			if mf != model.MediaTypeUnknown {
-				if deps.MatchesMediaFilter != nil {
-					if !deps.MatchesMediaFilter(showMedia, mf) {
-						continue
-					}
-				}
-			}
-
-			dateStr := container.PerformanceDateShortYearFirst
-			if dateStr == "" {
-				dateStr = container.PerformanceDate
-			}
-			allContainers = append(allContainers, model.ContainerWithDate{
-				Container: container,
-				DateStr:   dateStr,
-				MediaType: showMedia,
-			})
-		}
-	}
+	artistName := resolveArtistName(allMeta)
+	allContainers := collectContainers(allMeta, deps, mf)
 
 	if len(allContainers) == 0 {
-		if jsonLevel != "" {
-			artistIdInt, _ := strconv.Atoi(artistId)
-			emptyOutput := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      []model.ShowOutput{},
-				Total:      0,
-			}
-			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal empty output: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			if mf != model.MediaTypeUnknown {
-				ui.PrintWarning(fmt.Sprintf("No %s shows found for %s", mf, artistName))
-			} else {
-				ui.PrintWarning(fmt.Sprintf("No shows found for %s", artistName))
-			}
-		}
-		return nil
+		return renderEmptyShows(artistId, artistName, jsonLevel, mf)
 	}
 
-	sort.Slice(allContainers, func(i, j int) bool {
-		dateI := allContainers[i].DateStr
-		dateJ := allContainers[j].DateStr
-		if dateI == "" && dateJ != "" {
-			return false
-		}
-		if dateI != "" && dateJ == "" {
-			return true
-		}
-		if dateI == "" && dateJ == "" {
-			return false
-		}
-		return dateI > dateJ
-	})
+	sortContainersByDateDesc(allContainers)
 
 	if jsonLevel != "" {
 		if jsonLevel == model.JSONLevelRaw {
@@ -354,86 +442,51 @@ func ListArtistShows(ctx context.Context, artistId string, jsonLevel string, dep
 			fmt.Println(string(jsonData))
 			return nil
 		}
+		return renderShowsJSON(allContainers, artistId, artistName, jsonLevel, nil)
+	}
 
-		artistIdInt, _ := strconv.Atoi(artistId)
+	filterLabel := ""
+	if mf != model.MediaTypeUnknown {
+		filterLabel = fmt.Sprintf(" (%s)", mf)
+	}
+	ui.PrintSection(fmt.Sprintf("%s - %d shows%s", artistName, len(allContainers), filterLabel))
 
-		if jsonLevel == model.JSONLevelExtended {
-			shows := make([]*model.AlbArtResp, len(allContainers))
-			for i, item := range allContainers {
-				shows[i] = item.Container
-			}
-			output := map[string]any{
-				"artistID":   artistIdInt,
-				"artistName": artistName,
-				"shows":      shows,
-				"total":      len(allContainers),
-			}
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			output := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      make([]model.ShowOutput, len(allContainers)),
-				Total:      len(allContainers),
-			}
+	table := ui.NewTable([]ui.TableColumn{
+		{Header: "Type", Width: 6, Align: "center"},
+		{Header: "ID", Width: 10, Align: "left"},
+		{Header: "Date", Width: 12, Align: "left"},
+		{Header: "Title", Width: 42, Align: "left"},
+		{Header: "Venue", Width: 25, Align: "left"},
+	})
 
-			for i, item := range allContainers {
-				show := model.ShowOutput{
-					ContainerID: item.Container.ContainerID,
-					Date:        item.DateStr,
-					Title:       item.Container.ContainerInfo,
-					Venue:       item.Container.VenueName,
-				}
+	for _, item := range allContainers {
+		container := item.Container
+		mediaIndicator := ui.GetMediaTypeIndicator(item.MediaType)
+		table.AddRow(
+			mediaIndicator,
+			strconv.Itoa(container.ContainerID),
+			item.DateStr,
+			container.ContainerInfo,
+			container.VenueName,
+		)
+	}
 
-				if jsonLevel == model.JSONLevelStandard {
-					show.VenueCity = item.Container.VenueCity
-					show.VenueState = item.Container.VenueState
-				}
+	table.Print()
+	fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
+		ui.ColorCyan, ui.ColorReset, ui.SymbolAudio, ui.SymbolVideo, ui.SymbolBoth)
+	ui.PrintInfo("To download a show, use: nugs <container_id>")
+	return nil
+}
 
-				output.Shows[i] = show
-			}
-
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		}
+// renderEmptyShows handles the empty result case for show listing.
+func renderEmptyShows(artistId string, artistName string, jsonLevel string, mf model.MediaType) error {
+	if jsonLevel != "" {
+		return emptyShowListJSON(artistId, artistName)
+	}
+	if mf != model.MediaTypeUnknown {
+		ui.PrintWarning(fmt.Sprintf("No %s shows found for %s", mf, artistName))
 	} else {
-		filterLabel := ""
-		if mf != model.MediaTypeUnknown {
-			filterLabel = fmt.Sprintf(" (%s)", mf)
-		}
-		ui.PrintSection(fmt.Sprintf("%s - %d shows%s", artistName, len(allContainers), filterLabel))
-
-		table := ui.NewTable([]ui.TableColumn{
-			{Header: "Type", Width: 6, Align: "center"},
-			{Header: "ID", Width: 10, Align: "left"},
-			{Header: "Date", Width: 12, Align: "left"},
-			{Header: "Title", Width: 42, Align: "left"},
-			{Header: "Venue", Width: 25, Align: "left"},
-		})
-
-		for _, item := range allContainers {
-			container := item.Container
-			mediaIndicator := ui.GetMediaTypeIndicator(item.MediaType)
-			table.AddRow(
-				mediaIndicator,
-				strconv.Itoa(container.ContainerID),
-				item.DateStr,
-				container.ContainerInfo,
-				container.VenueName,
-			)
-		}
-
-		table.Print()
-		fmt.Printf("\n%sLegend:%s %s Audio  %s Video  %s Both\n",
-			ui.ColorCyan, ui.ColorReset, ui.SymbolAudio, ui.SymbolVideo, ui.SymbolBoth)
-		ui.PrintInfo("To download a show, use: nugs <container_id>")
+		ui.PrintWarning(fmt.Sprintf("No shows found for %s", artistName))
 	}
 	return nil
 }
@@ -448,7 +501,6 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 		fmt.Printf("Fetching shows at venues matching \"%s\"...\n", venueFilter)
 	}
 
-	// Use availType=2 to get complete catalog (both audio and video shows)
 	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
@@ -460,12 +512,51 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 		return nil
 	}
 
-	artistName := "Unknown Artist"
-	if len(allMeta[0].Response.Containers) > 0 {
-		artistName = allMeta[0].Response.Containers[0].ArtistName
+	artistName := resolveArtistName(allMeta)
+	filteredContainers := filterContainersByVenue(allMeta, venueFilter)
+
+	if len(filteredContainers) == 0 {
+		if jsonLevel != "" {
+			return emptyShowListJSON(artistId, artistName)
+		}
+		ui.PrintWarning(fmt.Sprintf("No shows found for %s at venues matching \"%s\"", artistName, venueFilter))
+		return nil
 	}
 
-	var filteredContainers []model.ContainerWithDate
+	sortContainersByDateDesc(filteredContainers)
+
+	if jsonLevel != "" {
+		extra := map[string]any{"venueFilter": venueFilter}
+		return renderShowsJSON(filteredContainers, artistId, artistName, jsonLevel, extra)
+	}
+
+	ui.PrintSection(fmt.Sprintf("%s - Shows at \"%s\" (%d shows)", artistName, venueFilter, len(filteredContainers)))
+
+	table := ui.NewTable([]ui.TableColumn{
+		{Header: "ID", Width: 10, Align: "left"},
+		{Header: "Date", Width: 12, Align: "left"},
+		{Header: "Title", Width: 45, Align: "left"},
+		{Header: "Venue", Width: 30, Align: "left"},
+	})
+
+	for _, item := range filteredContainers {
+		container := item.Container
+		table.AddRow(
+			strconv.Itoa(container.ContainerID),
+			item.DateStr,
+			container.ContainerInfo,
+			container.VenueName,
+		)
+	}
+
+	table.Print()
+	ui.PrintInfo("To download a show, use: nugs <container_id>")
+	return nil
+}
+
+// filterContainersByVenue filters containers by venue name substring match.
+func filterContainersByVenue(allMeta []*model.ArtistMeta, venueFilter string) []model.ContainerWithDate {
+	var filtered []model.ContainerWithDate
 	venueFilterLower := strings.ToLower(venueFilter)
 
 	for _, meta := range allMeta {
@@ -477,7 +568,7 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 				if dateStr == "" {
 					dateStr = container.PerformanceDate
 				}
-				filteredContainers = append(filteredContainers, model.ContainerWithDate{
+				filtered = append(filtered, model.ContainerWithDate{
 					Container: container,
 					DateStr:   dateStr,
 					MediaType: model.MediaTypeUnknown,
@@ -485,116 +576,7 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 			}
 		}
 	}
-
-	if len(filteredContainers) == 0 {
-		if jsonLevel != "" {
-			artistIdInt, _ := strconv.Atoi(artistId)
-			emptyOutput := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      []model.ShowOutput{},
-				Total:      0,
-			}
-			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal empty output: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			ui.PrintWarning(fmt.Sprintf("No shows found for %s at venues matching \"%s\"", artistName, venueFilter))
-		}
-		return nil
-	}
-
-	sort.Slice(filteredContainers, func(i, j int) bool {
-		dateI := filteredContainers[i].DateStr
-		dateJ := filteredContainers[j].DateStr
-		if dateI == "" && dateJ != "" {
-			return false
-		}
-		if dateI != "" && dateJ == "" {
-			return true
-		}
-		if dateI == "" && dateJ == "" {
-			return false
-		}
-		return dateI > dateJ
-	})
-
-	if jsonLevel != "" {
-		artistIdInt, _ := strconv.Atoi(artistId)
-
-		if jsonLevel == model.JSONLevelExtended || jsonLevel == model.JSONLevelRaw {
-			shows := make([]*model.AlbArtResp, len(filteredContainers))
-			for i, item := range filteredContainers {
-				shows[i] = item.Container
-			}
-			output := map[string]any{
-				"artistID":    artistIdInt,
-				"artistName":  artistName,
-				"venueFilter": venueFilter,
-				"shows":       shows,
-				"total":       len(filteredContainers),
-			}
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			output := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      make([]model.ShowOutput, len(filteredContainers)),
-				Total:      len(filteredContainers),
-			}
-
-			for i, item := range filteredContainers {
-				show := model.ShowOutput{
-					ContainerID: item.Container.ContainerID,
-					Date:        item.DateStr,
-					Title:       item.Container.ContainerInfo,
-					Venue:       item.Container.VenueName,
-				}
-
-				if jsonLevel == model.JSONLevelStandard {
-					show.VenueCity = item.Container.VenueCity
-					show.VenueState = item.Container.VenueState
-				}
-
-				output.Shows[i] = show
-			}
-
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		}
-	} else {
-		ui.PrintSection(fmt.Sprintf("%s - Shows at \"%s\" (%d shows)", artistName, venueFilter, len(filteredContainers)))
-
-		table := ui.NewTable([]ui.TableColumn{
-			{Header: "ID", Width: 10, Align: "left"},
-			{Header: "Date", Width: 12, Align: "left"},
-			{Header: "Title", Width: 45, Align: "left"},
-			{Header: "Venue", Width: 30, Align: "left"},
-		})
-
-		for _, item := range filteredContainers {
-			container := item.Container
-			table.AddRow(
-				strconv.Itoa(container.ContainerID),
-				item.DateStr,
-				container.ContainerInfo,
-				container.VenueName,
-			)
-		}
-
-		table.Print()
-		ui.PrintInfo("To download a show, use: nugs <container_id>")
-	}
-	return nil
+	return filtered
 }
 
 // ListArtistLatestShows displays the latest N shows for an artist.
@@ -603,7 +585,6 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 		fmt.Printf("Fetching latest %d shows...\n", limit)
 	}
 
-	// Use availType=2 to get complete catalog (both audio and video shows)
 	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
@@ -615,61 +596,18 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 		return nil
 	}
 
-	artistName := "Unknown Artist"
-	if len(allMeta) > 0 && len(allMeta[0].Response.Containers) > 0 {
-		artistName = allMeta[0].Response.Containers[0].ArtistName
-	}
-
-	var allContainers []model.ContainerWithDate
-
-	for _, meta := range allMeta {
-		for _, container := range meta.Response.Containers {
-			dateStr := container.PerformanceDateShortYearFirst
-			if dateStr == "" {
-				dateStr = container.PerformanceDate
-			}
-			allContainers = append(allContainers, model.ContainerWithDate{
-				Container: container,
-				DateStr:   dateStr,
-				MediaType: model.MediaTypeUnknown,
-			})
-		}
-	}
+	artistName := resolveArtistName(allMeta)
+	allContainers := collectContainersBasic(allMeta)
 
 	if len(allContainers) == 0 {
 		if jsonLevel != "" {
-			artistIdInt, _ := strconv.Atoi(artistId)
-			emptyOutput := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      []model.ShowOutput{},
-				Total:      0,
-			}
-			jsonData, err := json.MarshalIndent(emptyOutput, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal empty output: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			ui.PrintWarning(fmt.Sprintf("No shows found for %s", artistName))
+			return emptyShowListJSON(artistId, artistName)
 		}
+		ui.PrintWarning(fmt.Sprintf("No shows found for %s", artistName))
 		return nil
 	}
 
-	sort.Slice(allContainers, func(i, j int) bool {
-		dateI := allContainers[i].DateStr
-		dateJ := allContainers[j].DateStr
-		if dateI == "" && dateJ != "" {
-			return false
-		}
-		if dateI != "" && dateJ == "" {
-			return true
-		}
-		if dateI == "" && dateJ == "" {
-			return false
-		}
-		return dateI > dateJ
-	})
+	sortContainersByDateDesc(allContainers)
 
 	if limit > len(allContainers) {
 		limit = len(allContainers)
@@ -677,92 +615,49 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 	latestContainers := allContainers[:limit]
 
 	if jsonLevel != "" {
-		artistIdInt, _ := strconv.Atoi(artistId)
-
-		if jsonLevel == model.JSONLevelExtended || jsonLevel == model.JSONLevelRaw {
-			shows := make([]*model.AlbArtResp, len(latestContainers))
-			for i, item := range latestContainers {
-				shows[i] = item.Container
-			}
-			output := map[string]any{
-				"artistID":   artistIdInt,
-				"artistName": artistName,
-				"limit":      limit,
-				"shows":      shows,
-				"total":      len(latestContainers),
-			}
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		} else {
-			output := model.ShowListOutput{
-				ArtistID:   artistIdInt,
-				ArtistName: artistName,
-				Shows:      make([]model.ShowOutput, len(latestContainers)),
-				Total:      len(latestContainers),
-			}
-
-			for i, item := range latestContainers {
-				show := model.ShowOutput{
-					ContainerID: item.Container.ContainerID,
-					Date:        item.DateStr,
-					Title:       item.Container.ContainerInfo,
-					Venue:       item.Container.VenueName,
-				}
-
-				if jsonLevel == model.JSONLevelStandard {
-					show.VenueCity = item.Container.VenueCity
-					show.VenueState = item.Container.VenueState
-				}
-
-				output.Shows[i] = show
-			}
-
-			jsonData, err := json.MarshalIndent(output, "", "  ")
-			if err != nil {
-				return fmt.Errorf("failed to marshal JSON: %w", err)
-			}
-			fmt.Println(string(jsonData))
-		}
-	} else {
-		ui.PrintHeader(fmt.Sprintf("%s - Latest %d Shows", artistName, len(latestContainers)))
-
-		table := ui.NewTable([]ui.TableColumn{
-			{Header: "ID", Width: 10, Align: "right"},
-			{Header: "Date", Width: 12, Align: "left"},
-			{Header: "Title", Width: 50, Align: "left"},
-			{Header: "Venue", Width: 30, Align: "left"},
-		})
-
-		for _, item := range latestContainers {
-			table.AddRow(
-				fmt.Sprintf("%d", item.Container.ContainerID),
-				item.DateStr,
-				item.Container.ContainerInfo,
-				item.Container.VenueName,
-			)
-		}
-
-		table.Print()
-		fmt.Printf("\n%s%s%s To download: %snugs <container_id>%s\n\n",
-			ui.ColorCyan, ui.SymbolInfo, ui.ColorReset, ui.ColorBold, ui.ColorReset)
+		extra := map[string]any{"limit": limit}
+		return renderShowsJSON(latestContainers, artistId, artistName, jsonLevel, extra)
 	}
+
+	ui.PrintHeader(fmt.Sprintf("%s - Latest %d Shows", artistName, len(latestContainers)))
+
+	table := ui.NewTable([]ui.TableColumn{
+		{Header: "ID", Width: 10, Align: "right"},
+		{Header: "Date", Width: 12, Align: "left"},
+		{Header: "Title", Width: 50, Align: "left"},
+		{Header: "Venue", Width: 30, Align: "left"},
+	})
+
+	for _, item := range latestContainers {
+		table.AddRow(
+			fmt.Sprintf("%d", item.Container.ContainerID),
+			item.DateStr,
+			item.Container.ContainerInfo,
+			item.Container.VenueName,
+		)
+	}
+
+	table.Print()
+	fmt.Printf("\n%s%s%s To download: %snugs <container_id>%s\n\n",
+		ui.ColorCyan, ui.SymbolInfo, ui.ColorReset, ui.ColorBold, ui.ColorReset)
 	return nil
 }
 
 // ResolveCatPlistID resolves a catalog playlist URL to its GUID.
-func ResolveCatPlistID(plistUrl string) (string, error) {
-	req, err := api.Client.Get(plistUrl)
+func ResolveCatPlistID(ctx context.Context, plistUrl string) (string, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, plistUrl, nil)
 	if err != nil {
 		return "", err
 	}
-	req.Body.Close()
-	if req.StatusCode != http.StatusOK {
-		return "", errors.New(req.Status)
+	resp, err := api.Client.Do(httpReq)
+	if err != nil {
+		return "", err
 	}
-	location := req.Request.URL.String()
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", errors.New(resp.Status)
+	}
+	location := resp.Request.URL.String()
 	u, err := url.Parse(location)
 	if err != nil {
 		return "", err
@@ -780,10 +675,13 @@ func ResolveCatPlistID(plistUrl string) (string, error) {
 
 // CatalogPlist downloads a catalog playlist.
 func CatalogPlist(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
-	resolvedId, err := ResolveCatPlistID(plistId)
+	resolvedId, err := ResolveCatPlistID(ctx, plistId)
 	if err != nil {
 		fmt.Println("Failed to resolve playlist ID.")
 		return err
+	}
+	if deps.Playlist == nil {
+		return errors.New("playlist handler not configured")
 	}
 	return deps.Playlist(ctx, resolvedId, legacyToken, cfg, streamParams, true)
 }
