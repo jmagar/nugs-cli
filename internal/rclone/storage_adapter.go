@@ -23,7 +23,7 @@ type StorageAdapter struct {
 	calculateLocal    func(path string) int64
 	removeAll         func(path string) error
 
-	buildUploadCommand func(localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error)
+	buildUploadCommand func(ctx context.Context, localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error)
 	buildVerifyCommand func(localPath, remoteFullPath string) (*exec.Cmd, error)
 	runWithProgress    func(cmd *exec.Cmd, onProgress UploadProgressFunc) error
 	runCommand         func(cmd *exec.Cmd) error
@@ -40,7 +40,7 @@ func NewStorageAdapter() *StorageAdapter {
 		getRcloneBasePath:  helpers.GetRcloneBasePath,
 		calculateLocal:     helpers.CalculateLocalSize,
 		removeAll:          os.RemoveAll,
-		buildUploadCommand: BuildRcloneUploadCommand,
+		buildUploadCommand: BuildRcloneUploadCommandContext,
 		buildVerifyCommand: BuildRcloneVerifyCommand,
 		runWithProgress: func(cmd *exec.Cmd, onProgress UploadProgressFunc) error {
 			return RunRcloneWithProgress(cmd, onProgress)
@@ -80,7 +80,10 @@ func (a *StorageAdapter) Upload(ctx context.Context, cfg *model.Config, req mode
 		transfers = 4
 	}
 
-	cmd, remoteFullPath, err := a.buildUploadCommand(req.LocalPath, req.ArtistFolder, cfg, transfers, req.IsVideo)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cmd, remoteFullPath, err := a.buildUploadCommand(ctx, req.LocalPath, req.ArtistFolder, cfg, transfers, req.IsVideo)
 	if err != nil {
 		return err
 	}
@@ -200,7 +203,12 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 
 	remoteDest := cfg.RcloneRemote + ":" + a.getRcloneBasePath(cfg, isVideo)
 	fullPath := remoteDest + "/" + artistFolder
-	cmd := a.command("rclone", "lsf", fullPath, "--dirs-only")
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := a.commandContext(timeoutCtx, "rclone", "lsf", fullPath, "--dirs-only")
 	output, err := a.outputCommand(cmd)
 	if err != nil {
 		if code, ok := a.exitCode(err); ok && code == 3 {

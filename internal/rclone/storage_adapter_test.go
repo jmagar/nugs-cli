@@ -13,7 +13,7 @@ func TestStorageAdapterUploadWithHooksAndDelete(t *testing.T) {
 	adapter := NewStorageAdapter()
 	adapter.validatePath = func(string) error { return nil }
 	adapter.calculateLocal = func(string) int64 { return 4096 }
-	adapter.buildUploadCommand = func(localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
+	adapter.buildUploadCommand = func(ctx context.Context, localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
 		if localPath != "/tmp/local" {
 			t.Fatalf("local path = %q, want /tmp/local", localPath)
 		}
@@ -124,7 +124,7 @@ func TestStorageAdapterPathExistsHandlesExitCodeThree(t *testing.T) {
 func TestStorageAdapterListArtistFoldersParsesOutput(t *testing.T) {
 	adapter := NewStorageAdapter()
 	adapter.validatePath = func(string) error { return nil }
-	adapter.command = func(name string, args ...string) *exec.Cmd {
+	adapter.commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
 		return exec.Command("echo")
 	}
 	adapter.outputCommand = func(*exec.Cmd) ([]byte, error) {

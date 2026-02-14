@@ -93,8 +93,8 @@ type UploadProgressFunc func(percent int, speed, uploaded, total string)
 // UploadToRclone uploads the local path to the configured rclone remote.
 // If progressFn is non-nil, it is called with progress updates.
 // If fallbackPrintFn is non-nil, it is used for non-progress-box output.
-func UploadToRclone(localPath string, artistFolder string, cfg *model.Config, progressFn UploadProgressFunc, isVideo bool, onPreUpload func(totalBytes int64), onComplete func(), onDeleteAfterUpload func(localPath string)) error {
-	return defaultStorageProvider.Upload(context.Background(), cfg, model.UploadRequest{
+func UploadToRclone(ctx context.Context, localPath string, artistFolder string, cfg *model.Config, progressFn UploadProgressFunc, isVideo bool, onPreUpload func(totalBytes int64), onComplete func(), onDeleteAfterUpload func(localPath string)) error {
+	return defaultStorageProvider.Upload(ctx, cfg, model.UploadRequest{
 		LocalPath:    localPath,
 		ArtistFolder: artistFolder,
 		IsVideo:      isVideo,
@@ -113,6 +113,11 @@ func UploadToRclone(localPath string, artistFolder string, cfg *model.Config, pr
 
 // BuildRcloneUploadCommand constructs the rclone copy/copyto command.
 func BuildRcloneUploadCommand(localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
+	return BuildRcloneUploadCommandContext(context.Background(), localPath, artistFolder, cfg, transfers, isVideo)
+}
+
+// BuildRcloneUploadCommandContext constructs the rclone copy/copyto command with context support.
+func BuildRcloneUploadCommandContext(ctx context.Context, localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
 	remoteDest := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, isVideo)
 
 	localInfo, err := os.Stat(localPath)
@@ -131,11 +136,11 @@ func BuildRcloneUploadCommand(localPath, artistFolder string, cfg *model.Config,
 	if localInfo.IsDir() {
 		args := []string{"copy", localPath, remoteFullPath, transfersFlag}
 		args = append(args, statsFlags...)
-		return exec.Command("rclone", args...), remoteFullPath, nil
+		return exec.CommandContext(ctx, "rclone", args...), remoteFullPath, nil
 	}
 	args := []string{"copyto", localPath, remoteFullPath, transfersFlag}
 	args = append(args, statsFlags...)
-	return exec.Command("rclone", args...), remoteFullPath, nil
+	return exec.CommandContext(ctx, "rclone", args...), remoteFullPath, nil
 }
 
 // ParseHumanizedBytes converts a human-readable byte string back to bytes.
@@ -349,11 +354,11 @@ func BuildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, erro
 }
 
 // RemotePathExists checks if a path exists on the configured rclone remote.
-func RemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
-	return defaultStorageProvider.PathExists(context.Background(), cfg, remotePath, isVideo)
+func RemotePathExists(ctx context.Context, remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
+	return defaultStorageProvider.PathExists(ctx, cfg, remotePath, isVideo)
 }
 
 // ListRemoteArtistFolders returns show folder names under one artist folder on remote storage.
-func ListRemoteArtistFolders(artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error) {
-	return defaultStorageProvider.ListArtistFolders(context.Background(), cfg, artistFolder, isVideo)
+func ListRemoteArtistFolders(ctx context.Context, artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error) {
+	return defaultStorageProvider.ListArtistFolders(ctx, cfg, artistFolder, isVideo)
 }

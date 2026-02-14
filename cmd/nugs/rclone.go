@@ -4,6 +4,7 @@ package main
 // These will be removed in Phase 12 when all callers move to internal packages.
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"time"
@@ -26,7 +27,7 @@ func uploadToRclone(localPath string, artistFolder string, cfg *Config, progress
 	if progressBox != nil {
 		return uploadWithProgressBox(localPath, artistFolder, cfg, progressBox, isVideo)
 	}
-	return rclone.UploadToRclone(localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
+	return rclone.UploadToRclone(context.Background(), localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
 }
 
 // uploadWithProgressBox handles upload with progress box updates and phase tracking.
@@ -86,7 +87,7 @@ func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, p
 			renderProgressBox(progressBox)
 		}
 
-		err := rclone.UploadToRclone(localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
+		err := rclone.UploadToRclone(context.Background(), localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
 
 		// Set upload duration and final state (success or error)
 		progressBox.Mu.Lock()
@@ -141,10 +142,10 @@ func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, erro
 	return rclone.BuildRcloneVerifyCommand(localPath, remoteFullPath)
 }
 
-func remotePathExists(remotePath string, cfg *Config, isVideo bool) (bool, error) {
-	return rclone.RemotePathExists(remotePath, cfg, isVideo)
+func remotePathExists(ctx context.Context, remotePath string, cfg *Config, isVideo bool) (bool, error) {
+	return rclone.RemotePathExists(ctx, remotePath, cfg, isVideo)
 }
 
-func listRemoteArtistFolders(artistFolder string, cfg *Config, isVideo bool) (map[string]struct{}, error) {
-	return rclone.ListRemoteArtistFolders(artistFolder, cfg, isVideo)
+func listRemoteArtistFolders(ctx context.Context, artistFolder string, cfg *Config, isVideo bool) (map[string]struct{}, error) {
+	return rclone.ListRemoteArtistFolders(ctx, artistFolder, cfg, isVideo)
 }
