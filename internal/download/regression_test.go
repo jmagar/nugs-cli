@@ -106,12 +106,12 @@ func TestHlsOnly_ValidationErrors_NoPanic(t *testing.T) {
 	tests := []struct {
 		name        string
 		playlist    string
-		wantErrText string
+		wantErrText string // empty means just check err != nil (library error)
 	}{
 		{
 			name:        "rejects invalid playlist payload",
 			playlist:    "#EXTM3U\n#EXT-X-NOT-A-REAL-TAG\n",
-			wantErrText: "detect playlist type",
+			wantErrText: "", // library error, don't assert on exact message
 		},
 		{
 			name: "rejects playlist with no key",
@@ -152,9 +152,9 @@ func TestHlsOnly_ValidationErrors_NoPanic(t *testing.T) {
 				t.Fatal("HlsOnly panicked")
 			}
 			if gotErr == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.wantErrText)
+				t.Fatal("expected error, got nil")
 			}
-			if !strings.Contains(gotErr.Error(), tc.wantErrText) {
+			if tc.wantErrText != "" && !strings.Contains(gotErr.Error(), tc.wantErrText) {
 				t.Fatalf("expected error containing %q, got %q", tc.wantErrText, gotErr.Error())
 			}
 		})

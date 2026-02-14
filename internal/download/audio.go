@@ -37,25 +37,31 @@ var trackFallback = map[int]int{
 	5: 1, // AAC fallback to ALAC
 }
 
-// WriteCounterWrite implements the io.Writer interface for WriteCounter.
-// It updates download progress and calls the appropriate progress callback.
-func WriteCounterWrite(wc *model.WriteCounter, p []byte, deps *Deps) (int, error) {
-	if deps.WaitIfPausedOrCancelled != nil {
-		if err := deps.WaitIfPausedOrCancelled(); err != nil {
-			return 0, err
-		}
-	}
-	var speed int64
-	n := len(p)
+// updateWriteCounterProgress updates download progress on a WriteCounter and returns the computed speed.
+func updateWriteCounterProgress(wc *model.WriteCounter, n int) int64 {
 	wc.Downloaded += int64(n)
 	if wc.Total > 0 {
 		percentage := float64(wc.Downloaded) / float64(wc.Total) * float64(model.MaxProgressPercent)
 		wc.Percentage = int(percentage)
 	}
+	var speed int64
 	toDivideBy := time.Now().UnixMilli() - wc.StartTime
 	if toDivideBy != 0 {
 		speed = int64(wc.Downloaded) * model.KBpsDivisor / toDivideBy
 	}
+	return speed
+}
+
+// writeCounterWrite implements the io.Writer interface for WriteCounter.
+// It updates download progress and calls the appropriate progress callback.
+func writeCounterWrite(wc *model.WriteCounter, p []byte, deps *Deps) (int, error) {
+	if deps.WaitIfPausedOrCancelled != nil {
+		if err := deps.WaitIfPausedOrCancelled(); err != nil {
+			return 0, err
+		}
+	}
+	n := len(p)
+	speed := updateWriteCounterProgress(wc, n)
 	if wc.OnProgress != nil {
 		wc.OnProgress(wc.Downloaded, wc.Total, speed)
 	} else if deps.PrintProgress != nil {
@@ -124,7 +130,7 @@ type writeCounterAdapter struct {
 }
 
 func (a *writeCounterAdapter) Write(p []byte) (int, error) {
-	return WriteCounterWrite(a.wc, p, a.deps)
+	return writeCounterWrite(a.wc, p, a.deps)
 }
 
 // ExtractBitrate extracts the bitrate from a manifest URL.

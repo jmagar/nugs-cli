@@ -165,6 +165,5 @@ func PaidLstream(ctx context.Context, query, uguID string, cfg *model.Config, st
 	if err != nil {
 		return err
 	}
-	err = Video(ctx, showId, uguID, cfg, streamParams, nil, true, nil, deps)
-	return err
+	return Video(ctx, showId, uguID, cfg, streamParams, nil, true, nil, deps)
 }

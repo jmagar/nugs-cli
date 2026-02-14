@@ -307,17 +307,8 @@ type simpleWriteCounter struct {
 }
 
 func (s *simpleWriteCounter) Write(p []byte) (int, error) {
-	var speed int64
 	n := len(p)
-	s.wc.Downloaded += int64(n)
-	if s.wc.Total > 0 {
-		percentage := float64(s.wc.Downloaded) / float64(s.wc.Total) * float64(model.MaxProgressPercent)
-		s.wc.Percentage = int(percentage)
-	}
-	toDivideBy := time.Now().UnixMilli() - s.wc.StartTime
-	if toDivideBy != 0 {
-		speed = int64(s.wc.Downloaded) * model.KBpsDivisor / toDivideBy
-	}
+	speed := updateWriteCounterProgress(s.wc, n)
 	if s.wc.OnProgress != nil {
 		s.wc.OnProgress(s.wc.Downloaded, s.wc.Total, speed)
 	}
@@ -470,8 +461,12 @@ func WriteChapsFile(chapters []any, dur int) (string, error) {
 			if nextChapStart <= start {
 				continue
 			}
+			end := int(math.Round(nextChapStart)) - 1
+			if end < 0 {
+				end = 0
+			}
 			_, err = f.WriteString(fmt.Sprintf("\n[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\n",
-				int(math.Round(start)), int(math.Round(nextChapStart)-1)))
+				int(math.Round(start)), end))
 		} else {
 			_, err = f.WriteString(fmt.Sprintf("\n[CHAPTER]\nTIMEBASE=1/1\nSTART=%d\nEND=%d\n",
 				int(math.Round(start)), dur))
