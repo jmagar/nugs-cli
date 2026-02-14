@@ -14,11 +14,11 @@ import (
 // (main) package or would cause circular imports.
 type Deps struct {
 	// RemotePathExists checks whether a path exists on the rclone remote.
-	RemotePathExists func(remotePath string, cfg *model.Config, isVideo bool) (bool, error)
+	RemotePathExists func(ctx context.Context, remotePath string, cfg *model.Config, isVideo bool) (bool, error)
 
 	// ListRemoteArtistFolders returns show folder names under an artist
 	// folder on remote storage.
-	ListRemoteArtistFolders func(artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error)
+	ListRemoteArtistFolders func(ctx context.Context, artistFolder string, cfg *model.Config, isVideo bool) (map[string]struct{}, error)
 
 	// Album downloads a single album/show by container ID.
 	// Used by gap-fill to download missing shows.

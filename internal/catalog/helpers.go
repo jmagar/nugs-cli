@@ -1,11 +1,13 @@
 package catalog
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -38,14 +40,14 @@ func WarnRemoteCheckError(err error) {
 }
 
 // ListAllRemoteArtistFolders lists all artist folders on the remote.
-func ListAllRemoteArtistFolders(cfg *model.Config) (map[string]struct{}, error) {
+func ListAllRemoteArtistFolders(ctx context.Context, cfg *model.Config) (map[string]struct{}, error) {
 	folders := make(map[string]struct{})
 	if !cfg.RcloneEnabled {
 		return folders, nil
 	}
 
 	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
-	cmd := exec.Command("rclone", "lsf", remoteDest, "--dirs-only")
+	cmd := exec.CommandContext(ctx, "rclone", "lsf", remoteDest, "--dirs-only")
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError
@@ -78,9 +80,13 @@ func NormalizeArtistFolderKey(name string) string {
 }
 
 // ShowExists checks if a show has been downloaded locally or exists on remote storage.
-func ShowExists(show *model.AlbArtResp, cfg *model.Config, deps *Deps) bool {
+// It checks the path appropriate for the given mediaType, falling back to audio if unknown.
+func ShowExists(ctx context.Context, show *model.AlbArtResp, cfg *model.Config, mediaType model.MediaType, deps *Deps) bool {
+	if mediaType == model.MediaTypeUnknown {
+		mediaType = model.MediaTypeAudio
+	}
 	resolver := helpers.NewConfigPathResolver(cfg)
-	albumPath := resolver.LocalShowPath(show, model.MediaTypeAudio)
+	albumPath := resolver.LocalShowPath(show, mediaType)
 
 	// Check local existence
 	_, err := os.Stat(albumPath)
@@ -89,9 +95,10 @@ func ShowExists(show *model.AlbArtResp, cfg *model.Config, deps *Deps) bool {
 	}
 
 	// Check remote if rclone enabled
+	isVideo := mediaType.HasVideo()
 	if cfg.RcloneEnabled && deps.RemotePathExists != nil {
 		remotePath := resolver.RemoteShowPath(show)
-		remoteExists, err := deps.RemotePathExists(remotePath, cfg, false)
+		remoteExists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
 		if err != nil {
 			WarnRemoteCheckError(err)
 			return false
@@ -121,7 +128,7 @@ func CollectArtistShows(artistMetas []*model.ArtistMeta) (allShows []*model.AlbA
 //   - Audio: checks OutPath only
 //   - Video: checks VideoOutPath (or OutPath if VideoOutPath not set)
 //   - Both/Unknown: checks both OutPath and VideoOutPath (if different)
-func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, mediaFilter model.MediaType) ArtistPresenceIndex {
+func BuildArtistPresenceIndex(ctx context.Context, artistName string, cfg *model.Config, deps *Deps, mediaFilter model.MediaType) ArtistPresenceIndex {
 	idx := ArtistPresenceIndex{
 		ArtistFolder:  helpers.Sanitise(artistName),
 		LocalFolders:  make(map[string]struct{}),
@@ -153,7 +160,7 @@ func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, 
 		// - Video: check video path (isVideo=true)
 		// - Both/Unknown: check audio path (isVideo=false) as primary
 		isVideo := mediaFilter == model.MediaTypeVideo
-		remoteFolders, err := deps.ListRemoteArtistFolders(idx.ArtistFolder, cfg, isVideo)
+		remoteFolders, err := deps.ListRemoteArtistFolders(ctx, idx.ArtistFolder, cfg, isVideo)
 		if err != nil {
 			idx.RemoteListErr = err
 		} else {
@@ -165,7 +172,7 @@ func BuildArtistPresenceIndex(artistName string, cfg *model.Config, deps *Deps, 
 }
 
 // IsShowDownloaded checks if a show is downloaded using the pre-built index.
-func IsShowDownloaded(show *model.AlbArtResp, idx ArtistPresenceIndex, cfg *model.Config, deps *Deps) bool {
+func IsShowDownloaded(ctx context.Context, show *model.AlbArtResp, idx ArtistPresenceIndex, cfg *model.Config, deps *Deps) bool {
 	albumFolder := helpers.BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
 
 	if _, ok := idx.LocalFolders[albumFolder]; ok {
@@ -177,8 +184,8 @@ func IsShowDownloaded(show *model.AlbArtResp, idx ArtistPresenceIndex, cfg *mode
 
 	// Fallback for remote-list failures to preserve correctness.
 	if cfg.RcloneEnabled && idx.RemoteListErr != nil && deps.RemotePathExists != nil {
-		remotePath := filepath.Join(idx.ArtistFolder, albumFolder)
-		remoteExists, err := deps.RemotePathExists(remotePath, cfg, false)
+		remotePath := path.Join(idx.ArtistFolder, albumFolder)
+		remoteExists, err := deps.RemotePathExists(ctx, remotePath, cfg, false)
 		if err != nil {
 			WarnRemoteCheckError(err)
 			return false

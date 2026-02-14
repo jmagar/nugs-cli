@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
@@ -39,12 +41,13 @@ func main() {
 func bootstrap() (*Config, string) {
 	setupSessionPersistence()
 
-	// Check if any config file exists, if not, prompt to create one
 	configExists := false
-	homeDir, _ := os.UserHomeDir()
-	configSearchPaths := []string{
-		filepath.Join(homeDir, ".nugs", "config.json"),
-		filepath.Join(homeDir, ".config", "nugs", "config.json"),
+	configSearchPaths := []string{"config.json"} // local dir first
+	if homeDir, err := os.UserHomeDir(); err == nil {
+		configSearchPaths = append(configSearchPaths,
+			filepath.Join(homeDir, ".nugs", "config.json"),
+			filepath.Join(homeDir, ".config", "nugs", "config.json"),
+		)
 	}
 	for _, p := range configSearchPaths {
 		if _, statErr := os.Stat(p); statErr == nil {
@@ -155,7 +158,8 @@ func run(cfg *Config, jsonLevel string) {
 	stopHotkeys := startCrawlHotkeysIfNeeded(cfg.Urls)
 	defer stopHotkeys()
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	// Auto-refresh catalog cache if needed
 	err := autoRefreshIfNeeded(ctx, cfg)
@@ -216,7 +220,7 @@ func run(cfg *Config, jsonLevel string) {
 	}
 	subInfo, err := getSubInfo(ctx, token)
 	if err != nil {
-		handleErr("Failed to get subcription info.", err, true)
+		handleErr("Failed to get subscription info.", err, true)
 	}
 	legacyToken, uguID, err := extractLegToken(token)
 	if err != nil {
@@ -384,7 +388,7 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 			handleErr("Catalog cache status failed.", err, true)
 		}
 	case "stats":
-		err := catalogStats(jsonLevel)
+		err := catalogStats(ctx, jsonLevel)
 		if err != nil {
 			handleErr("Catalog stats failed.", err, true)
 		}
@@ -411,7 +415,7 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 				limit = parsedLimit
 			}
 		}
-		err := catalogLatest(limit, jsonLevel)
+		err := catalogLatest(ctx, limit, jsonLevel)
 		if err != nil {
 			handleErr("Catalog latest failed.", err, true)
 		}
@@ -605,7 +609,7 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 		errorsBefore := ui.RunErrorCount.Load()
 		warningsBefore := ui.RunWarningCount.Load()
 		fmt.Printf("\n%s%s Item %d of %d%s\n", colorBold, symbolPackage, albumNum+1, albumTotal, colorReset)
-		itemId, mediaType := checkUrl(_url)
+		itemId, mediaType := checkURL(_url)
 		if itemId == "" {
 			fmt.Println("Invalid URL:", _url)
 			continue

@@ -35,12 +35,12 @@ func catalogCacheStatus(jsonLevel string) error {
 	return catalog.CatalogCacheStatus(jsonLevel, buildCatalogDeps())
 }
 
-func catalogStats(jsonLevel string) error {
-	return catalog.CatalogStats(jsonLevel)
+func catalogStats(ctx context.Context, jsonLevel string) error {
+	return catalog.CatalogStats(ctx, jsonLevel)
 }
 
-func catalogLatest(limit int, jsonLevel string) error {
-	return catalog.CatalogLatest(limit, jsonLevel)
+func catalogLatest(ctx context.Context, limit int, jsonLevel string) error {
+	return catalog.CatalogLatest(ctx, limit, jsonLevel)
 }
 
 func catalogGapsForArtist(ctx context.Context, artistId string, cfg *Config, jsonLevel string, idsOnly bool, mediaFilter MediaType) error {

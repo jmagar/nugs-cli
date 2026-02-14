@@ -127,7 +127,7 @@ func CatalogCacheStatus(jsonLevel string, deps *Deps) error {
 }
 
 // CatalogStats shows catalog statistics.
-func CatalogStats(jsonLevel string) error {
+func CatalogStats(_ context.Context, jsonLevel string) error {
 	catalog, err := cache.ReadCatalogCache()
 	if err != nil {
 		return err
@@ -232,7 +232,7 @@ func CatalogStats(jsonLevel string) error {
 }
 
 // CatalogLatest shows latest additions to catalog.
-func CatalogLatest(limit int, jsonLevel string) error {
+func CatalogLatest(_ context.Context, limit int, jsonLevel string) error {
 	catalog, err := cache.ReadCatalogCache()
 	if err != nil {
 		return err
@@ -448,14 +448,13 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 		}
 	}()
 
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, os.Interrupt)
-	defer signal.Stop(sigChan)
+	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	defer stop()
 
 	for i, status := range missingShows {
 		show := status.Show
 		select {
-		case <-sigChan:
+		case <-ctx.Done():
 			interrupted = true
 			if jsonLevel == "" {
 				fmt.Println()
@@ -573,7 +572,7 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 			return fmt.Errorf("failed to read output directory: %w", err)
 		}
 
-		remoteArtistDirs, err := ListAllRemoteArtistFolders(cfg)
+		remoteArtistDirs, err := ListAllRemoteArtistFolders(ctx, cfg)
 		if err != nil && jsonLevel == "" {
 			ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
 		}

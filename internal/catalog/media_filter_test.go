@@ -1,9 +1,11 @@
 package catalog
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -26,14 +28,14 @@ func TestShowExistsForMedia_RemoteFallbackUsesMediaFlag(t *testing.T) {
 		gotIsVideo    bool
 	)
 	deps := &Deps{
-		RemotePathExists: func(remotePath string, _ *model.Config, isVideo bool) (bool, error) {
+		RemotePathExists: func(_ context.Context, remotePath string, _ *model.Config, isVideo bool) (bool, error) {
 			gotRemotePath = remotePath
 			gotIsVideo = isVideo
 			return true, nil
 		},
 	}
 
-	if !ShowExistsForMedia(show, cfg, model.MediaTypeVideo, deps) {
+	if !ShowExistsForMedia(context.Background(), show, cfg, model.MediaTypeVideo, deps) {
 		t.Fatal("expected remote fallback to report show exists")
 	}
 
@@ -66,7 +68,7 @@ func TestBuildArtistPresenceIndex_BothFilterReadsAudioAndVideoTrees(t *testing.T
 		t.Fatalf("mkdir video show: %v", err)
 	}
 
-	idx := BuildArtistPresenceIndex(artist, cfg, &Deps{}, model.MediaTypeBoth)
+	idx := BuildArtistPresenceIndex(context.Background(), artist, cfg, &Deps{}, model.MediaTypeBoth)
 
 	if _, ok := idx.LocalFolders[audioShow]; !ok {
 		t.Fatalf("expected audio show %q in local folder index", audioShow)
@@ -77,19 +79,17 @@ func TestBuildArtistPresenceIndex_BothFilterReadsAudioAndVideoTrees(t *testing.T
 }
 
 func TestListAllRemoteArtistFolders_WrapsErrorWithSentinel(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("test uses POSIX shell script, not portable to Windows")
+	}
+
 	binDir := t.TempDir()
 	rclonePath := filepath.Join(binDir, "rclone")
 	if err := os.WriteFile(rclonePath, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
 		t.Fatalf("write mock rclone: %v", err)
 	}
 
-	originalPath := os.Getenv("PATH")
-	if err := os.Setenv("PATH", binDir+string(os.PathListSeparator)+originalPath); err != nil {
-		t.Fatalf("set PATH: %v", err)
-	}
-	t.Cleanup(func() {
-		_ = os.Setenv("PATH", originalPath)
-	})
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	cfg := &model.Config{
 		RcloneEnabled: true,
@@ -97,7 +97,7 @@ func TestListAllRemoteArtistFolders_WrapsErrorWithSentinel(t *testing.T) {
 		RclonePath:    "/music",
 	}
 
-	_, err := ListAllRemoteArtistFolders(cfg)
+	_, err := ListAllRemoteArtistFolders(context.Background(), cfg)
 	if err == nil {
 		t.Fatal("expected non-nil error from failing rclone command")
 	}

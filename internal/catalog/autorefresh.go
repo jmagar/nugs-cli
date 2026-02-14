@@ -148,7 +148,9 @@ func ConfigureAutoRefresh(cfg *model.Config) error {
 	}
 
 	var hour, minute int
-	fmt.Sscanf(timeInput, "%d:%d", &hour, &minute)
+	if n, err := fmt.Sscanf(timeInput, "%d:%d", &hour, &minute); err != nil || n != 2 {
+		return fmt.Errorf("failed to parse time: %s", timeInput)
+	}
 	if hour < 0 || hour > 23 || minute < 0 || minute > 59 {
 		return fmt.Errorf("invalid time: hour must be 00-23, minute must be 00-59")
 	}
