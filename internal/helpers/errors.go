@@ -19,18 +19,20 @@ var (
 	ErrScanTextFile = errors.New("failed to scan text file")
 )
 
-// HandleErr prints an error to stderr. The _panic parameter is deprecated and
-// retained only for API compatibility — it now calls os.Exit(1) instead of panic.
-func HandleErr(errText string, err error, _panic bool) {
+// HandleErr prints an error to stderr and optionally exits. When fatal is true,
+// the process exits with code 1 after printing. When false, execution continues
+// and callers are responsible for checking err themselves before calling.
+//
+// Deprecated: Prefer returning errors to callers instead of printing directly.
+func HandleErr(errText string, err error, fatal bool) {
 	if err == nil {
 		return
 	}
 	errString := errText + "\n" + err.Error()
-	if _panic {
-		fmt.Fprintln(os.Stderr, errString)
+	fmt.Fprintln(os.Stderr, errString)
+	if fatal {
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr, errString)
 }
 
 // WasRunFromSrc checks if the binary was run from a Go build temp directory.
@@ -64,7 +66,7 @@ func GetScriptDir() (string, error) {
 // ReadTxtFile reads non-empty lines from a text file.
 func ReadTxtFile(path string) ([]string, error) {
 	var lines []string
-	f, err := os.OpenFile(path, os.O_RDONLY, 0755)
+	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("%w %q: %w", ErrOpenTextFile, path, err)
 	}
@@ -105,15 +107,15 @@ func ProcessUrls(urls []string) ([]string, error) {
 				return nil, err
 			}
 			for _, txtLine := range txtLines {
+				txtLine = strings.TrimSuffix(txtLine, "/")
 				if !Contains(processed, txtLine) {
-					txtLine = strings.TrimSuffix(txtLine, "/")
 					processed = append(processed, txtLine)
 				}
 			}
 			txtPaths = append(txtPaths, _url)
 		} else {
+			_url = strings.TrimSuffix(_url, "/")
 			if !Contains(processed, _url) {
-				_url = strings.TrimSuffix(_url, "/")
 				processed = append(processed, _url)
 			}
 		}

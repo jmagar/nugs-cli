@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -49,7 +50,7 @@ func Sanitise(filename string) string {
 // across all download and gap detection logic.
 // maxLen parameter allows customizing the length limit (default 120 for albums, 110 for videos).
 func BuildAlbumFolderName(artistName, containerInfo string, maxLen ...int) string {
-	limit := 120
+	limit := model.AlbumFolderMaxRunes
 	if len(maxLen) > 0 && maxLen[0] > 0 {
 		limit = maxLen[0]
 	}
@@ -201,7 +202,7 @@ func (r *ConfigPathResolver) RemoteShowPath(show *model.AlbArtResp) string {
 		return ""
 	}
 	albumFolder := BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
-	return filepath.Join(Sanitise(show.ArtistName), albumFolder)
+	return path.Join(Sanitise(show.ArtistName), albumFolder)
 }
 
 func uniqueNonEmptyPaths(paths []string) []string {
