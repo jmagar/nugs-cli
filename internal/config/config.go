@@ -12,11 +12,13 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 
 	"github.com/alexflint/go-arg"
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
+	"golang.org/x/term"
 )
 
 // LoadedConfigPath tracks which config file was loaded so WriteConfig can save to the same location.
@@ -31,30 +33,47 @@ var ResolveRes = map[int]string{
 	5: "2160",
 }
 
-// PromptForConfig runs the interactive first-time setup flow.
-func PromptForConfig() error {
-	scanner := bufio.NewScanner(os.Stdin)
-	ui.PrintHeader("First Time Setup")
-	ui.PrintInfo("No config.json found. Let's create one!")
-	fmt.Println()
+// scanLine reads a line from the scanner, returning the trimmed text or a scan error.
+func scanLine(scanner *bufio.Scanner) (string, error) {
+	if !scanner.Scan() {
+		if err := scanner.Err(); err != nil {
+			return "", fmt.Errorf("failed to read input: %w", err)
+		}
+		return "", errors.New("unexpected end of input")
+	}
+	return strings.TrimSpace(scanner.Text()), nil
+}
 
-	// Email
+// promptEmail prompts for and validates the user's email.
+func promptEmail(scanner *bufio.Scanner) (string, error) {
 	fmt.Printf("%s%s%s Enter your Nugs.net email: ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	email := strings.TrimSpace(scanner.Text())
+	email, err := scanLine(scanner)
+	if err != nil {
+		return "", err
+	}
 	if email == "" {
-		return errors.New("email is required")
+		return "", errors.New("email is required")
 	}
+	return email, nil
+}
 
-	// Password
+// promptPassword securely reads the password without echoing to the terminal.
+func promptPassword() (string, error) {
 	fmt.Printf("%s%s%s Enter your Nugs.net password: ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	password := strings.TrimSpace(scanner.Text())
-	if password == "" {
-		return errors.New("password is required")
+	pwBytes, err := term.ReadPassword(int(syscall.Stdin))
+	fmt.Println() // newline after hidden input
+	if err != nil {
+		return "", fmt.Errorf("failed to read password: %w", err)
 	}
+	password := strings.TrimSpace(string(pwBytes))
+	if password == "" {
+		return "", errors.New("password is required")
+	}
+	return password, nil
+}
 
-	// Format
+// promptFormat asks the user to select an audio quality format (1-5, default 4).
+func promptFormat(scanner *bufio.Scanner) (int, error) {
 	fmt.Println()
 	ui.PrintSection("Track Download Quality")
 	qualityOptions := []string{
@@ -66,18 +85,22 @@ func PromptForConfig() error {
 	}
 	ui.PrintList(qualityOptions, ui.ColorYellow)
 	fmt.Printf("\n%s%s%s Enter format choice [1-5] (default: 4): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	formatStr := strings.TrimSpace(scanner.Text())
-	format := 4
-	if formatStr != "" {
-		var err error
-		format, err = strconv.Atoi(formatStr)
-		if err != nil || format < 1 || format > 5 {
-			return errors.New("format must be between 1 and 5")
-		}
+	formatStr, err := scanLine(scanner)
+	if err != nil {
+		return 0, err
 	}
+	if formatStr == "" {
+		return 4, nil
+	}
+	format, err := strconv.Atoi(formatStr)
+	if err != nil || format < 1 || format > 5 {
+		return 0, errors.New("format must be between 1 and 5")
+	}
+	return format, nil
+}
 
-	// Video Format
+// promptVideoFormat asks the user to select a video resolution (1-5, default 5).
+func promptVideoFormat(scanner *bufio.Scanner) (int, error) {
 	fmt.Println()
 	ui.PrintSection("Video Download Format")
 	videoOptions := []string{
@@ -89,91 +112,183 @@ func PromptForConfig() error {
 	}
 	ui.PrintList(videoOptions, ui.ColorYellow)
 	fmt.Printf("\n%s%s%s Enter video format choice [1-5] (default: 5): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	videoFormatStr := strings.TrimSpace(scanner.Text())
-	videoFormat := 5
-	if videoFormatStr != "" {
-		var err error
-		videoFormat, err = strconv.Atoi(videoFormatStr)
-		if err != nil || videoFormat < 1 || videoFormat > 5 {
-			return errors.New("video format must be between 1 and 5")
-		}
+	videoFormatStr, err := scanLine(scanner)
+	if err != nil {
+		return 0, err
 	}
+	if videoFormatStr == "" {
+		return 5, nil
+	}
+	videoFormat, err := strconv.Atoi(videoFormatStr)
+	if err != nil || videoFormat < 1 || videoFormat > 5 {
+		return 0, errors.New("video format must be between 1 and 5")
+	}
+	return videoFormat, nil
+}
 
-	// Output Path
+// promptOutPaths asks for audio and video download directories.
+func promptOutPaths(scanner *bufio.Scanner) (outPath, videoOutPath string, err error) {
 	fmt.Printf("\n%s%s%s Enter download directory (default: Nugs downloads): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	outPath := strings.TrimSpace(scanner.Text())
+	outPath, err = scanLine(scanner)
+	if err != nil {
+		return "", "", err
+	}
 	if outPath == "" {
 		outPath = "Nugs downloads"
 	}
 
-	// Video Output Path
 	fmt.Printf("%s%s%s Enter video download directory (default: same as download directory): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	videoOutPath := strings.TrimSpace(scanner.Text())
+	videoOutPath, err = scanLine(scanner)
+	if err != nil {
+		return "", "", err
+	}
 	if videoOutPath == "" {
 		videoOutPath = outPath
 	}
+	return outPath, videoOutPath, nil
+}
 
-	// FFmpeg
+// promptFfmpegFlag asks whether to use the system FFmpeg.
+func promptFfmpegFlag(scanner *bufio.Scanner) (bool, error) {
 	fmt.Printf("\n%s%s%s Use FFmpeg from system PATH? [y/N] (default: N): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	useFfmpegEnvVarStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	useFfmpegEnvVar := useFfmpegEnvVarStr == "y" || useFfmpegEnvVarStr == "yes"
+	answer, err := scanLine(scanner)
+	if err != nil {
+		return false, err
+	}
+	answer = strings.ToLower(answer)
+	return answer == "y" || answer == "yes", nil
+}
 
-	// Rclone
+// rcloneSettings holds all rclone-related configuration from the setup prompt.
+type rcloneSettings struct {
+	enabled          bool
+	remote           string
+	path             string
+	videoPath        string
+	transfers        int
+	deleteAfterUpload bool
+}
+
+// promptRclone asks for rclone upload configuration.
+func promptRclone(scanner *bufio.Scanner) (rcloneSettings, error) {
 	fmt.Printf("\n%s%s%s Upload to remote using rclone? [y/N] (default: N): ", ui.ColorCyan, ui.BulletArrow, ui.ColorReset)
-	scanner.Scan()
-	rcloneEnabledStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
-	rcloneEnabled := rcloneEnabledStr == "y" || rcloneEnabledStr == "yes"
-
-	var rcloneRemote, rclonePath, rcloneVideoPath string
-	var deleteAfterUpload bool
-	var rcloneTransfers int
-
-	if rcloneEnabled {
-		fmt.Print("Enter rclone remote name (e.g., tootie): ")
-		scanner.Scan()
-		rcloneRemote = strings.TrimSpace(scanner.Text())
-		if rcloneRemote == "" {
-			return errors.New("rclone remote name is required")
-		}
-
-		fmt.Print("Enter remote path (e.g., /mnt/user/data/media/music): ")
-		scanner.Scan()
-		rclonePath = strings.TrimSpace(scanner.Text())
-		if rclonePath == "" {
-			return errors.New("rclone remote path is required")
-		}
-
-		fmt.Print("Enter remote video path (default: same as remote path): ")
-		scanner.Scan()
-		rcloneVideoPath = strings.TrimSpace(scanner.Text())
-		if rcloneVideoPath == "" {
-			rcloneVideoPath = rclonePath
-		}
-
-		fmt.Print("Enter number of parallel transfers (default: 4): ")
-		scanner.Scan()
-		transfersStr := strings.TrimSpace(scanner.Text())
-		if transfersStr == "" {
-			rcloneTransfers = 4
-		} else {
-			var err error
-			rcloneTransfers, err = strconv.Atoi(transfersStr)
-			if err != nil || rcloneTransfers < 1 {
-				return errors.New("transfers must be a positive integer")
-			}
-		}
-
-		fmt.Print("Delete local files after upload? [Y/n] (default: Y): ")
-		scanner.Scan()
-		deleteStr := strings.ToLower(strings.TrimSpace(scanner.Text()))
-		deleteAfterUpload = deleteStr != "n" && deleteStr != "no"
+	answer, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	answer = strings.ToLower(answer)
+	if answer != "y" && answer != "yes" {
+		return rcloneSettings{}, nil
 	}
 
-	// Create config object
+	fmt.Print("Enter rclone remote name (e.g., tootie): ")
+	remote, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	if remote == "" {
+		return rcloneSettings{}, errors.New("rclone remote name is required")
+	}
+
+	fmt.Print("Enter remote path (e.g., /mnt/user/data/media/music): ")
+	path, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	if path == "" {
+		return rcloneSettings{}, errors.New("rclone remote path is required")
+	}
+
+	fmt.Print("Enter remote video path (default: same as remote path): ")
+	videoPath, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	if videoPath == "" {
+		videoPath = path
+	}
+
+	fmt.Print("Enter number of parallel transfers (default: 4): ")
+	transfersStr, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	transfers := 4
+	if transfersStr != "" {
+		transfers, err = strconv.Atoi(transfersStr)
+		if err != nil || transfers < 1 {
+			return rcloneSettings{}, errors.New("transfers must be a positive integer")
+		}
+	}
+
+	fmt.Print("Delete local files after upload? [Y/n] (default: Y): ")
+	deleteStr, err := scanLine(scanner)
+	if err != nil {
+		return rcloneSettings{}, err
+	}
+	deleteStr = strings.ToLower(deleteStr)
+	deleteAfterUpload := deleteStr != "n" && deleteStr != "no"
+
+	return rcloneSettings{
+		enabled:          true,
+		remote:           remote,
+		path:             path,
+		videoPath:        videoPath,
+		transfers:        transfers,
+		deleteAfterUpload: deleteAfterUpload,
+	}, nil
+}
+
+// atomicWriteFile writes data to a temp file then atomically renames it to the target path.
+func atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
+	tmpPath := targetPath + ".tmp"
+	if err := os.WriteFile(tmpPath, data, perm); err != nil {
+		return fmt.Errorf("failed to write temp file %s: %w", tmpPath, err)
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename %s to %s: %w", tmpPath, targetPath, err)
+	}
+	return nil
+}
+
+// PromptForConfig runs the interactive first-time setup flow.
+func PromptForConfig() error {
+	scanner := bufio.NewScanner(os.Stdin)
+	ui.PrintHeader("First Time Setup")
+	ui.PrintInfo("No config.json found. Let's create one!")
+	fmt.Println()
+
+	email, err := promptEmail(scanner)
+	if err != nil {
+		return err
+	}
+	password, err := promptPassword()
+	if err != nil {
+		return err
+	}
+	format, err := promptFormat(scanner)
+	if err != nil {
+		return err
+	}
+	videoFormat, err := promptVideoFormat(scanner)
+	if err != nil {
+		return err
+	}
+	outPath, videoOutPath, err := promptOutPaths(scanner)
+	if err != nil {
+		return err
+	}
+	useFfmpegEnvVar, err := promptFfmpegFlag(scanner)
+	if err != nil {
+		return err
+	}
+	rclone, err := promptRclone(scanner)
+	if err != nil {
+		return err
+	}
+
 	cfg := model.Config{
 		Email:                  email,
 		Password:               password,
@@ -183,35 +298,19 @@ func PromptForConfig() error {
 		VideoOutPath:           videoOutPath,
 		Token:                  "",
 		UseFfmpegEnvVar:        useFfmpegEnvVar,
-		RcloneEnabled:          rcloneEnabled,
-		RcloneRemote:           rcloneRemote,
-		RclonePath:             rclonePath,
-		RcloneVideoPath:        rcloneVideoPath,
-		DeleteAfterUpload:      deleteAfterUpload,
-		RcloneTransfers:        rcloneTransfers,
+		RcloneEnabled:          rclone.enabled,
+		RcloneRemote:           rclone.remote,
+		RclonePath:             rclone.path,
+		RcloneVideoPath:        rclone.videoPath,
+		DeleteAfterUpload:      rclone.deleteAfterUpload,
+		RcloneTransfers:        rclone.transfers,
 		CatalogAutoRefresh:     true,
 		CatalogRefreshTime:     "05:00",
 		CatalogRefreshTimezone: "America/New_York",
 		CatalogRefreshInterval: "daily",
 	}
 
-	// Write to ~/.nugs/config.json
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("failed to get home directory: %w", err)
-	}
-	configDir := filepath.Join(homeDir, ".nugs")
-	if mkErr := os.MkdirAll(configDir, 0700); mkErr != nil {
-		return fmt.Errorf("failed to create config directory: %w", mkErr)
-	}
-	configPath := filepath.Join(configDir, "config.json")
-
-	data, err := json.MarshalIndent(cfg, "", "    ")
-	if err != nil {
-		return err
-	}
-
-	err = os.WriteFile(configPath, data, 0600)
+	configPath, err := writeNewConfigFile(cfg)
 	if err != nil {
 		return err
 	}
@@ -221,6 +320,29 @@ func PromptForConfig() error {
 	ui.PrintInfo("You can edit this file later to change settings.")
 	fmt.Println()
 	return nil
+}
+
+// writeNewConfigFile creates the config directory and atomically writes the config file.
+func writeNewConfigFile(cfg model.Config) (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to get home directory: %w", err)
+	}
+	configDir := filepath.Join(homeDir, ".nugs")
+	if mkErr := os.MkdirAll(configDir, 0700); mkErr != nil {
+		return "", fmt.Errorf("failed to create config directory: %w", mkErr)
+	}
+	configPath := filepath.Join(configDir, "config.json")
+
+	data, err := json.MarshalIndent(cfg, "", "    ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := atomicWriteFile(configPath, data, 0600); err != nil {
+		return "", err
+	}
+	return configPath, nil
 }
 
 // ParseCfg reads config, parses CLI args, and returns the resolved Config.
@@ -476,6 +598,7 @@ func ParseArgs() *model.Args {
 }
 
 // WriteConfig writes the config to the same file that was loaded by ReadConfig.
+// Uses atomic write (temp file + rename) to prevent corruption on crash/interrupt.
 func WriteConfig(cfg *model.Config) error {
 	configData, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -498,8 +621,7 @@ func WriteConfig(cfg *model.Config) error {
 		return fmt.Errorf("failed to create config directory %s: %w", dir, mkErr)
 	}
 
-	err = os.WriteFile(targetPath, configData, 0600)
-	if err != nil {
+	if err := atomicWriteFile(targetPath, configData, 0600); err != nil {
 		return fmt.Errorf("failed to write config to %s: %w", targetPath, err)
 	}
 
