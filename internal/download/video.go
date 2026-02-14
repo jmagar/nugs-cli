@@ -141,7 +141,10 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	master := playlist.(*m3u8.MasterPlaylist)
+	master, ok := playlist.(*m3u8.MasterPlaylist)
+	if !ok {
+		return nil, "", errors.New("expected HLS master playlist but got media playlist")
+	}
 	sort.Slice(master.Variants, func(x, y int) bool {
 		return master.Variants[x].Bandwidth > master.Variants[y].Bandwidth
 	})
@@ -221,7 +224,10 @@ func GetSegUrls(manifestUrl, query string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	media := playlist.(*m3u8.MediaPlaylist)
+	media, ok := playlist.(*m3u8.MediaPlaylist)
+	if !ok {
+		return nil, errors.New("expected HLS media playlist but got master playlist")
+	}
 	for _, seg := range media.Segments {
 		if seg == nil {
 			break
@@ -310,7 +316,7 @@ func (s *simpleWriteCounter) Write(p []byte) (int, error) {
 	}
 	toDivideBy := time.Now().UnixMilli() - s.wc.StartTime
 	if toDivideBy != 0 {
-		speed = int64(s.wc.Downloaded) / toDivideBy * model.KBpsDivisor
+		speed = int64(s.wc.Downloaded) * model.KBpsDivisor / toDivideBy
 	}
 	if s.wc.OnProgress != nil {
 		s.wc.OnProgress(s.wc.Downloaded, s.wc.Total, speed)
@@ -319,7 +325,7 @@ func (s *simpleWriteCounter) Write(p []byte) (int, error) {
 }
 
 // DownloadLstream downloads a livestream video by downloading all segments.
-func DownloadLstream(videoPath, baseUrl string, segUrls []string, onProgress func(segNum, segTotal int)) error {
+func DownloadLstream(ctx context.Context, videoPath, baseUrl string, segUrls []string, onProgress func(segNum, segTotal int)) error {
 	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -333,7 +339,7 @@ func DownloadLstream(videoPath, baseUrl string, segUrls []string, onProgress fun
 		} else {
 			fmt.Printf("\rSegment %d of %d.", segNum, segTotal)
 		}
-		req, err := http.NewRequest(http.MethodGet, baseUrl+segUrl, nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, baseUrl+segUrl, nil)
 		if err != nil {
 			return err
 		}
@@ -354,7 +360,7 @@ func DownloadLstream(videoPath, baseUrl string, segUrls []string, onProgress fun
 	if onProgress == nil {
 		fmt.Println("")
 	}
-	return err
+	return nil
 }
 
 // ExtractDuration extracts the duration string from ffmpeg output.
@@ -663,7 +669,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 	if cfg.RcloneEnabled {
 		remoteVideoPath := path.Join(artistFolder, filepath.Base(vidPath))
 		ui.PrintInfo(fmt.Sprintf("Checking remote for video: %s%s%s", ui.ColorCyan, filepath.Base(vidPath), ui.ColorReset))
-		remoteExists, checkErr := deps.CheckRemotePathExists(remoteVideoPath, cfg, true)
+		remoteExists, checkErr := deps.CheckRemotePathExists(ctx, remoteVideoPath, cfg, true)
 		if checkErr != nil {
 			ui.PrintWarning(fmt.Sprintf("Failed to check remote video path: %v", checkErr))
 		} else if remoteExists {
@@ -711,7 +717,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 	}
 
 	if isLstream {
-		err = DownloadLstream(vidPathTs, manBaseUrl, segUrls, func(segNum, segTotal int) {
+		err = DownloadLstream(ctx, vidPathTs, manBaseUrl, segUrls, func(segNum, segTotal int) {
 			if progressBox == nil {
 				return
 			}
@@ -806,7 +812,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 			}
 		}
 		// Upload the video file to the artist folder on remote
-		err = deps.UploadPath(vidPath, artistFolder, cfg, progressBox, true)
+		err = deps.UploadPath(ctx, vidPath, artistFolder, cfg, progressBox, true)
 		if err != nil {
 			helpers.HandleErr("Upload failed.", err, false)
 		}

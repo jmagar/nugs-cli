@@ -37,7 +37,7 @@ func TestDepsUploadPathUsesStorageProviderWhenLegacyCallbackMissing(t *testing.T
 	storage := &fakeStorageProvider{}
 	deps := &Deps{Storage: storage}
 
-	err := deps.UploadPath("/tmp/album", "artist", &model.Config{}, nil, false)
+	err := deps.UploadPath(context.Background(), "/tmp/album", "artist", &model.Config{}, nil, false)
 	if err != nil {
 		t.Fatalf("upload returned error: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDepsCheckRemotePathExistsUsesStorageProviderWhenLegacyCallbackMissing(t
 	storage := &fakeStorageProvider{pathExists: true}
 	deps := &Deps{Storage: storage}
 
-	exists, err := deps.CheckRemotePathExists("artist/show", &model.Config{}, true)
+	exists, err := deps.CheckRemotePathExists(context.Background(), "artist/show", &model.Config{}, true)
 	if err != nil {
 		t.Fatalf("path exists returned error: %v", err)
 	}

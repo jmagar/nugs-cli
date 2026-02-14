@@ -54,7 +54,7 @@ func WriteCounterWrite(wc *model.WriteCounter, p []byte, deps *Deps) (int, error
 	}
 	toDivideBy := time.Now().UnixMilli() - wc.StartTime
 	if toDivideBy != 0 {
-		speed = int64(wc.Downloaded) / toDivideBy * model.KBpsDivisor
+		speed = int64(wc.Downloaded) * model.KBpsDivisor / toDivideBy
 	}
 	if wc.OnProgress != nil {
 		wc.OnProgress(wc.Downloaded, wc.Total, speed)
@@ -72,11 +72,6 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 			return err
 		}
 	}
-	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, _url, nil)
 	if err != nil {
 		return err
@@ -92,6 +87,11 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 	if do.StatusCode != http.StatusOK && do.StatusCode != http.StatusPartialContent {
 		return errors.New(do.Status)
 	}
+	f, err := os.OpenFile(trackPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
 	totalBytes := do.ContentLength
 	totalStr := model.UnknownSizeLabelLower
 	if totalBytes > 0 {
@@ -110,7 +110,11 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 	if printNewline {
 		fmt.Println("")
 	}
-	return err
+	if err != nil {
+		os.Remove(trackPath)
+		return err
+	}
+	return nil
 }
 
 // writeCounterAdapter wraps WriteCounter to satisfy io.Writer using Deps.
@@ -147,7 +151,10 @@ func ParseHlsMaster(qual *model.Quality) error {
 	if err != nil {
 		return err
 	}
-	master := playlist.(*m3u8.MasterPlaylist)
+	master, ok := playlist.(*m3u8.MasterPlaylist)
+	if !ok {
+		return errors.New("expected HLS master playlist but got media playlist")
+	}
 	if len(master.Variants) == 0 {
 		return errors.New("HLS master playlist has no variants")
 	}
@@ -247,7 +254,10 @@ func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onPro
 	if err != nil {
 		return err
 	}
-	media := playlist.(*m3u8.MediaPlaylist)
+	media, ok := playlist.(*m3u8.MediaPlaylist)
+	if !ok {
+		return errors.New("expected HLS media playlist but got master playlist")
+	}
 
 	// Validate media playlist has segments and key before accessing
 	if len(media.Segments) == 0 {
@@ -633,7 +643,7 @@ func buildAlbumFolderName(meta *model.AlbArtResp) string {
 	return albumFolder
 }
 
-func prepareAlbumPaths(cfg *model.Config, meta *model.AlbArtResp, deps *Deps) (string, string, bool, error) {
+func prepareAlbumPaths(ctx context.Context, cfg *model.Config, meta *model.AlbArtResp, deps *Deps) (string, string, bool, error) {
 	artistFolder := helpers.Sanitise(meta.ArtistName)
 	artistPath := filepath.Join(cfg.OutPath, artistFolder)
 	if err := helpers.MakeDirs(artistPath); err != nil {
@@ -648,7 +658,7 @@ func prepareAlbumPaths(cfg *model.Config, meta *model.AlbArtResp, deps *Deps) (s
 	}
 	remoteShowPath := artistFolder + "/" + albumFolder
 	ui.PrintInfo(fmt.Sprintf("Checking remote for: %s%s%s", ui.ColorCyan, albumFolder, ui.ColorReset))
-	exists, err := deps.CheckRemotePathExists(remoteShowPath, cfg, false)
+	exists, err := deps.CheckRemotePathExists(ctx, remoteShowPath, cfg, false)
 	if err != nil {
 		ui.PrintWarning(fmt.Sprintf("Failed to check remote: %v", err))
 	} else if exists {
@@ -736,7 +746,7 @@ func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, ar
 	progressBox.CompletionTime = time.Now()
 	progressBox.TotalDuration = time.Since(progressBox.StartTime)
 	if cfg.RcloneEnabled {
-		if err := deps.UploadPath(albumPath, artistFolder, cfg, progressBox, false); err != nil {
+		if err := deps.UploadPath(ctx, albumPath, artistFolder, cfg, progressBox, false); err != nil {
 			helpers.HandleErr("Upload failed.", err, false)
 		}
 	}
@@ -776,7 +786,7 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 		return err
 	}
 
-	artistFolder, albumPath, skipped, err := prepareAlbumPaths(cfg, meta, deps)
+	artistFolder, albumPath, skipped, err := prepareAlbumPaths(ctx, cfg, meta, deps)
 	if err != nil || skipped {
 		return err
 	}

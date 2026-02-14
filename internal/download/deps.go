@@ -33,7 +33,7 @@ type Deps struct {
 	UploadToRclone func(localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error
 
 	// RemotePathExists checks if a path exists on the rclone remote.
-	RemotePathExists func(remotePath string, cfg *model.Config, isVideo bool) (bool, error)
+	RemotePathExists func(ctx context.Context, remotePath string, cfg *model.Config, isVideo bool) (bool, error)
 
 	// Storage can be injected for tests or alternate storage backends.
 	Storage model.StorageProvider
@@ -49,12 +49,12 @@ type Deps struct {
 }
 
 // UploadPath uploads local content via legacy callback or the injected storage provider.
-func (d *Deps) UploadPath(localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error {
+func (d *Deps) UploadPath(ctx context.Context, localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error {
 	if d != nil && d.UploadToRclone != nil {
 		return d.UploadToRclone(localPath, artistFolder, cfg, progressBox, isVideo)
 	}
 	if d != nil && d.Storage != nil {
-		return d.Storage.Upload(context.Background(), cfg, model.UploadRequest{
+		return d.Storage.Upload(ctx, cfg, model.UploadRequest{
 			LocalPath:    localPath,
 			ArtistFolder: artistFolder,
 			IsVideo:      isVideo,
@@ -64,12 +64,12 @@ func (d *Deps) UploadPath(localPath, artistFolder string, cfg *model.Config, pro
 }
 
 // CheckRemotePathExists checks remote path existence via legacy callback or storage provider.
-func (d *Deps) CheckRemotePathExists(remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
+func (d *Deps) CheckRemotePathExists(ctx context.Context, remotePath string, cfg *model.Config, isVideo bool) (bool, error) {
 	if d != nil && d.RemotePathExists != nil {
-		return d.RemotePathExists(remotePath, cfg, isVideo)
+		return d.RemotePathExists(ctx, remotePath, cfg, isVideo)
 	}
 	if d != nil && d.Storage != nil {
-		return d.Storage.PathExists(context.Background(), cfg, remotePath, isVideo)
+		return d.Storage.PathExists(ctx, cfg, remotePath, isVideo)
 	}
 	return false, nil
 }
