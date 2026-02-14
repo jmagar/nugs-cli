@@ -60,7 +60,7 @@ Nugs CLI is a Go-based monorepo with a clean 4-tier architecture:
 
 ### High-Level Structure
 
-```
+```text
 Tier 0: Foundation (model, testutil)
   ↓
 Tier 1: Core Utilities (helpers, ui, api, cache)
@@ -140,7 +140,7 @@ GOOS=windows go build ./cmd/nugs       # Windows cross-compile check
 GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 ```
 
-**Note:** Cross-compilation creates binaries only when building for the current OS. Building for a different target OS (e.g., `GOOS=darwin` on Linux) does not create a local binary.
+**Note:** Cross-compilation still creates a local binary in the current directory (or the `-o` path), but it will not be runnable on the current OS. Clean up with `make clean`.
 
 ---
 
@@ -176,7 +176,7 @@ GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 
 ### End-to-End Flow
 
-```
+```text
 1. CLI Command
    ↓
 2. bootstrap() → parse config/args
@@ -296,19 +296,19 @@ ffmpeg -hide_banner \
 
 ### Current Test Coverage
 
-**Overall Coverage:** 5.5% (37 tests across 10 test files)
+Run `go test ./... -cover` to get the latest coverage report.
 
 **Well-tested components:**
-- ✅ Media type detection (9 tests)
-- ✅ Upload progress tracking (9 tests)
-- ✅ FFmpeg binary resolution (3 tests)
+- Media type detection
+- Upload progress tracking
+- FFmpeg binary resolution
 
-**Critical coverage gaps** (0% tested):
-- ❌ `internal/api` (~600 lines) - Authentication, API calls
-- ❌ `internal/download` (~2500 lines) - Download logic, FFmpeg
-- ❌ `internal/cache` (~800 lines) - File locking, concurrency
-- ❌ `internal/catalog` (~1200 lines) - Catalog operations
-- ❌ `internal/config` (~300 lines) - Config loading
+**Key areas needing coverage:**
+- `internal/api` - Authentication, API calls
+- `internal/download` - Download logic, FFmpeg
+- `internal/cache` - File locking, concurrency
+- `internal/catalog` - Catalog operations
+- `internal/config` - Config loading
 
 ### Test Utilities
 
@@ -430,10 +430,12 @@ err := cache.WithCacheLock(func() error {
 ### Configuration Quirks
 
 **4. Config Search Order Matters**
+
 ```go
 // Searches in order (first found wins, no merging):
-// 1. ~/.nugs/config.json
-// 2. ~/.config/nugs/config.json
+// 1. ./config.json          (current directory)
+// 2. ~/.nugs/config.json
+// 3. ~/.config/nugs/config.json
 ```
 
 **5. Security Auto-Fix**
@@ -646,7 +648,7 @@ go mod download
 
 **Config file location confusion:**
 - Auto-refresh config commands write to `~/.nugs/config.json`
-- Main app reads from `~/.nugs/config.json` OR `~/.config/nugs/config.json`
+- Main app reads from `./config.json`, `~/.nugs/config.json`, or `~/.config/nugs/config.json` (first found wins)
 
 **Cache permission errors:**
 ```bash
@@ -668,9 +670,12 @@ brew install ffmpeg      # macOS
 ```
 
 **Rclone not found:**
+
 ```bash
-# Install rclone
-curl https://rclone.org/install.sh | sudo bash
+# Install rclone (see https://rclone.org/downloads/ for alternatives)
+# Review the script before running:
+curl -O https://rclone.org/install.sh
+sudo bash install.sh
 
 # Or disable in config.json:
 "rcloneEnabled": false

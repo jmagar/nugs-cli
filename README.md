@@ -176,7 +176,7 @@ On first run, you'll be prompted to create it.
 | `deleteAfterUpload` | Delete local files after successful upload |
 | `rcloneTransfers` | Number of parallel transfers (default: 4) |
 
-> **Migration note (2026-02-06):**
+> **Migration note (2026-02-05):**
 > `rclonePath` is now remote-only. Local download detection and storage always use `outPath`.
 > If you previously relied on `rclonePath` for local folder checks, move/update your `outPath`
 > to the local download root.
@@ -295,9 +295,9 @@ nugs list 461            # Grateful Dead
 ```
 
 **Media Type Indicators:**
-- 🎵 Audio only
-- 🎬 Video only
-- 📹 Both audio and video available
+- 🎵 Audio
+- 🎬 Video
+- 📹 Both audio and video
 
 **Filter and search shows:**
 

@@ -24,19 +24,19 @@ Complete reference for all configuration options in Nugs CLI.
 
 ## Config Structure
 
-The `Config` struct in `internal/model/types.go` contains **23 fields** organized by category:
+The `Config` struct in `internal/model/types.go` contains **25 fields** organized by category:
 
 | Category | Fields | Purpose |
 |----------|--------|---------|
 | Authentication | 3 | Nugs.net account credentials |
-| Download Quality | 4 | Audio/video format selection |
-| Output Paths | 3 | Local download directories |
-| FFmpeg Integration | 4 | Video processing |
+| Download Quality | 4 | Audio/video format selection (includes computed `wantRes`) |
+| Output Paths | 3 | Local download directories (includes internal `urls`) |
+| FFmpeg Integration | 4 | Video processing (includes deprecated `forceVideo`, `skipVideos`) |
 | Rclone Cloud Uploads | 6 | Cloud storage automation |
 | Catalog Auto-Refresh | 4 | Automatic catalog updates |
 | Performance | 1 | Optimization flags |
 
-**Total:** 23 configuration fields
+**Total:** 25 fields (23 user-configurable + 2 deprecated/internal)
 
 ---
 
@@ -46,8 +46,9 @@ The `Config` struct in `internal/model/types.go` contains **23 fields** organize
 
 Config files are searched in this order (first found wins):
 
-1. `~/.nugs/config.json` (recommended)
-2. `~/.config/nugs/config.json` (XDG standard)
+1. `./config.json` (current directory)
+2. `~/.nugs/config.json` (recommended)
+3. `~/.config/nugs/config.json` (XDG standard)
 
 **No merging:** Only the first found config is used.
 
@@ -197,6 +198,7 @@ On every config read:
 **Overrides:** Can be overridden per-command with `audio`, `video`, or `both` modifiers
 
 **Examples:**
+
 ```bash
 # Use config default
 nugs 23329
@@ -629,6 +631,7 @@ if permissions != 0600:
 ```
 
 **Expected permissions:**
+
 ```bash
 # Unix/Linux/macOS
 -rw------- 1 user user 436 Feb 07 23:13 config.json
@@ -747,6 +750,7 @@ owner:(R,W)
   "videoFormat": 0    // ❌ INVALID - must be 1-5
 }
 ```
+
 **Error:** `track Format must be between 1 and 5`
 
 #### Invalid defaultOutputs
@@ -756,6 +760,7 @@ owner:(R,W)
   "defaultOutputs": "videos"  // ❌ INVALID - typo ("videos" vs "video")
 }
 ```
+
 **Error:** `invalid defaultOutputs: "videos" (must be audio, video, or both)`
 
 #### Invalid Timezone
@@ -765,6 +770,7 @@ owner:(R,W)
   "catalogRefreshTimezone": "EST"  // ❌ INVALID - use IANA timezone
 }
 ```
+
 **Error:** `invalid timezone EST: unknown time zone EST`
 
 **Fix:** Use `"America/New_York"` instead
@@ -776,6 +782,7 @@ owner:(R,W)
   "catalogRefreshTime": "5am"  // ❌ INVALID - wrong format
 }
 ```
+
 **Error:** `invalid refresh time format: 5am (expected HH:MM)`
 
 **Fix:** Use `"05:00"`
@@ -787,6 +794,7 @@ owner:(R,W)
   "catalogRefreshInterval": "hourly"  // ❌ INVALID - not supported
 }
 ```
+
 **Error:** `invalid interval: hourly (must be 'daily' or 'weekly')`
 
 #### Missing Rclone Configuration
@@ -798,6 +806,7 @@ owner:(R,W)
   "rclonePath": ""         // ❌ Missing
 }
 ```
+
 **Result:** Runtime errors when attempting uploads
 
 **Fix:** Set `rcloneRemote` and `rclonePath` or disable rclone

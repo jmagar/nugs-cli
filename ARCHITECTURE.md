@@ -21,7 +21,7 @@ Complete architectural overview of the Nugs CLI codebase including package struc
 
 Nugs CLI is a Go-based monorepo with a clean 4-tier architecture:
 
-```
+```text
 Tier 0: Foundation (model, testutil)
   ↓
 Tier 1: Core Utilities (helpers, ui, api, cache)
@@ -44,7 +44,7 @@ Root: Command Orchestration (cmd/nugs/main.go)
 
 ## Package Structure
 
-```
+```text
 nugs/
 ├── cmd/
 │   └── nugs/
@@ -171,7 +171,7 @@ nugs/
 
 ## Dependency Hierarchy Diagram
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │  Tier 3: Business Logic (with Deps pattern) │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  │
@@ -244,6 +244,7 @@ Root Package (cmd/nugs/main.go)
 - Media type filtering (audio/video/both)
 
 **Deps Callbacks (from root):**
+
 ```go
 type Deps struct {
     RemotePathExists func(remotePath string, cfg *model.Config, isVideo bool) (bool, error)
@@ -273,6 +274,7 @@ type Deps struct {
 - Upload coordination
 
 **Deps Callbacks (from root):**
+
 ```go
 type Deps struct {
     WaitIfPausedOrCancelled func() error
@@ -303,6 +305,7 @@ type Deps struct {
 - Table rendering with media indicators
 
 **Deps Callbacks (from root):**
+
 ```go
 type Deps struct {
     GetShowMediaType func(show *model.AlbArtResp) model.MediaType
@@ -326,6 +329,7 @@ type Deps struct {
 - ✅ Easy to mock for testing
 
 **Example:**
+
 ```go
 // model/types.go (Tier 0)
 type Config struct {
@@ -355,6 +359,7 @@ func DownloadAlbum(cfg *model.Config) error {
 **Solution:** Dependency injection via `Deps` struct with callbacks.
 
 **Pattern:**
+
 ```go
 // catalog/deps.go
 type Deps struct {
@@ -371,6 +376,7 @@ func Gaps(ctx context.Context, artistID int, cfg *model.Config, deps Deps) error
 ```
 
 **Root wiring:**
+
 ```go
 // cmd/nugs/main.go
 catalogDeps := catalog.Deps{
@@ -399,6 +405,7 @@ catalog.Gaps(ctx, artistID, cfg, catalogDeps)
 **Pattern:** Platform-specific implementations with build tags
 
 **Example:**
+
 ```go
 // filelock_unix.go
 //go:build !windows
@@ -429,6 +436,7 @@ func AcquireLock(path string, retries int) (*FileLock, error) {
 ### 4. Atomic Operations
 
 **File Locking (cache/):**
+
 ```go
 // Atomic write pattern
 err := cache.WithCacheLock(func() error {
@@ -439,6 +447,7 @@ err := cache.WithCacheLock(func() error {
 ```
 
 **UI Counters (ui/):**
+
 ```go
 // Thread-safe atomic counters
 var RunErrorCount atomic.Int64
@@ -448,6 +457,7 @@ RunErrorCount.Add(1)  // Atomic increment
 ```
 
 **Progress Box (model/):**
+
 ```go
 // Mutex-protected state
 progressBox.Mu.Lock()
@@ -462,10 +472,14 @@ progressBox.Mu.Unlock()
 **Pattern:** All API calls accept `context.Context` for cancellation
 
 **Example:**
+
 ```go
 // api/client.go
 func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
-    req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return nil, fmt.Errorf("creating request: %w", err)
+    }
     resp, err := Client.Do(req)
     // ...
 }
@@ -600,6 +614,7 @@ err := catalog.Gaps(ctx, artistID, cfg, catalogDeps)
 - Does it analyze catalog? → `catalog/`
 
 **2. Add code to appropriate package**
+
 ```go
 // internal/catalog/new_feature.go
 func NewFeature(ctx context.Context, cfg *model.Config) error {
@@ -608,6 +623,7 @@ func NewFeature(ctx context.Context, cfg *model.Config) error {
 ```
 
 **3. Import from root if user-facing**
+
 ```go
 // cmd/nugs/main.go
 case "new-command":
@@ -615,6 +631,7 @@ case "new-command":
 ```
 
 **4. Update Deps if needs root callbacks**
+
 ```go
 // catalog/deps.go
 type Deps struct {
@@ -688,7 +705,10 @@ func DownloadAlbum(ctx context.Context, albumID string, cfg *model.Config) error
 
 ```go
 func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
-    req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return nil, fmt.Errorf("creating request: %w", err)
+    }
     // ...
 }
 ```
@@ -704,18 +724,21 @@ func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
 **Enum:** `model.MediaType` (Audio, Video, Both, Unknown)
 
 **Filtering:**
+
 ```go
 filteredShows := catalog.FilterShowsByMediaType(shows, model.MediaTypeVideo)
 matches := catalog.MatchesMediaFilter(show, model.MediaTypeAudio)
 ```
 
 **Path resolution:**
+
 ```go
 outPath := helpers.GetOutPathForMedia(cfg, mediaType)
 rclonePath := helpers.GetRclonePathForMedia(cfg, mediaType)
 ```
 
 **UI indicators:**
+
 ```go
 indicator := ui.GetMediaTypeIndicator(mediaType)  // 🎵/🎬/📹
 ```
@@ -733,6 +756,7 @@ indicator := ui.GetMediaTypeIndicator(mediaType)  // 🎵/🎬/📹
 - `runtime/` - Process control (9 files: Unix, Windows, Linux)
 
 **Build tag patterns:**
+
 ```go
 // Unix-like (Linux, macOS, BSD, etc.)
 //go:build !windows
@@ -749,6 +773,7 @@ indicator := ui.GetMediaTypeIndicator(mediaType)  // 🎵/🎬/📹
 ### Cache Package Platform Variants
 
 **Unix (POSIX flock):**
+
 ```go
 // filelock_unix.go
 //go:build !windows
@@ -767,6 +792,7 @@ func AcquireLock(path string, retries int) (*FileLock, error) {
 ```
 
 **Windows (LockFileEx):**
+
 ```go
 // filelock_windows.go
 //go:build windows
@@ -908,7 +934,10 @@ func FetchCatalog() (*Catalog, error) {
 
 // ✅ GOOD - Context-aware
 func FetchCatalog(ctx context.Context) (*Catalog, error) {
-    req, _ := http.NewRequestWithContext(ctx, "GET", url, nil)
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        return nil, fmt.Errorf("creating request: %w", err)
+    }
     resp, err := Client.Do(req)  // Can cancel
 }
 ```

@@ -25,7 +25,7 @@ Downloads require authentication (email/password or token in config).
 
 ### Direct URL Download
 
-```
+```bash
 nugs <url> [url2 url3 ...]
 ```
 
@@ -50,7 +50,7 @@ Accepts any nugs.net URL:
 
 ### Grab (Download Alias)
 
-```
+```bash
 nugs grab <url_or_id> [media_modifier]
 ```
 
@@ -58,7 +58,7 @@ nugs grab <url_or_id> [media_modifier]
 
 Media modifiers: `audio`, `video`, `both`
 
-```
+```bash
 nugs grab 23329              # Download album 23329
 nugs grab 23329 video        # Download video version
 nugs grab 23329 both         # Download audio + video
@@ -66,7 +66,7 @@ nugs grab 23329 both         # Download audio + video
 
 ### Artist Shortcuts
 
-```
+```bash
 nugs <artist_id> latest [audio|video|both]
 nugs <artist_id> full [audio|video|both]
 ```
@@ -86,7 +86,7 @@ List commands query the nugs.net API in real-time. No authentication required.
 
 ### List Artists
 
-```
+```bash
 nugs list
 nugs list artists
 nugs list [audio|video|both]
@@ -96,7 +96,7 @@ Lists all available artists on nugs.net.
 
 ### List Artists by Show Count
 
-```
+```bash
 nugs list <operator><number>
 nugs list artists shows <operator><number>
 ```
@@ -111,13 +111,13 @@ nugs list "=25"              # Artists with exactly 25 shows
 
 ### List Artist Shows
 
-```
+```bash
 nugs list <artist_id> [audio|video|both]
 ```
 
 Lists all shows for a specific artist.
 
-```
+```bash
 nugs list 1125               # All Billy Strings shows
 nugs list 1125 video         # Only video shows
 nugs list 1125 both          # Shows with both formats
@@ -125,27 +125,27 @@ nugs list 1125 both          # Shows with both formats
 
 ### List Shows by Venue
 
-```
+```bash
 nugs list <artist_id> <venue_name>
 nugs list <artist_id> shows <venue_name>
 ```
 
 Filter shows by venue name (partial match).
 
-```
+```bash
 nugs list 461 "Red Rocks"
 nugs list 1125 shows "Capitol Theatre"
 ```
 
 ### List Latest Shows
 
-```
+```bash
 nugs list <artist_id> latest [N]
 ```
 
 Lists the N most recent shows for an artist (default: 10).
 
-```
+```bash
 nugs list 1125 latest        # Latest 10 shows
 nugs list 1125 latest 25     # Latest 25 shows
 ```
@@ -158,7 +158,7 @@ Catalog commands work with a local cache at `~/.cache/nugs/`. No authentication 
 
 ### Update Catalog
 
-```
+```bash
 nugs catalog update
 nugs update
 ```
@@ -167,7 +167,7 @@ Fetches the latest catalog from nugs.net and updates the local cache.
 
 ### Cache Status
 
-```
+```bash
 nugs catalog cache
 nugs cache
 ```
@@ -176,7 +176,7 @@ Shows cache information (last updated, size, entry count).
 
 ### Catalog Statistics
 
-```
+```bash
 nugs catalog stats
 nugs stats
 ```
@@ -185,22 +185,21 @@ Displays catalog statistics (total shows, artists, date ranges).
 
 ### Latest Additions
 
-```
+```bash
 nugs catalog latest [limit]
 nugs latest [limit]
 ```
 
 Shows the most recently added shows (default: 15).
 
-```
+```bash
 nugs latest                  # Latest 15 additions
 nugs latest 50               # Latest 50 additions
 ```
 
-
 ### Gap Detection
 
-```
+```bash
 nugs catalog gaps <artist_id> [...] [audio|video|both] [--ids-only]
 nugs gaps <artist_id> [...] [audio|video|both] [--ids-only]
 ```
@@ -214,7 +213,7 @@ Finds shows you haven't downloaded yet by comparing the catalog against your loc
 | `video` | Only check video gaps |
 | `both` | Check gaps for both formats |
 
-```
+```bash
 nugs gaps 1125               # Missing Billy Strings shows
 nugs gaps 1125 video         # Missing video shows
 nugs gaps 1125 --ids-only    # Just IDs for scripting
@@ -223,14 +222,14 @@ nugs gaps 1125 461           # Gaps for multiple artists
 
 ### Gap Fill (Requires Auth)
 
-```
+```bash
 nugs catalog gaps <artist_id> [...] [audio|video|both] fill
 nugs gaps <artist_id> [...] [audio|video|both] fill
 ```
 
 Automatically downloads all missing shows for an artist.
 
-```
+```bash
 nugs gaps 1125 fill          # Download all missing shows
 nugs gaps 1125 video fill    # Download missing video shows
 nugs gaps 1125 461 fill      # Fill gaps for multiple artists
@@ -238,13 +237,13 @@ nugs gaps 1125 461 fill      # Fill gaps for multiple artists
 
 ### Catalog List
 
-```
+```bash
 nugs catalog list <artist_id> [...] [audio|video|both]
 ```
 
 Lists all shows for an artist from the local cache (offline).
 
-```
+```bash
 nugs catalog list 1125
 nugs catalog list 1125 video
 nugs catalog list 1125 461   # Multiple artists
@@ -252,14 +251,14 @@ nugs catalog list 1125 461   # Multiple artists
 
 ### Coverage Report
 
-```
+```bash
 nugs catalog coverage [artist_ids...] [audio|video|both]
 nugs coverage [artist_ids...] [audio|video|both]
 ```
 
 Shows download coverage statistics (total vs downloaded vs missing).
 
-```
+```bash
 nugs coverage 1125           # Coverage for Billy Strings
 nugs coverage 1125 video     # Video coverage
 nugs coverage                # Coverage for all subscribed artists
@@ -273,21 +272,21 @@ Manages automatic catalog cache refresh at startup.
 
 ### Enable Auto-Refresh
 
-```
+```bash
 nugs catalog config enable
 nugs refresh enable
 ```
 
 ### Disable Auto-Refresh
 
-```
+```bash
 nugs catalog config disable
 nugs refresh disable
 ```
 
 ### Configure Auto-Refresh
 
-```
+```bash
 nugs catalog config set
 nugs refresh set
 ```
@@ -300,7 +299,7 @@ Interactive configuration for refresh schedule (daily/weekly), time, and timezon
 
 ### Status
 
-```
+```bash
 nugs status
 ```
 
@@ -308,7 +307,7 @@ Shows the status of any running or recently completed download session (PID, sta
 
 ### Cancel
 
-```
+```bash
 nugs cancel
 ```
 
@@ -318,7 +317,7 @@ Cancels an active download crawl by sending a cancellation signal to the running
 
 ## Shell Completions
 
-```
+```bash
 nugs completion <shell>
 ```
 
@@ -336,7 +335,7 @@ Generates shell completion scripts.
 
 ## Help
 
-```
+```bash
 nugs help
 nugs --help
 ```
