@@ -145,7 +145,7 @@ func (s *ProgressBoxState) isValidTransition(from, to string) bool {
 	case PhaseComplete, PhaseError:
 		return to == PhaseIdle || to == PhaseDownload // Can restart after completion/error
 	default:
-		return true // Unknown phases allowed for backward compatibility
+		return false // Reject unknown phases to catch typos and invalid states
 	}
 }
 
@@ -336,6 +336,10 @@ func (s *ProgressBoxState) ResetForNewAlbum(showTitle, showNumber string, trackT
 	s.IsPaused = false
 	s.IsCancelled = false
 	s.ForceRender = true
+
+	// Reset phase to idle for new album
+	s.CurrentPhase = PhaseIdle
+	s.StatusColor = ""
 
 	// Fields that are NOT reset (preserved across albums):
 	// - RcloneEnabled (batch setting)
