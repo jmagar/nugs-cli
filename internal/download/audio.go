@@ -320,27 +320,17 @@ func CheckIfHlsOnly(quals []*model.Quality) bool {
 	return true
 }
 
-// ProcessTrack downloads a single track, handling quality selection and progress updates.
-func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int, cfg *model.Config, track *model.Track, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
-	if deps.WaitIfPausedOrCancelled != nil {
-		if err := deps.WaitIfPausedOrCancelled(); err != nil {
-			return err
-		}
-	}
-	origWantFmt := cfg.Format
-	wantFmt := origWantFmt
-	var (
-		quals      []*model.Quality
-		chosenQual *model.Quality
-	)
-	// Call the stream meta endpoint four times to get all avail formats since the formats can shift.
+// selectTrackQuality probes available formats and selects the best quality for a track.
+// Returns the chosen quality, whether the track is HLS-only, and the resolved format ID.
+func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *model.StreamParams, wantFmt int) (*model.Quality, bool, int, error) {
+	var quals []*model.Quality
 	for _, i := range model.TrackStreamMetaFormatProbeOrder {
 		streamUrl, err := api.GetStreamMeta(ctx, track.TrackID, 0, i, streamParams)
 		if err != nil {
 			ui.PrintError("Failed to get track stream metadata")
-			return err
+			return nil, false, wantFmt, err
 		} else if streamUrl == "" {
-			return errors.New("the api didn't return a track stream URL")
+			return nil, false, wantFmt, errors.New("the api didn't return a track stream URL")
 		}
 		quality := api.QueryQuality(streamUrl)
 		if quality == nil {
@@ -349,82 +339,39 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		}
 		quals = append(quals, quality)
 	}
-
 	if len(quals) == 0 {
-		return errors.New("the api didn't return any formats")
+		return nil, false, wantFmt, errors.New("the api didn't return any formats")
 	}
 
 	isHlsOnly := CheckIfHlsOnly(quals)
-
 	if isHlsOnly {
 		ui.PrintInfo("HLS-only track. Only AAC is available, tags currently unsupported")
-		chosenQual = quals[0]
-		err := ParseHlsMaster(chosenQual)
-		if err != nil {
-			return err
+		chosenQual := quals[0]
+		if err := ParseHlsMaster(chosenQual); err != nil {
+			return nil, true, wantFmt, err
 		}
-	} else {
-		// Guard against infinite loop: max 10 fallback attempts
-		maxFallbacks := model.MaxFormatFallbackAttempts
-		for i := 0; i < maxFallbacks; i++ {
-			chosenQual = api.GetTrackQual(quals, wantFmt)
-			if chosenQual != nil {
-				break
-			}
-			// Fallback quality.
-			nextFmt := trackFallback[wantFmt]
-			// Guard: if no fallback exists or fallback doesn't progress, break
-			if nextFmt == 0 || nextFmt == wantFmt {
-				break
-			}
-			wantFmt = nextFmt
-		}
-		if wantFmt != origWantFmt && origWantFmt != 4 {
-			ui.PrintInfo("Unavailable in your chosen format")
-			// Tier 3: Set quality fallback warning in progress box
-			if progressBox != nil {
-				fallbackMsg := fmt.Sprintf("Using %s (requested %s unavailable)",
-					model.GetQualityName(wantFmt), model.GetQualityName(origWantFmt))
-				progressBox.SetMessage(model.MessagePriorityWarning, fallbackMsg, model.StatusMessageDuration)
-			}
-		}
-		if chosenQual == nil {
-			return fmt.Errorf("no supported format found for track %d", trackNum)
-		}
-	}
-	trackFname := fmt.Sprintf(
-		"%02d. %s%s", trackNum, helpers.Sanitise(track.SongTitle), chosenQual.Extension,
-	)
-	trackPath := filepath.Join(folPath, trackFname)
-	exists, err := helpers.FileExists(trackPath)
-	if err != nil {
-		ui.PrintError("Failed to check if track already exists locally")
-		return err
-	}
-	if exists {
-		ui.PrintInfo(fmt.Sprintf("Track exists %s skipping", ui.SymbolArrow))
-		if progressBox != nil {
-			progressBox.Mu.Lock()
-			progressBox.SkippedTracks++
-			progressBox.Mu.Unlock()
-			// Tier 3: Set skip indicator message
-			skipMsg := fmt.Sprintf("Skipped track %d - already exists", trackNum)
-			progressBox.SetMessage(model.MessagePriorityStatus, skipMsg, model.SkipMessageDuration)
-		}
-		return nil
-	}
-	// Update progress box state
-	if progressBox != nil {
-		progressBox.TrackNumber = trackNum
-		progressBox.TrackTotal = trackTotal
-		progressBox.TrackName = track.SongTitle
-		progressBox.TrackFormat = chosenQual.Specs
-		progressBox.RcloneEnabled = cfg.RcloneEnabled
+		return chosenQual, true, wantFmt, nil
 	}
 
-	showProgress := func(downloaded, total, speed int64) {
+	// Non-HLS: try requested format with fallback chain
+	for i := 0; i < model.MaxFormatFallbackAttempts; i++ {
+		if chosen := api.GetTrackQual(quals, wantFmt); chosen != nil {
+			return chosen, false, wantFmt, nil
+		}
+		nextFmt := trackFallback[wantFmt]
+		if nextFmt == 0 || nextFmt == wantFmt {
+			break
+		}
+		wantFmt = nextFmt
+	}
+	return nil, false, wantFmt, nil
+}
+
+// buildTrackProgressCallback creates a progress callback for track downloads.
+// It updates both the progress box (if provided) and falls back to simple progress display.
+func buildTrackProgressCallback(progressBox *model.ProgressBoxState, deps *Deps, trackNum, trackTotal int, accumulatedBeforeCurrent int64) func(downloaded, total, speed int64) {
+	return func(downloaded, total, speed int64) {
 		if progressBox == nil {
-			// Fallback to old progress display if no box provided
 			trackPercentage := 0
 			trackTotalStr := model.UnknownSizeLabelLower
 			if total > 0 {
@@ -442,7 +389,6 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			return
 		}
 
-		// Update progress box with download progress
 		trackPercentage := 0
 		trackTotalStr := model.UnknownSizeLabelLower
 		if total > 0 {
@@ -452,7 +398,6 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			}
 			trackTotalStr = humanize.Bytes(uint64(total))
 		}
-
 		trackProgress := 0.0
 		if total > 0 {
 			trackProgress = float64(downloaded) / float64(total)
@@ -465,26 +410,18 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			showPercentage = model.MaxProgressPercent
 		}
 
-		// Lock for atomic update of all progress fields
 		progressBox.Mu.Lock()
 		progressBox.DownloadPercent = trackPercentage
 		progressBox.DownloadSpeed = humanize.Bytes(uint64(speed))
 		progressBox.Downloaded = humanize.Bytes(uint64(downloaded))
 		progressBox.DownloadTotal = trackTotalStr
 		progressBox.ShowPercent = showPercentage
+		progressBox.ShowDownloaded = humanize.Bytes(uint64(accumulatedBeforeCurrent + downloaded))
 
-		// Calculate accumulated download (completed tracks + current track progress)
-		accumulatedBytes := progressBox.AccumulatedBytes + downloaded
-		progressBox.ShowDownloaded = humanize.Bytes(uint64(accumulatedBytes))
-
-		// Calculate ETA for current track
 		if speed > 0 && total > 0 && downloaded < total {
-			// Update speed history for smoothing
 			if deps.UpdateSpeedHistory != nil {
 				progressBox.SpeedHistory = deps.UpdateSpeedHistory(progressBox.SpeedHistory, float64(speed))
 			}
-
-			// Calculate remaining bytes for current track
 			remaining := total - downloaded
 			if deps.CalculateETA != nil {
 				progressBox.DownloadETA = deps.CalculateETA(progressBox.SpeedHistory, remaining)
@@ -494,11 +431,69 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		}
 		progressBox.Mu.Unlock()
 
-		// Render the updated progress box (outside lock to avoid holding during I/O)
 		if deps.RenderProgressBox != nil {
 			deps.RenderProgressBox(progressBox)
 		}
 	}
+}
+
+// ProcessTrack downloads a single track, handling quality selection and progress updates.
+func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int, cfg *model.Config, track *model.Track, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
+	if deps.WaitIfPausedOrCancelled != nil {
+		if err := deps.WaitIfPausedOrCancelled(); err != nil {
+			return err
+		}
+	}
+	origWantFmt := cfg.Format
+	chosenQual, isHlsOnly, resolvedFmt, err := selectTrackQuality(ctx, track, streamParams, origWantFmt)
+	if err != nil {
+		return err
+	}
+	if !isHlsOnly && resolvedFmt != origWantFmt && origWantFmt != 4 {
+		ui.PrintInfo("Unavailable in your chosen format")
+		if progressBox != nil {
+			fallbackMsg := fmt.Sprintf("Using %s (requested %s unavailable)",
+				model.GetQualityName(resolvedFmt), model.GetQualityName(origWantFmt))
+			progressBox.SetMessage(model.MessagePriorityWarning, fallbackMsg, model.StatusMessageDuration)
+		}
+	}
+	if chosenQual == nil {
+		return fmt.Errorf("no supported format found for track %d", trackNum)
+	}
+
+	trackFname := fmt.Sprintf(
+		"%02d. %s%s", trackNum, helpers.Sanitise(track.SongTitle), chosenQual.Extension,
+	)
+	trackPath := filepath.Join(folPath, trackFname)
+	exists, err := helpers.FileExists(trackPath)
+	if err != nil {
+		ui.PrintError("Failed to check if track already exists locally")
+		return err
+	}
+	if exists {
+		ui.PrintInfo(fmt.Sprintf("Track exists %s skipping", ui.SymbolArrow))
+		if progressBox != nil {
+			progressBox.Mu.Lock()
+			progressBox.SkippedTracks++
+			progressBox.Mu.Unlock()
+			skipMsg := fmt.Sprintf("Skipped track %d - already exists", trackNum)
+			progressBox.SetMessage(model.MessagePriorityStatus, skipMsg, model.SkipMessageDuration)
+		}
+		return nil
+	}
+
+	var accumulatedBeforeCurrent int64
+	if progressBox != nil {
+		progressBox.Mu.Lock()
+		progressBox.TrackNumber = trackNum
+		progressBox.TrackTotal = trackTotal
+		progressBox.TrackName = track.SongTitle
+		progressBox.TrackFormat = chosenQual.Specs
+		progressBox.RcloneEnabled = cfg.RcloneEnabled
+		accumulatedBeforeCurrent = progressBox.AccumulatedBytes
+		progressBox.Mu.Unlock()
+	}
+	showProgress := buildTrackProgressCallback(progressBox, deps, trackNum, trackTotal, accumulatedBeforeCurrent)
 
 	if isHlsOnly {
 		err = HlsOnly(ctx, trackPath, chosenQual.URL, cfg.FfmpegNameStr, showProgress, false, deps)
@@ -510,9 +505,7 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		return err
 	}
 
-	// Update accumulated bytes after successful download
 	if progressBox != nil {
-		// Get the actual file size
 		var trackSize int64
 		if stat, statErr := os.Stat(trackPath); statErr == nil {
 			trackSize = stat.Size()
@@ -522,7 +515,6 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 		progressBox.AccumulatedTracks++
 		progressBox.Mu.Unlock()
 	}
-
 	return nil
 }
 
@@ -540,13 +532,8 @@ func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams
 	// Semaphore to limit concurrent requests to 8
 	sem := make(chan struct{}, model.PreCalcConcurrency)
 
-	// Context with timeout for overall operation (tracks * 5 seconds, max 60 seconds)
-	timeout := time.Duration(len(tracks)) * model.PreCalcPerTrackTimeout
-	if timeout > model.PreCalcMaxTimeout {
-		timeout = model.PreCalcMaxTimeout
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	// Use background context for orchestration; per-request timeouts handle individual HEADs
+	ctx := context.Background()
 
 	for _, track := range tracks {
 		wg.Add(1)
@@ -742,15 +729,19 @@ func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, ar
 			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 				return err
 			}
-			progressBox.Mu.Lock()
-			progressBox.ErrorTracks++
-			progressBox.Mu.Unlock()
+			if progressBox != nil {
+				progressBox.Mu.Lock()
+				progressBox.ErrorTracks++
+				progressBox.Mu.Unlock()
+			}
 			helpers.HandleErr("Track failed.", err, false)
 		}
 	}
-	progressBox.IsComplete = true
-	progressBox.CompletionTime = time.Now()
-	progressBox.TotalDuration = time.Since(progressBox.StartTime)
+	if progressBox != nil {
+		progressBox.IsComplete = true
+		progressBox.CompletionTime = time.Now()
+		progressBox.TotalDuration = time.Since(progressBox.StartTime)
+	}
 	if cfg.RcloneEnabled {
 		if err := deps.UploadPath(ctx, albumPath, artistFolder, cfg, progressBox, false); err != nil {
 			helpers.HandleErr("Upload failed.", err, false)

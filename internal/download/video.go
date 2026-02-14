@@ -574,25 +574,196 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 	return box, true
 }
 
-// Video downloads a video from Nugs.net using the provided videoID.
-func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, streamParams *model.StreamParams, _meta *model.AlbArtResp, isLstream bool, progressBox *model.ProgressBoxState, deps *Deps) error {
-	var (
-		chapsAvail  bool
-		skuID       int
-		manifestUrl string
-		meta        *model.AlbArtResp
-		err         error
-	)
-
+// resolveVideoMeta retrieves video metadata and determines the SKU ID.
+func resolveVideoMeta(ctx context.Context, videoID string, _meta *model.AlbArtResp, isLstream bool) (*model.AlbArtResp, int, error) {
+	var meta *model.AlbArtResp
 	if _meta != nil {
 		meta = _meta
 	} else {
 		m, err := api.GetAlbumMeta(ctx, videoID)
 		if err != nil {
 			ui.PrintError("Failed to get metadata")
-			return err
+			return nil, 0, err
 		}
 		meta = m.Response
+	}
+	var skuID int
+	if isLstream {
+		skuID = GetLstreamSku(meta.ProductFormatList)
+	} else {
+		skuID = GetVideoSku(meta.Products)
+	}
+	if skuID == 0 {
+		return nil, 0, errors.New("no video available")
+	}
+	return meta, skuID, nil
+}
+
+// resolveManifestAndVariant fetches the manifest URL and selects the best video variant.
+func resolveManifestAndVariant(ctx context.Context, meta *model.AlbArtResp, videoID, uguID string, skuID int, streamParams *model.StreamParams, cfg *model.Config) (string, *m3u8.Variant, string, error) {
+	var (
+		manifestUrl string
+		err         error
+	)
+	if uguID == "" {
+		manifestUrl, err = api.GetStreamMeta(ctx, meta.ContainerID, skuID, 0, streamParams)
+	} else {
+		manifestUrl, err = api.GetPurchasedManURL(ctx, skuID, videoID, streamParams.UserID, uguID)
+	}
+	if err != nil {
+		ui.PrintError("Failed to get video file metadata")
+		return "", nil, "", err
+	}
+	if manifestUrl == "" {
+		return "", nil, "", errors.New("the api didn't return a video manifest url")
+	}
+	variant, retRes, err := ChooseVariant(manifestUrl, cfg.WantRes)
+	if err != nil {
+		ui.PrintError("Failed to get video master manifest")
+		return "", nil, "", err
+	}
+	return manifestUrl, variant, retRes, nil
+}
+
+// prepareVideoPathsAndCheck creates directories and checks for existing files locally/remotely.
+// Returns artistFolder, vidPathTs, vidPath, and whether the video should be skipped.
+func prepareVideoPathsAndCheck(ctx context.Context, meta *model.AlbArtResp, videoFname, retRes string, cfg *model.Config, deps *Deps) (string, string, string, bool, error) {
+	artistFolder := helpers.Sanitise(meta.ArtistName)
+	artistPath := filepath.Join(helpers.GetVideoOutPath(cfg), artistFolder)
+	if err := helpers.MakeDirs(artistPath); err != nil {
+		ui.PrintError("Failed to make artist folder")
+		return "", "", "", false, err
+	}
+	vidPathNoExt := filepath.Join(artistPath, helpers.Sanitise(videoFname+"_"+retRes))
+	vidPathTs := vidPathNoExt + ".ts"
+	vidPath := vidPathNoExt + ".mp4"
+	exists, err := helpers.FileExists(vidPath)
+	if err != nil {
+		ui.PrintError("Failed to check if video already exists locally")
+		return "", "", "", false, err
+	}
+	if exists {
+		ui.PrintInfo(fmt.Sprintf("Video exists %s skipping", ui.SymbolArrow))
+		return "", "", "", true, nil
+	}
+	if cfg.RcloneEnabled {
+		remoteVideoPath := path.Join(artistFolder, filepath.Base(vidPath))
+		ui.PrintInfo(fmt.Sprintf("Checking remote for video: %s%s%s", ui.ColorCyan, filepath.Base(vidPath), ui.ColorReset))
+		remoteExists, checkErr := deps.CheckRemotePathExists(ctx, remoteVideoPath, cfg, true)
+		if checkErr != nil {
+			ui.PrintWarning(fmt.Sprintf("Failed to check remote video path: %v", checkErr))
+		} else if remoteExists {
+			ui.PrintSuccess(fmt.Sprintf("Video found on remote %s skipping", ui.SymbolArrow))
+			return "", "", "", true, nil
+		}
+	}
+	return artistFolder, vidPathTs, vidPath, false, nil
+}
+
+// downloadVideoContent downloads the video content (livestream segments or single file).
+func downloadVideoContent(ctx context.Context, vidPathTs, manBaseUrl string, segUrls []string, isLstream bool, progressBox *model.ProgressBoxState, deps *Deps) error {
+	if isLstream {
+		return DownloadLstream(ctx, vidPathTs, manBaseUrl, segUrls, func(segNum, segTotal int) {
+			if progressBox == nil {
+				return
+			}
+			percent := 0
+			if segTotal > 0 {
+				percent = int(float64(segNum) / float64(segTotal) * float64(model.MaxProgressPercent))
+			}
+			progressBox.Mu.Lock()
+			progressBox.DownloadPercent = percent
+			progressBox.Downloaded = fmt.Sprintf("%d segments", segNum)
+			progressBox.DownloadTotal = fmt.Sprintf("%d segments", segTotal)
+			progressBox.ShowPercent = percent
+			progressBox.ShowDownloaded = progressBox.Downloaded
+			progressBox.ShowTotal = progressBox.DownloadTotal
+			progressBox.Mu.Unlock()
+			if deps.RenderProgressBox != nil {
+				deps.RenderProgressBox(progressBox)
+			}
+		})
+	}
+	return DownloadVideoFile(ctx, vidPathTs, manBaseUrl+segUrls[0], func(downloaded, total, speed int64) {
+		if progressBox == nil {
+			return
+		}
+		totalStr := model.UnknownSizeLabel
+		percent := 0
+		if total > 0 {
+			totalStr = humanize.Bytes(uint64(total))
+			percent = int(float64(downloaded) / float64(total) * float64(model.MaxProgressPercent))
+		}
+		progressBox.Mu.Lock()
+		progressBox.DownloadPercent = percent
+		progressBox.DownloadSpeed = humanize.Bytes(uint64(speed))
+		progressBox.Downloaded = humanize.Bytes(uint64(downloaded))
+		progressBox.DownloadTotal = totalStr
+		progressBox.ShowPercent = percent
+		progressBox.ShowDownloaded = progressBox.Downloaded
+		progressBox.ShowTotal = progressBox.DownloadTotal
+		progressBox.Mu.Unlock()
+		if deps.RenderProgressBox != nil {
+			deps.RenderProgressBox(progressBox)
+		}
+	})
+}
+
+// convertAndUploadVideo handles chapter extraction, TS-to-MP4 conversion, and optional upload.
+func convertAndUploadVideo(ctx context.Context, vidPathTs, vidPath, artistFolder string, meta *model.AlbArtResp, cfg *model.Config, chapsAvail bool, progressBox *model.ProgressBoxState, deps *Deps) error {
+	var chapsFilePath string
+	if chapsAvail {
+		dur, getDurErr := GetDuration(vidPathTs, cfg.FfmpegNameStr)
+		if getDurErr != nil {
+			ui.PrintError("Failed to get TS duration")
+			return getDurErr
+		}
+		var err error
+		chapsFilePath, err = WriteChapsFile(meta.VideoChapters, dur)
+		if err != nil {
+			if chapsFilePath != "" {
+				os.Remove(chapsFilePath)
+			}
+			ui.PrintError("Failed to write chapters file")
+			return err
+		}
+		defer os.Remove(chapsFilePath)
+	}
+	ui.PrintInfo("Putting into MP4 container...")
+	if progressBox != nil {
+		progressBox.SetPhase(model.PhaseVerify)
+		progressBox.SetMessage(model.MessagePriorityStatus, model.VideoConvertStatusLabel, model.StatusMessageDuration)
+		if deps.RenderProgressBox != nil {
+			deps.RenderProgressBox(progressBox)
+		}
+	}
+	if err := TsToMp4(vidPathTs, vidPath, cfg.FfmpegNameStr, chapsFilePath); err != nil {
+		ui.PrintError("Failed to put TS into MP4 container")
+		return err
+	}
+	if err := os.Remove(vidPathTs); err != nil {
+		ui.PrintError("Failed to delete TS")
+	}
+	if cfg.RcloneEnabled {
+		if progressBox != nil {
+			progressBox.SetPhase(model.PhaseUpload)
+			progressBox.SetMessage(model.MessagePriorityStatus, model.VideoUploadStatusLabel, model.StatusMessageDuration)
+			if deps.RenderProgressBox != nil {
+				deps.RenderProgressBox(progressBox)
+			}
+		}
+		if err := deps.UploadPath(ctx, vidPath, artistFolder, cfg, progressBox, true); err != nil {
+			helpers.HandleErr("Upload failed.", err, false)
+		}
+	}
+	return nil
+}
+
+// Video downloads a video from Nugs.net using the provided videoID.
+func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, streamParams *model.StreamParams, _meta *model.AlbArtResp, isLstream bool, progressBox *model.ProgressBoxState, deps *Deps) error {
+	meta, skuID, err := resolveVideoMeta(ctx, videoID, _meta, isLstream)
+	if err != nil {
+		return err
 	}
 
 	progressBox, createdProgressBox := PrepareVideoProgressBox(meta, cfg, progressBox, deps)
@@ -604,86 +775,33 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		}()
 	}
 
-	if !cfg.SkipChapters {
-		chapsAvail = len(meta.VideoChapters) > 0
-	}
-
+	chapsAvail := !cfg.SkipChapters && len(meta.VideoChapters) > 0
 	videoFname := helpers.BuildAlbumFolderName(meta.ArtistName, meta.ContainerInfo, model.VideoNameMaxRunes)
 	fmt.Println(videoFname)
 	if len([]rune(meta.ArtistName+" - "+strings.TrimRight(meta.ContainerInfo, " "))) > model.VideoNameMaxRunes {
 		fmt.Printf("Video filename was chopped because it exceeds %d characters.\n", model.VideoNameMaxRunes)
 	}
-	if isLstream {
-		skuID = GetLstreamSku(meta.ProductFormatList)
-	} else {
-		skuID = GetVideoSku(meta.Products)
-	}
-	if skuID == 0 {
-		return errors.New("no video available")
-	}
-	if uguID == "" {
-		manifestUrl, err = api.GetStreamMeta(ctx,
-			meta.ContainerID, skuID, 0, streamParams)
-	} else {
-		manifestUrl, err = api.GetPurchasedManURL(ctx, skuID, videoID, streamParams.UserID, uguID)
-	}
 
+	manifestUrl, variant, retRes, err := resolveManifestAndVariant(ctx, meta, videoID, uguID, skuID, streamParams, cfg)
 	if err != nil {
-		ui.PrintError("Failed to get video file metadata")
-		return err
-	} else if manifestUrl == "" {
-		return errors.New("the api didn't return a video manifest url")
-	}
-	variant, retRes, err := ChooseVariant(manifestUrl, cfg.WantRes)
-	if err != nil {
-		ui.PrintError("Failed to get video master manifest")
 		return err
 	}
 
-	// Create artist directory
-	artistFolder := helpers.Sanitise(meta.ArtistName)
-	artistPath := filepath.Join(helpers.GetVideoOutPath(cfg), artistFolder)
-	err = helpers.MakeDirs(artistPath)
-	if err != nil {
-		ui.PrintError("Failed to make artist folder")
+	artistFolder, vidPathTs, vidPath, skipped, err := prepareVideoPathsAndCheck(ctx, meta, videoFname, retRes, cfg, deps)
+	if err != nil || skipped {
 		return err
 	}
 
-	vidPathNoExt := filepath.Join(artistPath, helpers.Sanitise(videoFname+"_"+retRes))
-	vidPathTs := vidPathNoExt + ".ts"
-	vidPath := vidPathNoExt + ".mp4"
-	exists, err := helpers.FileExists(vidPath)
-	if err != nil {
-		ui.PrintError("Failed to check if video already exists locally")
-		return err
-	}
-	if exists {
-		ui.PrintInfo(fmt.Sprintf("Video exists %s skipping", ui.SymbolArrow))
-		return nil
-	}
-	if cfg.RcloneEnabled {
-		remoteVideoPath := path.Join(artistFolder, filepath.Base(vidPath))
-		ui.PrintInfo(fmt.Sprintf("Checking remote for video: %s%s%s", ui.ColorCyan, filepath.Base(vidPath), ui.ColorReset))
-		remoteExists, checkErr := deps.CheckRemotePathExists(ctx, remoteVideoPath, cfg, true)
-		if checkErr != nil {
-			ui.PrintWarning(fmt.Sprintf("Failed to check remote video path: %v", checkErr))
-		} else if remoteExists {
-			ui.PrintSuccess(fmt.Sprintf("Video found on remote %s skipping", ui.SymbolArrow))
-			return nil
-		}
-	}
 	manBaseUrl, query, err := GetManifestBase(manifestUrl)
 	if err != nil {
 		ui.PrintError("Failed to get video manifest base URL")
 		return err
 	}
-
 	segUrls, err := GetSegUrls(manBaseUrl+variant.URI, query)
 	if err != nil {
 		ui.PrintError("Failed to get video segment URLs")
 		return err
 	}
-	// Player album page videos aren't always only the first seg for the entire vid.
 	isLstream, err = api.IsLikelyLivestreamSegments(segUrls)
 	if err != nil {
 		return err
@@ -711,106 +829,13 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		}
 	}
 
-	if isLstream {
-		err = DownloadLstream(ctx, vidPathTs, manBaseUrl, segUrls, func(segNum, segTotal int) {
-			if progressBox == nil {
-				return
-			}
-			percent := 0
-			if segTotal > 0 {
-				percent = int(float64(segNum) / float64(segTotal) * float64(model.MaxProgressPercent))
-			}
-			progressBox.Mu.Lock()
-			progressBox.DownloadPercent = percent
-			progressBox.Downloaded = fmt.Sprintf("%d segments", segNum)
-			progressBox.DownloadTotal = fmt.Sprintf("%d segments", segTotal)
-			progressBox.ShowPercent = percent
-			progressBox.ShowDownloaded = progressBox.Downloaded
-			progressBox.ShowTotal = progressBox.DownloadTotal
-			progressBox.Mu.Unlock()
-			if deps.RenderProgressBox != nil {
-				deps.RenderProgressBox(progressBox)
-			}
-		})
-	} else {
-		err = DownloadVideoFile(ctx, vidPathTs, manBaseUrl+segUrls[0], func(downloaded, total, speed int64) {
-			if progressBox == nil {
-				return
-			}
-			totalStr := model.UnknownSizeLabel
-			percent := 0
-			if total > 0 {
-				totalStr = humanize.Bytes(uint64(total))
-				percent = int(float64(downloaded) / float64(total) * float64(model.MaxProgressPercent))
-			}
-
-			progressBox.Mu.Lock()
-			progressBox.DownloadPercent = percent
-			progressBox.DownloadSpeed = humanize.Bytes(uint64(speed))
-			progressBox.Downloaded = humanize.Bytes(uint64(downloaded))
-			progressBox.DownloadTotal = totalStr
-			progressBox.ShowPercent = percent
-			progressBox.ShowDownloaded = progressBox.Downloaded
-			progressBox.ShowTotal = progressBox.DownloadTotal
-			progressBox.Mu.Unlock()
-			if deps.RenderProgressBox != nil {
-				deps.RenderProgressBox(progressBox)
-			}
-		})
-	}
-	if err != nil {
+	if err := downloadVideoContent(ctx, vidPathTs, manBaseUrl, segUrls, isLstream, progressBox, deps); err != nil {
 		ui.PrintError("Failed to download video segments")
 		return err
 	}
-	var chapsFilePath string
-	if chapsAvail {
-		dur, getDurErr := GetDuration(vidPathTs, cfg.FfmpegNameStr)
-		if getDurErr != nil {
-			ui.PrintError("Failed to get TS duration")
-			return getDurErr
-		}
-		chapsFilePath, err = WriteChapsFile(meta.VideoChapters, dur)
-		if err != nil {
-			if chapsFilePath != "" {
-				os.Remove(chapsFilePath)
-			}
-			ui.PrintError("Failed to write chapters file")
-			return err
-		}
-		defer os.Remove(chapsFilePath)
-	}
-	ui.PrintInfo("Putting into MP4 container...")
-	if progressBox != nil {
-		progressBox.SetPhase(model.PhaseVerify)
-		progressBox.SetMessage(model.MessagePriorityStatus, model.VideoConvertStatusLabel, model.StatusMessageDuration)
-		if deps.RenderProgressBox != nil {
-			deps.RenderProgressBox(progressBox)
-		}
-	}
-	err = TsToMp4(vidPathTs, vidPath, cfg.FfmpegNameStr, chapsFilePath)
-	if err != nil {
-		ui.PrintError("Failed to put TS into MP4 container")
-		return err
-	}
-	err = os.Remove(vidPathTs)
-	if err != nil {
-		ui.PrintError("Failed to delete TS")
-	}
 
-	// Upload to rclone if enabled
-	if cfg.RcloneEnabled {
-		if progressBox != nil {
-			progressBox.SetPhase(model.PhaseUpload)
-			progressBox.SetMessage(model.MessagePriorityStatus, model.VideoUploadStatusLabel, model.StatusMessageDuration)
-			if deps.RenderProgressBox != nil {
-				deps.RenderProgressBox(progressBox)
-			}
-		}
-		// Upload the video file to the artist folder on remote
-		err = deps.UploadPath(ctx, vidPath, artistFolder, cfg, progressBox, true)
-		if err != nil {
-			helpers.HandleErr("Upload failed.", err, false)
-		}
+	if err := convertAndUploadVideo(ctx, vidPathTs, vidPath, artistFolder, meta, cfg, chapsAvail, progressBox, deps); err != nil {
+		return err
 	}
 
 	if progressBox != nil {
@@ -820,11 +845,9 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		progressBox.TotalDuration = time.Since(progressBox.StartTime)
 		progressBox.Mu.Unlock()
 	}
-
 	if createdProgressBox && deps.RenderCompletionSummary != nil {
 		deps.RenderCompletionSummary(progressBox)
 		fmt.Println("")
 	}
-
 	return nil
 }

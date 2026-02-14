@@ -130,21 +130,12 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 		}
 	}()
 
-	for trackNum, track := range meta.Items {
-		if deps.WaitIfPausedOrCancelled != nil {
-			if err := deps.WaitIfPausedOrCancelled(); err != nil {
-				return err
-			}
-		}
-		trackNum++
-		err := ProcessTrack(ctx,
-			plistPath, trackNum, trackTotal, cfg, &track.Track, streamParams, progressBox, deps)
-		if err != nil {
-			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
-				return err
-			}
-			helpers.HandleErr("Track failed.", err, false)
-		}
+	tracks := make([]*model.Track, trackTotal)
+	for i := range meta.Items {
+		tracks[i] = &meta.Items[i].Track
+	}
+	if err := processPlaylistTracks(ctx, tracks, plistPath, cfg, streamParams, progressBox, deps); err != nil {
+		return err
 	}
 
 	// Upload to rclone if enabled
@@ -156,6 +147,26 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 		}
 	}
 
+	return nil
+}
+
+// processPlaylistTracks iterates over playlist tracks, downloading each with pause/cancel support.
+func processPlaylistTracks(ctx context.Context, tracks []*model.Track, plistPath string, cfg *model.Config, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
+	trackTotal := len(tracks)
+	for trackNum, track := range tracks {
+		if deps.WaitIfPausedOrCancelled != nil {
+			if err := deps.WaitIfPausedOrCancelled(); err != nil {
+				return err
+			}
+		}
+		trackNum++
+		if err := ProcessTrack(ctx, plistPath, trackNum, trackTotal, cfg, track, streamParams, progressBox, deps); err != nil {
+			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
+				return err
+			}
+			helpers.HandleErr("Track failed.", err, false)
+		}
+	}
 	return nil
 }
 
