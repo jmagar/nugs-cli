@@ -363,7 +363,6 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 			}
 			wantFmt = nextFmt
 		}
-		// chosenQual is guaranteed non-nil after loop exit
 		if wantFmt != origWantFmt && origWantFmt != 4 {
 			ui.PrintInfo("Unavailable in your chosen format")
 			// Tier 3: Set quality fallback warning in progress box
@@ -372,6 +371,9 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 					model.GetQualityName(wantFmt), model.GetQualityName(origWantFmt))
 				progressBox.SetMessage(model.MessagePriorityWarning, fallbackMsg, model.StatusMessageDuration)
 			}
+		}
+		if chosenQual == nil {
+			return fmt.Errorf("no supported format found for track %d", trackNum)
 		}
 	}
 	trackFname := fmt.Sprintf(

@@ -232,7 +232,7 @@ func GetSegUrls(manifestUrl, query string) ([]string, error) {
 }
 
 // DownloadVideoFile downloads a video file from a URL with progress tracking.
-func DownloadVideoFile(videoPath, _url string, onProgress func(downloaded, total, speed int64)) error {
+func DownloadVideoFile(ctx context.Context, videoPath, _url string, onProgress func(downloaded, total, speed int64)) error {
 	f, err := os.OpenFile(videoPath, os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
@@ -245,7 +245,7 @@ func DownloadVideoFile(videoPath, _url string, onProgress func(downloaded, total
 	}
 	startByte := stat.Size()
 
-	req, err := http.NewRequest(http.MethodGet, _url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, _url, nil)
 	if err != nil {
 		return err
 	}
@@ -257,6 +257,17 @@ func DownloadVideoFile(videoPath, _url string, onProgress func(downloaded, total
 	defer do.Body.Close()
 	if do.StatusCode != http.StatusOK && do.StatusCode != http.StatusPartialContent {
 		return errors.New(do.Status)
+	}
+
+	// Server ignored Range header — restart from beginning
+	if do.StatusCode == http.StatusOK && startByte > 0 {
+		startByte = 0
+		if err := f.Truncate(0); err != nil {
+			return fmt.Errorf("failed to truncate file for full re-download: %w", err)
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("failed to seek to start: %w", err)
+		}
 	}
 
 	if startByte > 0 {
@@ -721,7 +732,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 			}
 		})
 	} else {
-		err = DownloadVideoFile(vidPathTs, manBaseUrl+segUrls[0], func(downloaded, total, speed int64) {
+		err = DownloadVideoFile(ctx, vidPathTs, manBaseUrl+segUrls[0], func(downloaded, total, speed int64) {
 			if progressBox == nil {
 				return
 			}

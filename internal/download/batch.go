@@ -26,6 +26,9 @@ func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParam
 		return errors.New(
 			"The API didn't return any artist metadata.")
 	}
+	if len(meta[0].Response.Containers) == 0 {
+		return errors.New("The API didn't return any containers for this artist.")
+	}
 	fmt.Println(meta[0].Response.Containers[0].ArtistName)
 	albumTotal := GetAlbumTotal(meta)
 
