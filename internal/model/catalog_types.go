@@ -32,7 +32,7 @@ type CacheMeta struct {
 	CacheVersion   string    `json:"cacheVersion"`
 	TotalShows     int       `json:"totalShows"`
 	TotalArtists   int       `json:"totalArtists"`
-	ApiMethod      string    `json:"apiMethod"`
+	APIMethod      string    `json:"apiMethod"`
 	UpdateDuration string    `json:"updateDuration"`
 }
 

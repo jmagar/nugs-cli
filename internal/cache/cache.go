@@ -83,79 +83,82 @@ func WriteCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Dur
 			return err
 		}
 
-		// Write catalog.json atomically using temp file
-		catalogPath := filepath.Join(cacheDir, "catalog.json")
-		catalogData, err := json.Marshal(catalog)
-		if err != nil {
-			return fmt.Errorf("failed to marshal catalog: %w", err)
-		}
-
-		tmpCatalogPath := catalogPath + ".tmp"
-		err = os.WriteFile(tmpCatalogPath, catalogData, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write temp catalog: %w", err)
-		}
-
-		err = os.Rename(tmpCatalogPath, catalogPath)
-		if err != nil {
-			_ = os.Remove(tmpCatalogPath)
-			return fmt.Errorf("failed to rename catalog: %w", err)
-		}
-
-		// Count unique artists
-		artistSet := make(map[int]bool)
-		for _, item := range catalog.Response.RecentItems {
-			artistSet[item.ArtistID] = true
-		}
-
-		// Write catalog-meta.json atomically
-		meta := model.CacheMeta{
-			LastUpdated:    time.Now(),
-			CacheVersion:   "v1.0.0",
-			TotalShows:     len(catalog.Response.RecentItems),
-			TotalArtists:   len(artistSet),
-			ApiMethod:      "catalog.latest",
-			UpdateDuration: formatDurationFn(updateDuration),
-		}
-		metaPath := filepath.Join(cacheDir, "catalog-meta.json")
-		metaData, err := json.MarshalIndent(meta, "", "  ")
-		if err != nil {
-			return fmt.Errorf("failed to marshal metadata: %w", err)
-		}
-
-		tmpMetaPath := metaPath + ".tmp"
-		err = os.WriteFile(tmpMetaPath, metaData, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write temp metadata: %w", err)
-		}
-
-		err = os.Rename(tmpMetaPath, metaPath)
-		if err != nil {
-			_ = os.Remove(tmpMetaPath)
-			return fmt.Errorf("failed to rename metadata: %w", err)
-		}
-
-		// Build indexes (also atomic)
-		err = BuildArtistIndex(catalog)
-		if err != nil {
-			return err
-		}
-		err = BuildContainerIndex(catalog)
-		if err != nil {
+		if err := writeCatalogJSON(cacheDir, catalog); err != nil {
 			return err
 		}
 
-		return nil
+		if err := writeCatalogMeta(cacheDir, catalog, updateDuration, formatDurationFn); err != nil {
+			return err
+		}
+
+		if err := buildArtistIndex(cacheDir, catalog); err != nil {
+			return err
+		}
+		return buildContainerIndex(cacheDir, catalog)
 	})
 }
 
-// BuildArtistIndex creates artist name -> ID lookup index.
-func BuildArtistIndex(catalog *model.LatestCatalogResp) error {
-	cacheDir, err := GetCacheDir()
+// writeCatalogJSON writes catalog.json atomically using a temp file.
+func writeCatalogJSON(cacheDir string, catalog *model.LatestCatalogResp) error {
+	catalogPath := filepath.Join(cacheDir, "catalog.json")
+	catalogData, err := json.Marshal(catalog)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to marshal catalog: %w", err)
+	}
+	return atomicWriteFile(catalogPath, catalogData)
+}
+
+// writeCatalogMeta writes catalog-meta.json atomically.
+func writeCatalogMeta(cacheDir string, catalog *model.LatestCatalogResp, updateDuration time.Duration, formatDurationFn func(time.Duration) string) error {
+	artistSet := make(map[int]bool)
+	for _, item := range catalog.Response.RecentItems {
+		artistSet[item.ArtistID] = true
 	}
 
+	meta := model.CacheMeta{
+		LastUpdated:    time.Now(),
+		CacheVersion:   "v1.0.0",
+		TotalShows:     len(catalog.Response.RecentItems),
+		TotalArtists:   len(artistSet),
+		APIMethod:      "catalog.latest",
+		UpdateDuration: formatDurationFn(updateDuration),
+	}
+	metaPath := filepath.Join(cacheDir, "catalog-meta.json")
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	return atomicWriteFile(metaPath, metaData)
+}
+
+// atomicWriteFile writes data to a temp file then atomically renames it.
+func atomicWriteFile(targetPath string, data []byte) error {
+	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), "nugs_cache_*.tmp")
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	if _, err := tmpFile.Write(data); err != nil {
+		tmpFile.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to write temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("failed to rename temp file: %w", err)
+	}
+	return nil
+}
+
+// buildArtistIndex creates artist name -> ID lookup index (artists_index.json).
+// Must be called within WithCacheLock.
+func buildArtistIndex(cacheDir string, catalog *model.LatestCatalogResp) error {
 	index := make(map[string]int)
 	for _, item := range catalog.Response.RecentItems {
 		normalizedName := strings.ToLower(strings.TrimSpace(item.ArtistName))
@@ -168,29 +171,12 @@ func BuildArtistIndex(catalog *model.LatestCatalogResp) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal artist index: %w", err)
 	}
-
-	tmpPath := indexPath + ".tmp"
-	err = os.WriteFile(tmpPath, indexData, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write temp artist index: %w", err)
-	}
-
-	err = os.Rename(tmpPath, indexPath)
-	if err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename artist index: %w", err)
-	}
-
-	return nil
+	return atomicWriteFile(indexPath, indexData)
 }
 
-// BuildContainerIndex creates containerID -> artist mapping.
-func BuildContainerIndex(catalog *model.LatestCatalogResp) error {
-	cacheDir, err := GetCacheDir()
-	if err != nil {
-		return err
-	}
-
+// buildContainerIndex creates containerID -> artist mapping (containers_index.json).
+// Must be called within WithCacheLock.
+func buildContainerIndex(cacheDir string, catalog *model.LatestCatalogResp) error {
 	containers := make(map[int]model.ContainerIndexEntry)
 	for _, item := range catalog.Response.RecentItems {
 		containers[item.ContainerID] = model.ContainerIndexEntry{
@@ -207,18 +193,5 @@ func BuildContainerIndex(catalog *model.LatestCatalogResp) error {
 	if err != nil {
 		return fmt.Errorf("failed to marshal container index: %w", err)
 	}
-
-	tmpPath := indexPath + ".tmp"
-	err = os.WriteFile(tmpPath, indexData, 0644)
-	if err != nil {
-		return fmt.Errorf("failed to write temp container index: %w", err)
-	}
-
-	err = os.Rename(tmpPath, indexPath)
-	if err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename container index: %w", err)
-	}
-
-	return nil
+	return atomicWriteFile(indexPath, indexData)
 }
