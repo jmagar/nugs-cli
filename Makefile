@@ -12,7 +12,7 @@ clean:
 	@rm -f ~/.local/bin/nugs ./nugs ./nugs-cli
 
 test:
-	@go test ./... -count=1
+	@go test -race -count=1 ./...
 
 # Install is the same as build (already in user's PATH)
 install: build
