@@ -36,8 +36,8 @@ func parseTimestamps(start, end string) (string, string, error) {
 	return api.ParseTimestamps(start, end)
 }
 
-func parseStreamParams(userId string, subInfo *SubInfo, isPromo bool) (*StreamParams, error) {
-	return api.ParseStreamParams(userId, subInfo, isPromo)
+func parseStreamParams(userID string, subInfo *SubInfo, isPromo bool) (*StreamParams, error) {
+	return api.ParseStreamParams(userID, subInfo, isPromo)
 }
 
 func checkURL(url string) (string, int) {

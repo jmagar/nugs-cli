@@ -9,6 +9,6 @@ import (
 	"github.com/jmagar/nugs-cli/internal/download"
 )
 
-func video(ctx context.Context, videoID, uguID string, cfg *Config, streamParams *StreamParams, _meta *AlbArtResp, isLstream bool, progressBox *ProgressBoxState) error {
-	return download.Video(ctx, videoID, uguID, cfg, streamParams, _meta, isLstream, progressBox, buildDownloadDeps())
+func video(ctx context.Context, videoID, uguID string, cfg *Config, streamParams *StreamParams, meta *AlbArtResp, isLstream bool, progressBox *ProgressBoxState) error {
+	return download.Video(ctx, videoID, uguID, cfg, streamParams, meta, isLstream, progressBox, buildDownloadDeps())
 }
