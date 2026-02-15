@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,6 +20,105 @@ import (
 
 // ArtistMetaCacheTTL is the TTL used for artist metadata caching.
 const ArtistMetaCacheTTL = 24 * time.Hour
+
+type gapFillErrorContext struct {
+	AvailabilityType string `json:"availabilityType,omitempty"`
+	ActiveState      string `json:"activeState,omitempty"`
+	Tracks           int    `json:"tracks"`
+	Products         int    `json:"products"`
+	ProductFormats   int    `json:"productFormats"`
+
+	LocalAudioPath   string `json:"localAudioPath"`
+	LocalAudioExists bool   `json:"localAudioExists"`
+	LocalVideoPath   string `json:"localVideoPath"`
+	LocalVideoExists bool   `json:"localVideoExists"`
+
+	RemoteRelativePath string `json:"remoteRelativePath,omitempty"`
+	RemoteAudioPath    string `json:"remoteAudioPath,omitempty"`
+	RemoteAudioExists  bool   `json:"remoteAudioExists"`
+	RemoteAudioError   string `json:"remoteAudioError,omitempty"`
+	RemoteVideoPath    string `json:"remoteVideoPath,omitempty"`
+	RemoteVideoExists  bool   `json:"remoteVideoExists"`
+	RemoteVideoError   string `json:"remoteVideoError,omitempty"`
+}
+
+func deriveGapFillReasonHint(err error, info gapFillErrorContext) string {
+	if info.AvailabilityType != "" &&
+		!strings.EqualFold(info.AvailabilityType, model.AvailableAvailabilityType) &&
+		info.Tracks == 0 && info.Products == 0 && info.ProductFormats == 0 {
+		return "Preorder/placeholder container (not released yet)"
+	}
+	if info.LocalAudioExists || info.LocalVideoExists {
+		return "Already exists locally (naming/path mismatch likely)"
+	}
+	if info.RemoteAudioExists || info.RemoteVideoExists {
+		return "Already exists on remote (naming/path mismatch likely)"
+	}
+	if info.RemoteAudioError != "" || info.RemoteVideoError != "" {
+		return "Remote existence check failed"
+	}
+	if err != nil && strings.Contains(err.Error(), "release has no tracks or videos") {
+		return "Metadata has no downloadable tracks/videos yet"
+	}
+	return "No content found at expected local/remote paths"
+}
+
+func joinRemotePath(remote, base, relative string) string {
+	trimmedBase := strings.TrimRight(base, "/")
+	trimmedRelative := strings.TrimLeft(relative, "/")
+	if trimmedBase == "" {
+		return fmt.Sprintf("%s:%s", remote, trimmedRelative)
+	}
+	return fmt.Sprintf("%s:%s/%s", remote, trimmedBase, trimmedRelative)
+}
+
+func buildGapFillErrorContext(ctx context.Context, show *model.AlbArtResp, cfg *model.Config, deps *Deps) gapFillErrorContext {
+	resolver := helpers.NewConfigPathResolver(cfg)
+	localAudioPath := resolver.LocalShowPath(show, model.MediaTypeAudio)
+	localVideoPath := resolver.LocalShowPath(show, model.MediaTypeVideo)
+
+	info := gapFillErrorContext{
+		AvailabilityType: show.AvailabilityTypeStr,
+		ActiveState:      show.ActiveState,
+		Tracks:           len(show.Tracks),
+		Products:         len(show.Products),
+		ProductFormats:   len(show.ProductFormatList),
+		LocalAudioPath:   localAudioPath,
+		LocalVideoPath:   localVideoPath,
+	}
+
+	if _, err := os.Stat(localAudioPath); err == nil {
+		info.LocalAudioExists = true
+	}
+	if _, err := os.Stat(localVideoPath); err == nil {
+		info.LocalVideoExists = true
+	}
+
+	if !cfg.RcloneEnabled || deps.RemotePathExists == nil {
+		return info
+	}
+
+	remoteRelativePath := resolver.RemoteShowPath(show)
+	info.RemoteRelativePath = remoteRelativePath
+	info.RemoteAudioPath = joinRemotePath(cfg.RcloneRemote, helpers.GetRcloneBasePath(cfg, false), remoteRelativePath)
+	info.RemoteVideoPath = joinRemotePath(cfg.RcloneRemote, helpers.GetRcloneBasePath(cfg, true), remoteRelativePath)
+
+	audioExists, audioErr := deps.RemotePathExists(ctx, path.Clean(remoteRelativePath), cfg, false)
+	if audioErr != nil {
+		info.RemoteAudioError = audioErr.Error()
+	} else {
+		info.RemoteAudioExists = audioExists
+	}
+
+	videoExists, videoErr := deps.RemotePathExists(ctx, path.Clean(remoteRelativePath), cfg, true)
+	if videoErr != nil {
+		info.RemoteVideoError = videoErr.Error()
+	} else {
+		info.RemoteVideoExists = videoExists
+	}
+
+	return info
+}
 
 // AnalyzeArtistCatalog analyzes an artist's catalog with optional media type filtering.
 func AnalyzeArtistCatalog(ctx context.Context, artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
@@ -471,6 +571,8 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 
 		err := deps.Album(ctx, fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
 		if err != nil {
+			errorCtx := buildGapFillErrorContext(ctx, show, cfg, deps)
+			reasonHint := deriveGapFillReasonHint(err, errorCtx)
 			failedCount++
 			batchState.Failed++
 			failedShows = append(failedShows, map[string]any{
@@ -478,9 +580,22 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 				"date":        show.PerformanceDateShortYearFirst,
 				"title":       show.ContainerInfo,
 				"error":       err.Error(),
+				"reasonHint":  reasonHint,
+				"context":     errorCtx,
 			})
 			if jsonLevel == "" {
 				ui.PrintError(fmt.Sprintf("Failed to download show %d: %v", show.ContainerID, err))
+				ui.PrintWarning(fmt.Sprintf("Reason hint: %s", reasonHint))
+				ui.PrintInfo(fmt.Sprintf("Failure context: availability=%s activeState=%s tracks=%d products=%d productFormats=%d",
+					errorCtx.AvailabilityType, errorCtx.ActiveState, errorCtx.Tracks, errorCtx.Products, errorCtx.ProductFormats))
+				ui.PrintInfo(fmt.Sprintf("Local check: audioExists=%t path=%s", errorCtx.LocalAudioExists, errorCtx.LocalAudioPath))
+				ui.PrintInfo(fmt.Sprintf("Local check: videoExists=%t path=%s", errorCtx.LocalVideoExists, errorCtx.LocalVideoPath))
+				if cfg.RcloneEnabled {
+					ui.PrintInfo(fmt.Sprintf("Remote check: audioExists=%t path=%s err=%s",
+						errorCtx.RemoteAudioExists, errorCtx.RemoteAudioPath, errorCtx.RemoteAudioError))
+					ui.PrintInfo(fmt.Sprintf("Remote check: videoExists=%t path=%s err=%s",
+						errorCtx.RemoteVideoExists, errorCtx.RemoteVideoPath, errorCtx.RemoteVideoError))
+				}
 			}
 		} else {
 			successCount++

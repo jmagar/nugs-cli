@@ -78,6 +78,76 @@ func TestBuildArtistPresenceIndex_BothFilterReadsAudioAndVideoTrees(t *testing.T
 	}
 }
 
+func TestBuildArtistPresenceIndex_BothFilterReadsAudioAndVideoRemoteTrees(t *testing.T) {
+	cfg := &model.Config{
+		OutPath:       t.TempDir(),
+		VideoOutPath:  t.TempDir(),
+		RcloneEnabled: true,
+	}
+
+	audioShow := "Audio Remote Show"
+	videoShow := "Video Remote Show"
+
+	deps := &Deps{
+		ListRemoteArtistFolders: func(_ context.Context, _ string, _ *model.Config, isVideo bool) (map[string]struct{}, error) {
+			if isVideo {
+				return map[string]struct{}{videoShow: {}}, nil
+			}
+			return map[string]struct{}{audioShow: {}}, nil
+		},
+	}
+
+	idx := BuildArtistPresenceIndex(context.Background(), "Billy Strings", cfg, deps, model.MediaTypeBoth)
+
+	if _, ok := idx.RemoteFolders[audioShow]; !ok {
+		t.Fatalf("expected audio remote show %q in index", audioShow)
+	}
+	if _, ok := idx.RemoteFolders[videoShow]; !ok {
+		t.Fatalf("expected video remote show %q in index", videoShow)
+	}
+}
+
+func TestIsShowDownloadable(t *testing.T) {
+	tests := []struct {
+		name string
+		show *model.AlbArtResp
+		want bool
+	}{
+		{
+			name: "preorder empty metadata is not downloadable",
+			show: &model.AlbArtResp{
+				AvailabilityTypeStr: "PREORDER",
+			},
+			want: false,
+		},
+		{
+			name: "available with product formats is downloadable",
+			show: &model.AlbArtResp{
+				AvailabilityTypeStr: model.AvailableAvailabilityType,
+				ProductFormatList:   []*model.ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
+			},
+			want: true,
+		},
+		{
+			name: "available with tracks is downloadable",
+			show: &model.AlbArtResp{
+				AvailabilityTypeStr: model.AvailableAvailabilityType,
+				Tracks:              []model.Track{{TrackID: 1}},
+			},
+			want: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := IsShowDownloadable(tc.show)
+			if got != tc.want {
+				t.Fatalf("IsShowDownloadable() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestListAllRemoteArtistFolders_WrapsErrorWithSentinel(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("test uses POSIX shell script, not portable to Windows")

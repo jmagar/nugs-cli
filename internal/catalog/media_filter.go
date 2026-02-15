@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -60,14 +61,23 @@ func ShowExistsForMediaIndexed(ctx context.Context, show *model.AlbArtResp, cfg 
 
 	// Fallback: remote index errored or rclone disabled, use slow per-show check
 	if cfg.RcloneEnabled && idx.RemoteListErr != nil && deps.RemotePathExists != nil {
-		isVideo := mediaType.HasVideo()
 		remotePath := resolver.RemoteShowPath(show)
-		exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
-		if err != nil {
-			WarnRemoteCheckError(err)
-			return false
+		// For "both", check audio and video remotes to avoid false negatives.
+		remoteTargets := []bool{mediaType == model.MediaTypeVideo}
+		if mediaType == model.MediaTypeBoth || mediaType == model.MediaTypeUnknown {
+			remoteTargets = []bool{false, true}
 		}
-		return exists
+		for _, isVideo := range remoteTargets {
+			exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
+			if err != nil {
+				WarnRemoteCheckError(err)
+				continue
+			}
+			if exists {
+				return true
+			}
+		}
+		return false
 	}
 
 	return false
@@ -88,10 +98,35 @@ func MatchesMediaFilter(showMedia, filter model.MediaType) bool {
 	return false
 }
 
+// IsShowDownloadable returns true only when metadata indicates content is
+// currently downloadable/streamable (audio tracks or a video SKU).
+func IsShowDownloadable(show *model.AlbArtResp) bool {
+	if show == nil {
+		return false
+	}
+	if show.AvailabilityTypeStr != "" &&
+		!strings.EqualFold(show.AvailabilityTypeStr, model.AvailableAvailabilityType) {
+		return false
+	}
+	if len(show.Tracks) > 0 || len(show.Songs) > 0 {
+		return true
+	}
+	if len(show.Products) > 0 {
+		return true
+	}
+	if len(show.ProductFormatList) > 0 {
+		return true
+	}
+	return false
+}
+
 // classifyShows iterates all shows, applies media filtering, and populates the analysis
 // with show statuses and download counts.
 func classifyShows(ctx context.Context, allShows []*model.AlbArtResp, mediaFilter model.MediaType, presenceIdx *ArtistPresenceIndex, cfg *model.Config, deps *Deps, analysis *model.ArtistCatalogAnalysis) {
 	for _, show := range allShows {
+		if !IsShowDownloadable(show) {
+			continue
+		}
 		var showMedia model.MediaType
 		if deps.GetShowMediaType != nil {
 			showMedia = deps.GetShowMediaType(show)
