@@ -1001,7 +1001,7 @@ Refresh interval (daily/weekly) [daily]: weekly
 
 ## See Also
 
-- [CLAUDE.md](./CLAUDE.md) - Development guide and quick start
+- [CLAUDE.md](../CLAUDE.md) - Development guide and quick start
 - [ARCHITECTURE.md](./ARCHITECTURE.md) - Package structure and patterns
-- [README.md](./README.md) - User documentation
-- [docs/token.md](./docs/token.md) - Token extraction guide
+- [README.md](../README.md) - User documentation
+- [token.md](./token.md) - Token extraction guide
