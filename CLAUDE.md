@@ -168,7 +168,7 @@ GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 3. Import from `cmd/nugs/main.go` if user-facing
 4. Update package `deps.go` if adding new dependencies
 
-**For detailed patterns:** See [ARCHITECTURE.md - Where New Code Goes](./ARCHITECTURE.md#where-new-code-goes)
+**For detailed patterns:** See [ARCHITECTURE.md - Where New Code Goes](./docs/ARCHITECTURE.md#where-new-code-goes)
 
 ---
 
