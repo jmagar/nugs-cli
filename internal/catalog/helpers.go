@@ -26,17 +26,15 @@ type ArtistPresenceIndex struct {
 	RemoteListErr error
 }
 
-var remoteCheckWarnOnce sync.Once
-
 var (
 	ErrRemoteArtistFolderListFailed = errors.New("failed to list remote artist folders")
 )
 
-// WarnRemoteCheckError prints a one-time warning about remote check failures.
+// WarnRemoteCheckError logs a warning about a remote existence check failure.
+// Each call logs the specific error so failures are visible for debugging,
+// rather than silently swallowing errors after the first occurrence.
 func WarnRemoteCheckError(err error) {
-	remoteCheckWarnOnce.Do(func() {
-		ui.PrintWarning(fmt.Sprintf("Remote existence checks failed; treating as not found. First error: %v", err))
-	})
+	ui.PrintWarning(fmt.Sprintf("Remote existence check failed: %v", err))
 }
 
 // ListAllRemoteArtistFolders lists all artist folders on the remote.
@@ -165,6 +163,12 @@ func BuildArtistPresenceIndex(ctx context.Context, artistName string, cfg *model
 		for _, isVideo := range remoteTargets {
 			remoteFolders, err := deps.ListRemoteArtistFolders(ctx, idx.ArtistFolder, cfg, isVideo)
 			if err != nil {
+				mediaType := "audio"
+				if isVideo {
+					mediaType = "video"
+				}
+				ui.PrintWarning(fmt.Sprintf("Remote %s folder check failed for %s: %v",
+					mediaType, idx.ArtistFolder, err))
 				idx.RemoteListErr = err
 				break
 			}
