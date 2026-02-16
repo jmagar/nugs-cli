@@ -706,7 +706,9 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		remoteArtistDirs, err := ListAllRemoteArtistFolders(ctx, cfg)
 		if err != nil {
 			remoteScanErr = err
-			ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
+			if jsonLevel == "" {
+				ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
+			}
 		}
 		for artistDir := range remoteArtistDirs {
 			discoveredArtistDirs[artistDir] = struct{}{}
