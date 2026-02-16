@@ -588,13 +588,14 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 				ui.PrintWarning(fmt.Sprintf("Reason hint: %s", reasonHint))
 				ui.PrintInfo(fmt.Sprintf("Failure context: availability=%s activeState=%s tracks=%d products=%d productFormats=%d",
 					errorCtx.AvailabilityType, errorCtx.ActiveState, errorCtx.Tracks, errorCtx.Products, errorCtx.ProductFormats))
-				ui.PrintInfo(fmt.Sprintf("Local check: audioExists=%t path=%s", errorCtx.LocalAudioExists, errorCtx.LocalAudioPath))
-				ui.PrintInfo(fmt.Sprintf("Local check: videoExists=%t path=%s", errorCtx.LocalVideoExists, errorCtx.LocalVideoPath))
+				// Redact full paths to avoid PII leakage in logs
+				ui.PrintInfo(fmt.Sprintf("Local check: audioExists=%t path=%s", errorCtx.LocalAudioExists, filepath.Base(errorCtx.LocalAudioPath)))
+				ui.PrintInfo(fmt.Sprintf("Local check: videoExists=%t path=%s", errorCtx.LocalVideoExists, filepath.Base(errorCtx.LocalVideoPath)))
 				if cfg.RcloneEnabled {
 					ui.PrintInfo(fmt.Sprintf("Remote check: audioExists=%t path=%s err=%s",
-						errorCtx.RemoteAudioExists, errorCtx.RemoteAudioPath, errorCtx.RemoteAudioError))
+						errorCtx.RemoteAudioExists, filepath.Base(errorCtx.RemoteAudioPath), errorCtx.RemoteAudioError))
 					ui.PrintInfo(fmt.Sprintf("Remote check: videoExists=%t path=%s err=%s",
-						errorCtx.RemoteVideoExists, errorCtx.RemoteVideoPath, errorCtx.RemoteVideoError))
+						errorCtx.RemoteVideoExists, filepath.Base(errorCtx.RemoteVideoPath), errorCtx.RemoteVideoError))
 				}
 			}
 		} else {
