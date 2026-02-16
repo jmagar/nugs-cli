@@ -3,7 +3,6 @@ package catalog
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -59,7 +58,7 @@ func TestBuildGapFillErrorContext_IncludesLocalAndRemoteChecks(t *testing.T) {
 	if info.RemoteRelativePath == "" {
 		t.Fatal("expected RemoteRelativePath to be set")
 	}
-	if filepath.Base(info.LocalAudioPath) == "" {
+	if info.LocalAudioPath == "" {
 		t.Fatal("expected LocalAudioPath to be set")
 	}
 }
