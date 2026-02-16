@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -57,7 +58,7 @@ func deriveGapFillReasonHint(err error, info gapFillErrorContext) string {
 	if info.RemoteAudioError != "" || info.RemoteVideoError != "" {
 		return "Remote existence check failed"
 	}
-	if err != nil && strings.Contains(err.Error(), "release has no tracks or videos") {
+	if errors.Is(err, model.ErrReleaseHasNoContent) {
 		return "Metadata has no downloadable tracks/videos yet"
 	}
 	return "No content found at expected local/remote paths"

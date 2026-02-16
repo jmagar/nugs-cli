@@ -2,7 +2,6 @@ package catalog
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -93,7 +92,7 @@ func TestDeriveGapFillReasonHint(t *testing.T) {
 		},
 		{
 			name: "empty metadata error",
-			err:  errors.New("release has no tracks or videos"),
+			err:  model.ErrReleaseHasNoContent,
 			info: gapFillErrorContext{},
 			want: "Metadata has no downloadable tracks/videos yet",
 		},

@@ -775,7 +775,7 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 	trackTotal := len(tracks)
 	skuID := GetVideoSku(meta.Products)
 	if skuID == 0 && trackTotal < 1 {
-		return errors.New("release has no tracks or videos")
+		return model.ErrReleaseHasNoContent
 	}
 	downloadAudio, downloadVideo := resolveAlbumDownloadModes(cfg, meta)
 	handled, err := handleVideoOnlyAlbum(ctx, albumID, cfg, streamParams, meta, trackTotal, skuID, downloadVideo, deps)
