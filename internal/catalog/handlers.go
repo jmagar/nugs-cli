@@ -22,25 +22,38 @@ import (
 // ArtistMetaCacheTTL is the TTL used for artist metadata caching.
 const ArtistMetaCacheTTL = 24 * time.Hour
 
+// gapFillErrorContext captures diagnostic information when a gap-fill download
+// fails. It helps distinguish between several failure modes:
+//   - Preorder/placeholder shows (availabilityType != "available", zero tracks/products)
+//   - Naming/path mismatches (content exists locally or remotely but wasn't detected)
+//   - Network failures (remote check returned an error)
+//   - Missing content (metadata has no downloadable tracks or videos)
+//
+// Fields are populated progressively by buildGapFillErrorContext: metadata fields
+// are always set, local checks run next, and remote fields are only populated
+// when RcloneEnabled is true and the remote check completes.
 type gapFillErrorContext struct {
-	AvailabilityType string `json:"availabilityType,omitempty"`
-	ActiveState      string `json:"activeState,omitempty"`
-	Tracks           int    `json:"tracks"`
-	Products         int    `json:"products"`
-	ProductFormats   int    `json:"productFormats"`
+	// Metadata from the show's API response, used to detect preorder/placeholder shows.
+	AvailabilityType string `json:"availabilityType,omitempty"` // e.g. "available", "preorder"
+	ActiveState      string `json:"activeState,omitempty"`      // show lifecycle state from API
+	Tracks           int    `json:"tracks"`                     // number of audio tracks in metadata
+	Products         int    `json:"products"`                   // number of product SKUs (purchase options)
+	ProductFormats   int    `json:"productFormats"`             // number of format variants (FLAC, ALAC, etc.)
 
-	LocalAudioPath   string `json:"localAudioPath"`
-	LocalAudioExists bool   `json:"localAudioExists"`
-	LocalVideoPath   string `json:"localVideoPath"`
-	LocalVideoExists bool   `json:"localVideoExists"`
+	// Local filesystem existence checks against expected download paths.
+	LocalAudioPath   string `json:"localAudioPath"`   // expected path: outPath/artist/album
+	LocalAudioExists bool   `json:"localAudioExists"` // true if directory found on disk
+	LocalVideoPath   string `json:"localVideoPath"`   // expected path: videoOutPath/artist/album
+	LocalVideoExists bool   `json:"localVideoExists"` // true if directory found on disk
 
-	RemoteRelativePath string `json:"remoteRelativePath,omitempty"`
-	RemoteAudioPath    string `json:"remoteAudioPath,omitempty"`
-	RemoteAudioExists  bool   `json:"remoteAudioExists"`
-	RemoteAudioError   string `json:"remoteAudioError,omitempty"`
-	RemoteVideoPath    string `json:"remoteVideoPath,omitempty"`
-	RemoteVideoExists  bool   `json:"remoteVideoExists"`
-	RemoteVideoError   string `json:"remoteVideoError,omitempty"`
+	// Remote storage checks, only populated when cfg.RcloneEnabled is true.
+	RemoteRelativePath string `json:"remoteRelativePath,omitempty"` // artist/album relative path
+	RemoteAudioPath    string `json:"remoteAudioPath,omitempty"`    // full rclone URI for audio (remote:base/artist/album)
+	RemoteAudioExists  bool   `json:"remoteAudioExists"`            // true if found on remote
+	RemoteAudioError   string `json:"remoteAudioError,omitempty"`   // error message if audio check failed
+	RemoteVideoPath    string `json:"remoteVideoPath,omitempty"`    // full rclone URI for video
+	RemoteVideoExists  bool   `json:"remoteVideoExists"`            // true if found on remote
+	RemoteVideoError   string `json:"remoteVideoError,omitempty"`   // error message if video check failed
 }
 
 func deriveGapFillReasonHint(err error, info gapFillErrorContext) string {
@@ -665,6 +678,7 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 	}
 
 	var allStats []coverageStats
+	var remoteScanErr error
 
 	if len(artistIds) == 0 {
 		if jsonLevel == "" {
@@ -690,7 +704,8 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		}
 
 		remoteArtistDirs, err := ListAllRemoteArtistFolders(ctx, cfg)
-		if err != nil && jsonLevel == "" {
+		if err != nil {
+			remoteScanErr = err
 			ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
 		}
 		for artistDir := range remoteArtistDirs {
@@ -821,6 +836,10 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 				"missing":    totalShows - totalDownloaded,
 				"coverage":   totalCoveragePct,
 			},
+			"remoteScanError": nil,
+		}
+		if remoteScanErr != nil {
+			output["remoteScanError"] = remoteScanErr.Error()
 		}
 		if err := PrintJSON(output); err != nil {
 			return err

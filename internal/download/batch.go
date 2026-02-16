@@ -90,7 +90,8 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 				if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 					return err
 				}
-				helpers.HandleErr("Item failed.", err, false)
+				ui.PrintError(fmt.Sprintf("Album %d/%d failed (ID %d, %s): %v",
+				albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
 			} else {
 				progressBox.Mu.Lock()
 				batchState.Complete++
@@ -156,7 +157,7 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 		// Playlists don't have artist folder structure
 		err = deps.UploadPath(ctx, plistPath, "", cfg, progressBox, false)
 		if err != nil {
-			helpers.HandleErr("Upload failed.", err, false)
+			ui.PrintError(fmt.Sprintf("Playlist upload failed (%s): %v", plistName, err))
 		}
 	}
 
@@ -177,7 +178,8 @@ func processPlaylistTracks(ctx context.Context, tracks []*model.Track, plistPath
 			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 				return err
 			}
-			helpers.HandleErr("Track failed.", err, false)
+			ui.PrintError(fmt.Sprintf("Track %d/%d failed (%s): %v",
+				trackNum, trackTotal, track.SongTitle, err))
 		}
 	}
 	return nil

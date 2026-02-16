@@ -59,25 +59,46 @@ func ShowExistsForMediaIndexed(ctx context.Context, show *model.AlbArtResp, cfg 
 		return false // Index is valid, not found
 	}
 
-	// Fallback: remote index errored or rclone disabled, use slow per-show check
+	// Fallback: the bulk remote folder listing failed (e.g., network timeout,
+	// invalid remote config, permission error), so the pre-built index is
+	// incomplete. We must check each show individually via rclone to avoid
+	// false negatives that would cause re-downloading already-uploaded shows.
 	if cfg.RcloneEnabled && idx.RemoteListErr != nil && deps.RemotePathExists != nil {
 		remotePath := resolver.RemoteShowPath(show)
-		// For "both", check audio and video remotes to avoid false negatives.
+
+		// Determine which remote locations to check based on media type.
+		// Audio and video may be stored in separate remote base paths
+		// (rclonePath vs rcloneVideoPath), so the isVideo flag selects
+		// which remote to query. For explicit types, check only the
+		// corresponding remote. For "both" or "unknown", check both
+		// audio (isVideo=false) then video (isVideo=true) to ensure we
+		// find the show regardless of which format was uploaded.
 		remoteTargets := []bool{mediaType == model.MediaTypeVideo}
 		if mediaType == model.MediaTypeBoth || mediaType == model.MediaTypeUnknown {
-			remoteTargets = []bool{false, true}
+			remoteTargets = []bool{false, true} // check audio first, then video
 		}
+
+		var lastErr error
 		for _, isVideo := range remoteTargets {
 			exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
 			if err != nil {
-				WarnRemoteCheckError(err)
-				continue
+				mediaType := "audio"
+				if isVideo {
+					mediaType = "video"
+				}
+				ui.PrintWarning(fmt.Sprintf("Remote %s check failed for %s: %v",
+					mediaType, remotePath, err))
+				lastErr = err
+				continue // try next target; one remote may work even if the other fails
 			}
 			if exists {
-				return true
+				return true // found in at least one remote location
 			}
 		}
-		return false
+		if lastErr != nil {
+			ui.PrintWarning(fmt.Sprintf("All remote checks failed for %s", remotePath))
+		}
+		return false // not found in any checked remote location
 	}
 
 	return false

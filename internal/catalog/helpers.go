@@ -10,7 +10,6 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
 	"unicode"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"

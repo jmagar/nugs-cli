@@ -22,7 +22,13 @@ var (
 	RuntimeStatusPath      string
 	Status                 model.RuntimeStatus
 	RuntimeStatusLastWrite time.Time
-	RuntimeStatusWarnOnce  sync.Once
+	// RuntimeStatusWarnOnce suppresses duplicate warnings about runtime status
+	// write failures. Status writes occur up to 4 times/second during downloads
+	// (throttled to every 250ms by WriteRuntimeStatus). If the cache directory
+	// becomes read-only or fills up, repeated warnings would flood stderr and
+	// obscure more critical errors. The first failure is sufficient to alert
+	// the user; subsequent failures are silently ignored.
+	RuntimeStatusWarnOnce sync.Once
 )
 
 // GetRuntimeStatusPath returns the path to the runtime status JSON file.
