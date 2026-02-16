@@ -114,6 +114,16 @@ func TestIsShowDownloadable(t *testing.T) {
 		want bool
 	}{
 		{
+			name: "nil show is not downloadable",
+			show: nil,
+			want: false,
+		},
+		{
+			name: "empty availability with no content is not downloadable",
+			show: &model.AlbArtResp{},
+			want: false,
+		},
+		{
 			name: "preorder empty metadata is not downloadable",
 			show: &model.AlbArtResp{
 				AvailabilityTypeStr: "PREORDER",
@@ -136,6 +146,22 @@ func TestIsShowDownloadable(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "available with only songs is downloadable",
+			show: &model.AlbArtResp{
+				AvailabilityTypeStr: model.AvailableAvailabilityType,
+				Songs:               []model.Track{{TrackID: 1}},
+			},
+			want: true,
+		},
+		{
+			name: "available with only products is downloadable",
+			show: &model.AlbArtResp{
+				AvailabilityTypeStr: model.AvailableAvailabilityType,
+				Products:            []model.Product{{SkuID: 1}},
+			},
+			want: true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -143,6 +169,68 @@ func TestIsShowDownloadable(t *testing.T) {
 			got := IsShowDownloadable(tc.show)
 			if got != tc.want {
 				t.Fatalf("IsShowDownloadable() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestMatchesMediaFilter(t *testing.T) {
+	tests := []struct {
+		name      string
+		showMedia model.MediaType
+		filter    model.MediaType
+		want      bool
+	}{
+		{
+			name:      "unknown filter matches all shows",
+			showMedia: model.MediaTypeAudio,
+			filter:    model.MediaTypeUnknown,
+			want:      true,
+		},
+		{
+			name:      "both filter matches all shows",
+			showMedia: model.MediaTypeVideo,
+			filter:    model.MediaTypeBoth,
+			want:      true,
+		},
+		{
+			name:      "audio filter matches audio-only show",
+			showMedia: model.MediaTypeAudio,
+			filter:    model.MediaTypeAudio,
+			want:      true,
+		},
+		{
+			name:      "audio filter matches both-media show",
+			showMedia: model.MediaTypeBoth,
+			filter:    model.MediaTypeAudio,
+			want:      true,
+		},
+		{
+			name:      "audio filter excludes video-only show",
+			showMedia: model.MediaTypeVideo,
+			filter:    model.MediaTypeAudio,
+			want:      false,
+		},
+		{
+			name:      "video filter matches both-media show",
+			showMedia: model.MediaTypeBoth,
+			filter:    model.MediaTypeVideo,
+			want:      true,
+		},
+		{
+			name:      "video filter excludes audio-only show",
+			showMedia: model.MediaTypeAudio,
+			filter:    model.MediaTypeVideo,
+			want:      false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := MatchesMediaFilter(tc.showMedia, tc.filter)
+			if got != tc.want {
+				t.Fatalf("MatchesMediaFilter(%v, %v) = %v, want %v",
+					tc.showMedia, tc.filter, got, tc.want)
 			}
 		})
 	}
