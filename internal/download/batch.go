@@ -71,8 +71,10 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 			}
 
 			albumCount++
+			progressBox.Mu.Lock()
 			batchState.CurrentAlbum = albumCount
 			batchState.CurrentTitle = container.ContainerInfo
+			progressBox.Mu.Unlock()
 
 			var err error
 			if cfg.SkipVideos {
@@ -82,13 +84,17 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 				err = Album(ctx, strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, progressBox, deps)
 			}
 			if err != nil {
+				progressBox.Mu.Lock()
 				batchState.Failed++
+				progressBox.Mu.Unlock()
 				if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 					return err
 				}
 				helpers.HandleErr("Item failed.", err, false)
 			} else {
+				progressBox.Mu.Lock()
 				batchState.Complete++
+				progressBox.Mu.Unlock()
 			}
 		}
 	}
