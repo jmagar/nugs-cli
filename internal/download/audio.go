@@ -418,6 +418,15 @@ func buildTrackProgressCallback(progressBox *model.ProgressBoxState, deps *Deps,
 		progressBox.ShowPercent = showPercentage
 		progressBox.ShowDownloaded = humanize.Bytes(uint64(accumulatedBeforeCurrent + downloaded))
 
+		// Update ShowTotal dynamically based on actual downloaded size + current track size
+		// This fixes incorrect pre-calculation that may have returned 0 or wrong values
+		if total > 0 {
+			// Calculate estimated total: completed bytes + current track + estimate for remaining tracks
+			estimatedRemaining := total * int64(trackTotal-trackNum)
+			estimatedTotal := accumulatedBeforeCurrent + downloaded + estimatedRemaining
+			progressBox.ShowTotal = humanize.Bytes(uint64(estimatedTotal))
+		}
+
 		if speed > 0 && total > 0 && downloaded < total {
 			if deps.UpdateSpeedHistory != nil {
 				progressBox.SpeedHistory = deps.UpdateSpeedHistory(progressBox.SpeedHistory, float64(speed))
