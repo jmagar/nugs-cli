@@ -75,9 +75,9 @@ func getTrackQual(quals []*Quality, wantFmt int) *Quality {
 // getArtistMetaCached bridges api and cache packages.
 // It stays in root because it imports both internal/api and internal/cache.
 func getArtistMetaCached(ctx context.Context, artistID string, ttl time.Duration) (pages []*ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error) {
-	// Catalog commands need shows with downloadable content for accurate analysis.
-	// Using availType=1 fetches audio shows which have actual tracks/products data.
-	const availType = 1 // Fetch audio catalog with downloadable shows
+	// Use availType=2 to fetch the full catalog (audio + video) so video-only shows
+	// are included in coverage and gap analysis. IsShowDownloadable handles filtering.
+	const availType = 2 // Fetch full catalog (audio + video) for media-aware analysis
 
 	cachedPages, cachedAt, readErr := readArtistMetaCache(artistID)
 	if readErr == nil && len(cachedPages) > 0 {
