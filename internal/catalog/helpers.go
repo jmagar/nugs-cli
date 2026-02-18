@@ -10,6 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -29,11 +30,26 @@ var (
 	ErrRemoteArtistFolderListFailed = errors.New("failed to list remote artist folders")
 )
 
+// remoteCheckErrCount tracks how many remote check warnings have been emitted
+// so large batch runs don't flood the log.
+var remoteCheckErrCount atomic.Int64
+
+// remoteCheckErrLimit is the number of individual warnings to show before
+// switching to a single suppression notice.
+const remoteCheckErrLimit = 3
+
 // WarnRemoteCheckError logs a warning about a remote existence check failure.
-// Each call logs the specific error so failures are visible for debugging,
-// rather than silently swallowing errors after the first occurrence.
+// The first remoteCheckErrLimit failures are logged individually; subsequent
+// failures emit a single suppression notice to avoid flooding the log during
+// large catalog scans with persistent network issues.
 func WarnRemoteCheckError(err error) {
-	ui.PrintWarning(fmt.Sprintf("Remote existence check failed: %v", err))
+	n := remoteCheckErrCount.Add(1)
+	switch {
+	case n <= remoteCheckErrLimit:
+		ui.PrintWarning(fmt.Sprintf("Remote existence check failed: %v", err))
+	case n == remoteCheckErrLimit+1:
+		ui.PrintWarning("Remote existence checks keep failing; suppressing further warnings to reduce noise")
+	}
 }
 
 // ListAllRemoteArtistFolders lists all artist folders on the remote.

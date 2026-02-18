@@ -28,9 +28,9 @@ func TestCatalogCoverage_JSONMode_RemoteScanFailurePreservesJSONOutput(t *testin
 	})
 
 	var payload struct {
-		Artists         []map[string]any `json:"artists"`
-		Total           int              `json:"total"`
-		Message         string           `json:"message"`
+		Artists []map[string]any `json:"artists"`
+		Total   int              `json:"total"`
+		Message string           `json:"message"`
 	}
 
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {

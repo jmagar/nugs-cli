@@ -112,8 +112,8 @@ func TestDeriveGapFillReasonHint(t *testing.T) {
 
 func TestBuildGapFillErrorContext_CapturesRemoteErrors(t *testing.T) {
 	cfg := &model.Config{
-		OutPath:      t.TempDir(),
-		VideoOutPath: t.TempDir(),
+		OutPath:       t.TempDir(),
+		VideoOutPath:  t.TempDir(),
 		RcloneEnabled: true,
 		RcloneRemote:  "gdrive",
 		RclonePath:    "/music",

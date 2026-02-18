@@ -82,12 +82,12 @@ func ShowExistsForMediaIndexed(ctx context.Context, show *model.AlbArtResp, cfg 
 		for _, isVideo := range remoteTargets {
 			exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
 			if err != nil {
-				mediaType := "audio"
+				mediaLabel := "audio"
 				if isVideo {
-					mediaType = "video"
+					mediaLabel = "video"
 				}
 				ui.PrintWarning(fmt.Sprintf("Remote %s check failed for %s: %v",
-					mediaType, remotePath, err))
+					mediaLabel, remotePath, err))
 				lastErr = err
 				continue // try next target; one remote may work even if the other fails
 			}

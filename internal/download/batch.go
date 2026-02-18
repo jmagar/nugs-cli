@@ -91,7 +91,7 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 					return err
 				}
 				ui.PrintError(fmt.Sprintf("Album %d/%d failed (ID %d, %s): %v",
-				albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
+					albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
 			} else {
 				progressBox.Mu.Lock()
 				batchState.Complete++
