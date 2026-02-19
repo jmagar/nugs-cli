@@ -5,6 +5,8 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 	"unicode/utf8"
 
 	"golang.org/x/term"
@@ -39,12 +41,34 @@ const (
 // AnsiRegex is compiled once for performance.
 var AnsiRegex = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
+const termWidthCacheTTL = 500 * time.Millisecond
+
+var (
+	termWidthMu         sync.Mutex
+	cachedTermWidth     = 80
+	cachedTermWidthTime time.Time
+)
+
 // GetTermWidth returns the terminal width, defaulting to 80.
 func GetTermWidth() int {
+	termWidthMu.Lock()
+	if time.Since(cachedTermWidthTime) <= termWidthCacheTTL && cachedTermWidth > 0 {
+		width := cachedTermWidth
+		termWidthMu.Unlock()
+		return width
+	}
+	termWidthMu.Unlock()
+
 	width, _, err := term.GetSize(int(os.Stdout.Fd()))
 	if err != nil || width == 0 {
-		return 80
+		width = 80
 	}
+
+	termWidthMu.Lock()
+	cachedTermWidth = width
+	cachedTermWidthTime = time.Now()
+	termWidthMu.Unlock()
+
 	return width
 }
 

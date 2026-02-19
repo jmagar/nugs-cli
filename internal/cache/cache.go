@@ -77,25 +77,89 @@ func ReadCatalogCache() (*model.LatestCatalogResp, error) {
 // Uses file locking to prevent corruption from concurrent writes.
 // The formatDurationFn parameter formats the update duration for metadata.
 func WriteCatalogCache(catalog *model.LatestCatalogResp, updateDuration time.Duration, formatDurationFn func(time.Duration) string) error {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		return err
+	}
+
+	prepared, err := prepareCatalogCacheData(catalog, updateDuration, formatDurationFn)
+	if err != nil {
+		return err
+	}
+
 	return WithCacheLock(func() error {
-		cacheDir, err := GetCacheDir()
-		if err != nil {
-			return err
-		}
-
-		if err := writeCatalogJSON(cacheDir, catalog); err != nil {
-			return err
-		}
-
-		if err := writeCatalogMeta(cacheDir, catalog, updateDuration, formatDurationFn); err != nil {
-			return err
-		}
-
-		if err := buildArtistIndex(cacheDir, catalog); err != nil {
-			return err
-		}
-		return buildContainerIndex(cacheDir, catalog)
+		return writePreparedCatalogCache(cacheDir, prepared)
 	})
+}
+
+type preparedCatalogCacheData struct {
+	catalogData   []byte
+	metaData      []byte
+	artistIdxData []byte
+	containerData []byte
+}
+
+func prepareCatalogCacheData(catalog *model.LatestCatalogResp, updateDuration time.Duration, formatDurationFn func(time.Duration) string) (*preparedCatalogCacheData, error) {
+	catalogData, err := json.Marshal(catalog)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal catalog: %w", err)
+	}
+
+	artistSet := make(map[int]bool, len(catalog.Response.RecentItems))
+	artistIndex := make(map[string]int, len(catalog.Response.RecentItems))
+	containers := make(map[int]model.ContainerIndexEntry, len(catalog.Response.RecentItems))
+	for _, item := range catalog.Response.RecentItems {
+		artistSet[item.ArtistID] = true
+		artistIndex[strings.ToLower(strings.TrimSpace(item.ArtistName))] = item.ArtistID
+		containers[item.ContainerID] = model.ContainerIndexEntry{
+			ArtistID:        item.ArtistID,
+			ArtistName:      item.ArtistName,
+			ContainerInfo:   item.ContainerInfo,
+			PerformanceDate: item.PerformanceDateStr,
+		}
+	}
+
+	meta := model.CacheMeta{
+		LastUpdated:    time.Now(),
+		CacheVersion:   "v1.0.0",
+		TotalShows:     len(catalog.Response.RecentItems),
+		TotalArtists:   len(artistSet),
+		APIMethod:      "catalog.latest",
+		UpdateDuration: formatDurationFn(updateDuration),
+	}
+
+	metaData, err := json.Marshal(meta)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+	artistIdxData, err := json.Marshal(model.ArtistsIndex{Index: artistIndex})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal artist index: %w", err)
+	}
+	containerData, err := json.Marshal(model.ContainersIndex{Containers: containers})
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal container index: %w", err)
+	}
+
+	return &preparedCatalogCacheData{
+		catalogData:   catalogData,
+		metaData:      metaData,
+		artistIdxData: artistIdxData,
+		containerData: containerData,
+	}, nil
+}
+
+func writePreparedCatalogCache(cacheDir string, prepared *preparedCatalogCacheData) error {
+	if err := atomicWriteFile(filepath.Join(cacheDir, "catalog.json"), prepared.catalogData); err != nil {
+		return err
+	}
+	if err := atomicWriteFile(filepath.Join(cacheDir, "catalog-meta.json"), prepared.metaData); err != nil {
+		return err
+	}
+	if err := atomicWriteFile(filepath.Join(cacheDir, "artists_index.json"), prepared.artistIdxData); err != nil {
+		return err
+	}
+	return atomicWriteFile(filepath.Join(cacheDir, "containers_index.json"), prepared.containerData)
 }
 
 // writeCatalogJSON writes catalog.json atomically using a temp file.

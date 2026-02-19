@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/api"
@@ -784,22 +785,60 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		}
 	}
 
-	for _, artistId := range artistIds {
-		analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
-		if err != nil {
+	type coverageResult struct {
+		stats coverageStats
+		err   error
+	}
+	jobs := make(chan string)
+	results := make(chan coverageResult, len(artistIds))
+	workerCount := min(coverageArtistConcurrency, len(artistIds))
+	var wg sync.WaitGroup
+
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for artistID := range jobs {
+				analysis, err := AnalyzeArtistCatalog(ctx, artistID, cfg, jsonLevel, mediaFilter, deps)
+				if err != nil {
+					results <- coverageResult{err: fmt.Errorf("artist %s: %w", artistID, err)}
+					continue
+				}
+				results <- coverageResult{
+					stats: coverageStats{
+						artistID:        artistID,
+						artistName:      analysis.ArtistName,
+						totalShows:      analysis.TotalShows,
+						downloadedCount: analysis.Downloaded,
+						coveragePct:     analysis.DownloadPct,
+					},
+				}
+			}
+		}()
+	}
+
+	for _, artistID := range artistIds {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			close(results)
+			return ctx.Err()
+		case jobs <- artistID:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		if result.err != nil {
 			if jsonLevel == "" {
-				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for artist %s: %v", artistId, err))
+				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for %v", result.err))
 			}
 			continue
 		}
-
-		allStats = append(allStats, coverageStats{
-			artistID:        artistId,
-			artistName:      analysis.ArtistName,
-			totalShows:      analysis.TotalShows,
-			downloadedCount: analysis.Downloaded,
-			coveragePct:     analysis.DownloadPct,
-		})
+		allStats = append(allStats, result.stats)
 	}
 
 	sort.Slice(allStats, func(i, j int) bool {

@@ -30,7 +30,7 @@ type Deps struct {
 	RenderCompletionSummary func(box *model.ProgressBoxState)
 
 	// UploadToRclone uploads a local path to rclone remote.
-	UploadToRclone func(localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error
+	UploadToRclone func(ctx context.Context, localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error
 
 	// RemotePathExists checks if a path exists on the rclone remote.
 	RemotePathExists func(ctx context.Context, remotePath string, cfg *model.Config, isVideo bool) (bool, error)
@@ -51,7 +51,7 @@ type Deps struct {
 // UploadPath uploads local content via legacy callback or the injected storage provider.
 func (d *Deps) UploadPath(ctx context.Context, localPath, artistFolder string, cfg *model.Config, progressBox *model.ProgressBoxState, isVideo bool) error {
 	if d != nil && d.UploadToRclone != nil {
-		return d.UploadToRclone(localPath, artistFolder, cfg, progressBox, isVideo)
+		return d.UploadToRclone(ctx, localPath, artistFolder, cfg, progressBox, isVideo)
 	}
 	if d != nil && d.Storage != nil {
 		return d.Storage.Upload(ctx, cfg, model.UploadRequest{

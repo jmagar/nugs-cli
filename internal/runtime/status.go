@@ -55,14 +55,16 @@ func InitRuntimeStatus() {
 	if err != nil {
 		return
 	}
-	RuntimeStatusPath = statusPath
 	now := time.Now().UTC().Format(time.RFC3339)
+	RuntimeStatusMu.Lock()
+	RuntimeStatusPath = statusPath
 	Status = model.RuntimeStatus{
 		PID:       os.Getpid(),
 		State:     "running",
 		StartedAt: now,
 		UpdatedAt: now,
 	}
+	RuntimeStatusMu.Unlock()
 	WriteRuntimeStatus(true)
 	_ = WriteRuntimeControl(model.RuntimeControl{Pause: false, Cancel: false, UpdatedAt: now})
 }
@@ -72,8 +74,8 @@ func InitRuntimeStatus() {
 // tracked in the root package (output.go).
 func UpdateRuntimeProgress(label string, percentage int, speed, current, total string, errorCount, warningCount int) {
 	RuntimeStatusMu.Lock()
-	defer RuntimeStatusMu.Unlock()
 	if RuntimeStatusPath == "" {
+		RuntimeStatusMu.Unlock()
 		return
 	}
 	Status.Label = label
@@ -84,6 +86,7 @@ func UpdateRuntimeProgress(label string, percentage int, speed, current, total s
 	Status.Errors = errorCount
 	Status.Warnings = warningCount
 	Status.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	RuntimeStatusMu.Unlock()
 	WriteRuntimeStatus(false)
 }
 
@@ -91,33 +94,46 @@ func UpdateRuntimeProgress(label string, percentage int, speed, current, total s
 // errorCount and warningCount are passed in from the caller.
 func FinalizeRuntimeStatus(state string, errorCount, warningCount int) {
 	RuntimeStatusMu.Lock()
-	defer RuntimeStatusMu.Unlock()
 	if RuntimeStatusPath == "" {
+		RuntimeStatusMu.Unlock()
 		return
 	}
 	Status.State = state
 	Status.Errors = errorCount
 	Status.Warnings = warningCount
 	Status.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	RuntimeStatusMu.Unlock()
 	WriteRuntimeStatus(true)
 }
 
 // WriteRuntimeStatus writes the current runtime status to disk.
 // If force is false, writes are throttled to at most once per 250ms.
 func WriteRuntimeStatus(force bool) {
+	var (
+		statusPath string
+		statusSnap model.RuntimeStatus
+	)
+
+	RuntimeStatusMu.Lock()
 	if RuntimeStatusPath == "" {
+		RuntimeStatusMu.Unlock()
 		return
 	}
 	now := time.Now()
 	if !force && now.Sub(RuntimeStatusLastWrite) < 250*time.Millisecond {
+		RuntimeStatusMu.Unlock()
 		return
 	}
 	RuntimeStatusLastWrite = now
-	data, err := json.MarshalIndent(Status, "", "  ")
+	statusPath = RuntimeStatusPath
+	statusSnap = Status
+	RuntimeStatusMu.Unlock()
+
+	data, err := json.MarshalIndent(statusSnap, "", "  ")
 	if err != nil {
 		return
 	}
-	if err := WriteFileAtomic(RuntimeStatusPath, data, 0644); err != nil {
+	if err := WriteFileAtomic(statusPath, data, 0644); err != nil {
 		RuntimeStatusWarnOnce.Do(func() {
 			fmt.Fprintf(os.Stderr, "warning: failed to write runtime status: %v\n", err)
 		})

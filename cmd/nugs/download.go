@@ -35,8 +35,8 @@ func processTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 	return download.ProcessTrack(ctx, folPath, trackNum, trackTotal, cfg, track, streamParams, progressBox, buildDownloadDeps())
 }
 
-func preCalculateShowSize(tracks []Track, streamParams *StreamParams, cfg *Config) (int64, error) {
-	return download.PreCalculateShowSize(tracks, streamParams, cfg)
+func preCalculateShowSize(ctx context.Context, tracks []Track, streamParams *StreamParams, cfg *Config) (int64, error) {
+	return download.PreCalculateShowSize(ctx, tracks, streamParams, cfg)
 }
 
 func getAlbumTotal(meta []*ArtistMeta) int {

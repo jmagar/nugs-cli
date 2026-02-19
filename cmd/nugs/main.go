@@ -11,6 +11,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
@@ -95,6 +96,15 @@ func bootstrap() (*Config, string) {
 	}
 	cfg.Urls = normalizeCliAliases(cfg.Urls)
 	printActiveRuntimeHint(os.Getpid(), cfg.Urls)
+
+	// Initialise the dedicated API call log. Non-fatal: a logging failure
+	// must never prevent a download from starting.
+	if homeDir, hdErr := os.UserHomeDir(); hdErr == nil {
+		logPath := filepath.Join(homeDir, ".nugs", "api.log")
+		if logErr := api.InitAPILogger(logPath); logErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not open API log %s: %v\n", logPath, logErr)
+		}
+	}
 
 	return cfg, jsonLevel
 }
