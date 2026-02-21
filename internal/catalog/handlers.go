@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/cache"
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -142,10 +141,29 @@ func AnalyzeArtistCatalog(ctx context.Context, artistID string, cfg *model.Confi
 
 // CatalogUpdate fetches and caches the latest catalog.
 func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
+	// Capture previous state before overwriting so we can diff for new shows.
+	oldIndex, err := cache.ReadContainersIndex()
+	if err != nil {
+		// Non-fatal: treat as first run if we can't read the old index.
+		oldIndex = &model.ContainersIndex{Containers: map[int]model.ContainerIndexEntry{}}
+	}
+	isFirstUpdate := len(oldIndex.Containers) == 0
+
 	startTime := time.Now()
-	catalog, err := api.GetLatestCatalog(ctx)
+	catalog, err := deps.FetchCatalog(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch catalog: %w", err)
+	}
+
+	// Compute new shows before writing (containers_index will be overwritten).
+	// [:0:0] creates an empty slice with the same element type as RecentItems.
+	newShows := catalog.Response.RecentItems[:0:0]
+	if !isFirstUpdate {
+		for _, item := range catalog.Response.RecentItems {
+			if _, known := oldIndex.Containers[item.ContainerID]; !known {
+				newShows = append(newShows, item)
+			}
+		}
 	}
 
 	updateDuration := time.Since(startTime)
@@ -157,11 +175,31 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 	cacheDir, _ := cache.GetCacheDir()
 
 	if jsonLevel != "" {
+		// Always include newShowsList as [] when not a first update so consumers
+		// can check len(newShowsList) without also testing key existence.
+		newShowsData := make([]map[string]any, len(newShows))
+		for i, item := range newShows {
+			location := item.Venue
+			if item.VenueCity != "" {
+				location = item.VenueCity + ", " + item.VenueState
+			}
+			newShowsData[i] = map[string]any{
+				"containerID": item.ContainerID,
+				"artistID":    item.ArtistID,
+				"artistName":  item.ArtistName,
+				"date":        item.ShowDateFormattedShort,
+				"title":       item.ContainerInfo,
+				"location":    location,
+			}
+		}
 		output := map[string]any{
-			"success":    true,
-			"totalShows": len(catalog.Response.RecentItems),
-			"updateTime": deps.FormatDuration(updateDuration),
-			"cacheDir":   cacheDir,
+			"success":     true,
+			"firstUpdate": isFirstUpdate,
+			"totalShows":  len(catalog.Response.RecentItems),
+			"newShows":    len(newShows),
+			"updateTime":  deps.FormatDuration(updateDuration),
+			"cacheDir":    cacheDir,
+			"newShowsList": newShowsData,
 		}
 		if err := PrintJSON(output); err != nil {
 			return err
@@ -171,6 +209,39 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 		fmt.Printf("  Total shows: %s%d%s\n", ui.ColorGreen, len(catalog.Response.RecentItems), ui.ColorReset)
 		fmt.Printf("  Update time: %s%s%s\n", ui.ColorCyan, deps.FormatDuration(updateDuration), ui.ColorReset)
 		fmt.Printf("  Cache location: %s\n", cacheDir)
+
+		switch {
+		case isFirstUpdate:
+			fmt.Printf("\n  %s(First catalog update — run again after future updates to see new shows.)%s\n", ui.ColorCyan, ui.ColorReset)
+		case len(newShows) == 0:
+			fmt.Printf("\n  No new shows since last update.\n")
+		default:
+			fmt.Printf("\n  %s%d new show(s) since last update:%s\n\n", ui.ColorGreen, len(newShows), ui.ColorReset)
+
+			table := ui.NewTable([]ui.TableColumn{
+				{Header: "ID", Width: 10, Align: "right"},
+				{Header: "Artist", Width: 26, Align: "left"},
+				{Header: "Date", Width: 12, Align: "left"},
+				{Header: "Title", Width: 42, Align: "left"},
+				{Header: "Location", Width: 28, Align: "left"},
+			})
+
+			for _, item := range newShows {
+				location := item.Venue
+				if item.VenueCity != "" {
+					location = item.VenueCity + ", " + item.VenueState
+				}
+				table.AddRow(
+					fmt.Sprintf("%d", item.ContainerID),
+					item.ArtistName,
+					item.ShowDateFormattedShort,
+					item.ContainerInfo,
+					location,
+				)
+			}
+			table.Print()
+			fmt.Println()
+		}
 	}
 	return nil
 }

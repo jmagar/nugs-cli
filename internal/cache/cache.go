@@ -195,6 +195,31 @@ func writeCatalogMeta(cacheDir string, catalog *model.LatestCatalogResp, updateD
 	return atomicWriteFile(metaPath, metaData)
 }
 
+// ReadContainersIndex reads the containers index file.
+// Returns an empty index (not an error) when no cache exists yet.
+func ReadContainersIndex() (*model.ContainersIndex, error) {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	indexPath := filepath.Join(cacheDir, "containers_index.json")
+	data, err := os.ReadFile(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &model.ContainersIndex{Containers: map[int]model.ContainerIndexEntry{}}, nil
+		}
+		return nil, fmt.Errorf("failed to read containers index: %w", err)
+	}
+	var idx model.ContainersIndex
+	if err := json.Unmarshal(data, &idx); err != nil {
+		return nil, fmt.Errorf("failed to parse containers index: %w", err)
+	}
+	if idx.Containers == nil {
+		idx.Containers = map[int]model.ContainerIndexEntry{}
+	}
+	return &idx, nil
+}
+
 // atomicWriteFile writes data to a temp file then atomically renames it.
 func atomicWriteFile(targetPath string, data []byte) error {
 	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), "nugs_cache_*.tmp")

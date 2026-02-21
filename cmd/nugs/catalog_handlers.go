@@ -6,12 +6,14 @@ package main
 import (
 	"context"
 
+	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/catalog"
 )
 
 // buildCatalogDeps wires root-level callbacks into the internal/catalog package.
 func buildCatalogDeps() *catalog.Deps {
 	return &catalog.Deps{
+		FetchCatalog:            api.GetLatestCatalog,
 		RemotePathExists:        remotePathExists,
 		ListRemoteArtistFolders: listRemoteArtistFolders,
 		Album:                   album,
