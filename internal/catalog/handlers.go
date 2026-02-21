@@ -2,15 +2,17 @@ package catalog
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/cache"
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -20,6 +22,118 @@ import (
 // ArtistMetaCacheTTL is the TTL used for artist metadata caching.
 const ArtistMetaCacheTTL = 24 * time.Hour
 
+// gapFillErrorContext captures diagnostic information when a gap-fill download
+// fails. It helps distinguish between several failure modes:
+//   - Preorder/placeholder shows (availabilityType != "available", zero tracks/products)
+//   - Naming/path mismatches (content exists locally or remotely but wasn't detected)
+//   - Network failures (remote check returned an error)
+//   - Missing content (metadata has no downloadable tracks or videos)
+//
+// Fields are populated progressively by buildGapFillErrorContext: metadata fields
+// are always set, local checks run next, and remote fields are only populated
+// when RcloneEnabled is true and the remote check completes.
+type gapFillErrorContext struct {
+	// Metadata from the show's API response, used to detect preorder/placeholder shows.
+	AvailabilityType string `json:"availabilityType,omitempty"` // e.g. "available", "preorder"
+	ActiveState      string `json:"activeState,omitempty"`      // show lifecycle state from API
+	Tracks           int    `json:"tracks"`                     // number of audio tracks in metadata
+	Products         int    `json:"products"`                   // number of product SKUs (purchase options)
+	ProductFormats   int    `json:"productFormats"`             // number of format variants (FLAC, ALAC, etc.)
+
+	// Local filesystem existence checks against expected download paths.
+	LocalAudioPath   string `json:"localAudioPath"`   // expected path: outPath/artist/album
+	LocalAudioExists bool   `json:"localAudioExists"` // true if directory found on disk
+	LocalVideoPath   string `json:"localVideoPath"`   // expected path: videoOutPath/artist/album
+	LocalVideoExists bool   `json:"localVideoExists"` // true if directory found on disk
+
+	// Remote storage checks, only populated when cfg.RcloneEnabled is true.
+	RemoteRelativePath string `json:"remoteRelativePath,omitempty"` // artist/album relative path
+	RemoteAudioPath    string `json:"remoteAudioPath,omitempty"`    // full rclone URI for audio (remote:base/artist/album)
+	RemoteAudioExists  bool   `json:"remoteAudioExists"`            // true if found on remote
+	RemoteAudioError   string `json:"remoteAudioError,omitempty"`   // error message if audio check failed
+	RemoteVideoPath    string `json:"remoteVideoPath,omitempty"`    // full rclone URI for video
+	RemoteVideoExists  bool   `json:"remoteVideoExists"`            // true if found on remote
+	RemoteVideoError   string `json:"remoteVideoError,omitempty"`   // error message if video check failed
+}
+
+func deriveGapFillReasonHint(err error, info gapFillErrorContext) string {
+	if info.AvailabilityType != "" &&
+		!strings.EqualFold(info.AvailabilityType, model.AvailableAvailabilityType) &&
+		info.Tracks == 0 && info.Products == 0 && info.ProductFormats == 0 {
+		return "Preorder/placeholder container (not released yet)"
+	}
+	if info.LocalAudioExists || info.LocalVideoExists {
+		return "Already exists locally (naming/path mismatch likely)"
+	}
+	if info.RemoteAudioExists || info.RemoteVideoExists {
+		return "Already exists on remote (naming/path mismatch likely)"
+	}
+	if info.RemoteAudioError != "" || info.RemoteVideoError != "" {
+		return "Remote existence check failed"
+	}
+	if errors.Is(err, model.ErrReleaseHasNoContent) {
+		return "Metadata has no downloadable tracks/videos yet"
+	}
+	return "No content found at expected local/remote paths"
+}
+
+func joinRemotePath(remote, base, relative string) string {
+	trimmedBase := strings.TrimRight(base, "/")
+	trimmedRelative := strings.TrimLeft(relative, "/")
+	if trimmedBase == "" {
+		return fmt.Sprintf("%s:%s", remote, trimmedRelative)
+	}
+	return fmt.Sprintf("%s:%s/%s", remote, trimmedBase, trimmedRelative)
+}
+
+func buildGapFillErrorContext(ctx context.Context, show *model.AlbArtResp, cfg *model.Config, deps *Deps) gapFillErrorContext {
+	resolver := helpers.NewConfigPathResolver(cfg)
+	localAudioPath := resolver.LocalShowPath(show, model.MediaTypeAudio)
+	localVideoPath := resolver.LocalShowPath(show, model.MediaTypeVideo)
+
+	info := gapFillErrorContext{
+		AvailabilityType: show.AvailabilityTypeStr,
+		ActiveState:      show.ActiveState,
+		Tracks:           len(show.Tracks),
+		Products:         len(show.Products),
+		ProductFormats:   len(show.ProductFormatList),
+		LocalAudioPath:   localAudioPath,
+		LocalVideoPath:   localVideoPath,
+	}
+
+	if _, err := os.Stat(localAudioPath); err == nil {
+		info.LocalAudioExists = true
+	}
+	if _, err := os.Stat(localVideoPath); err == nil {
+		info.LocalVideoExists = true
+	}
+
+	if !cfg.RcloneEnabled || deps.RemotePathExists == nil {
+		return info
+	}
+
+	remoteRelativePath := resolver.RemoteShowPath(show)
+	info.RemoteRelativePath = remoteRelativePath
+	info.RemoteAudioPath = joinRemotePath(cfg.RcloneRemote, helpers.GetRcloneBasePath(cfg, false), remoteRelativePath)
+	info.RemoteVideoPath = joinRemotePath(cfg.RcloneRemote, helpers.GetRcloneBasePath(cfg, true), remoteRelativePath)
+
+	audioExists, audioErr := deps.RemotePathExists(ctx, path.Clean(remoteRelativePath), cfg, false)
+	if audioErr != nil {
+		info.RemoteAudioError = audioErr.Error()
+	} else {
+		info.RemoteAudioExists = audioExists
+	}
+
+	videoExists, videoErr := deps.RemotePathExists(ctx, path.Clean(remoteRelativePath), cfg, true)
+	if videoErr != nil {
+		info.RemoteVideoError = videoErr.Error()
+	} else {
+		info.RemoteVideoExists = videoExists
+	}
+
+	return info
+}
+
 // AnalyzeArtistCatalog analyzes an artist's catalog with optional media type filtering.
 func AnalyzeArtistCatalog(ctx context.Context, artistID string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (*model.ArtistCatalogAnalysis, error) {
 	return AnalyzeArtistCatalogMediaAware(ctx, artistID, cfg, jsonLevel, mediaFilter, deps)
@@ -27,10 +141,29 @@ func AnalyzeArtistCatalog(ctx context.Context, artistID string, cfg *model.Confi
 
 // CatalogUpdate fetches and caches the latest catalog.
 func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
+	// Capture previous state before overwriting so we can diff for new shows.
+	oldIndex, err := cache.ReadContainersIndex()
+	if err != nil {
+		// Non-fatal: treat as first run if we can't read the old index.
+		oldIndex = &model.ContainersIndex{Containers: map[int]model.ContainerIndexEntry{}}
+	}
+	isFirstUpdate := len(oldIndex.Containers) == 0
+
 	startTime := time.Now()
-	catalog, err := api.GetLatestCatalog(ctx)
+	catalog, err := deps.FetchCatalog(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch catalog: %w", err)
+	}
+
+	// Compute new shows before writing (containers_index will be overwritten).
+	// [:0:0] creates an empty slice with the same element type as RecentItems.
+	newShows := catalog.Response.RecentItems[:0:0]
+	if !isFirstUpdate {
+		for _, item := range catalog.Response.RecentItems {
+			if _, known := oldIndex.Containers[item.ContainerID]; !known {
+				newShows = append(newShows, item)
+			}
+		}
 	}
 
 	updateDuration := time.Since(startTime)
@@ -42,11 +175,31 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 	cacheDir, _ := cache.GetCacheDir()
 
 	if jsonLevel != "" {
+		// Always include newShowsList as [] when not a first update so consumers
+		// can check len(newShowsList) without also testing key existence.
+		newShowsData := make([]map[string]any, len(newShows))
+		for i, item := range newShows {
+			location := item.Venue
+			if item.VenueCity != "" {
+				location = item.VenueCity + ", " + item.VenueState
+			}
+			newShowsData[i] = map[string]any{
+				"containerID": item.ContainerID,
+				"artistID":    item.ArtistID,
+				"artistName":  item.ArtistName,
+				"date":        item.ShowDateFormattedShort,
+				"title":       item.ContainerInfo,
+				"location":    location,
+			}
+		}
 		output := map[string]any{
-			"success":    true,
-			"totalShows": len(catalog.Response.RecentItems),
-			"updateTime": deps.FormatDuration(updateDuration),
-			"cacheDir":   cacheDir,
+			"success":     true,
+			"firstUpdate": isFirstUpdate,
+			"totalShows":  len(catalog.Response.RecentItems),
+			"newShows":    len(newShows),
+			"updateTime":  deps.FormatDuration(updateDuration),
+			"cacheDir":    cacheDir,
+			"newShowsList": newShowsData,
 		}
 		if err := PrintJSON(output); err != nil {
 			return err
@@ -56,6 +209,39 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 		fmt.Printf("  Total shows: %s%d%s\n", ui.ColorGreen, len(catalog.Response.RecentItems), ui.ColorReset)
 		fmt.Printf("  Update time: %s%s%s\n", ui.ColorCyan, deps.FormatDuration(updateDuration), ui.ColorReset)
 		fmt.Printf("  Cache location: %s\n", cacheDir)
+
+		switch {
+		case isFirstUpdate:
+			fmt.Printf("\n  %s(First catalog update — run again after future updates to see new shows.)%s\n", ui.ColorCyan, ui.ColorReset)
+		case len(newShows) == 0:
+			fmt.Printf("\n  No new shows since last update.\n")
+		default:
+			fmt.Printf("\n  %s%d new show(s) since last update:%s\n\n", ui.ColorGreen, len(newShows), ui.ColorReset)
+
+			table := ui.NewTable([]ui.TableColumn{
+				{Header: "ID", Width: 10, Align: "right"},
+				{Header: "Artist", Width: 26, Align: "left"},
+				{Header: "Date", Width: 12, Align: "left"},
+				{Header: "Title", Width: 42, Align: "left"},
+				{Header: "Location", Width: 28, Align: "left"},
+			})
+
+			for _, item := range newShows {
+				location := item.Venue
+				if item.VenueCity != "" {
+					location = item.VenueCity + ", " + item.VenueState
+				}
+				table.AddRow(
+					fmt.Sprintf("%d", item.ContainerID),
+					item.ArtistName,
+					item.ShowDateFormattedShort,
+					item.ContainerInfo,
+					location,
+				)
+			}
+			table.Print()
+			fmt.Println()
+		}
 	}
 	return nil
 }
@@ -471,6 +657,8 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 
 		err := deps.Album(ctx, fmt.Sprintf("%d", show.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox)
 		if err != nil {
+			errorCtx := buildGapFillErrorContext(ctx, show, cfg, deps)
+			reasonHint := deriveGapFillReasonHint(err, errorCtx)
 			failedCount++
 			batchState.Failed++
 			failedShows = append(failedShows, map[string]any{
@@ -478,9 +666,23 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 				"date":        show.PerformanceDateShortYearFirst,
 				"title":       show.ContainerInfo,
 				"error":       err.Error(),
+				"reasonHint":  reasonHint,
+				"context":     errorCtx,
 			})
 			if jsonLevel == "" {
 				ui.PrintError(fmt.Sprintf("Failed to download show %d: %v", show.ContainerID, err))
+				ui.PrintWarning(fmt.Sprintf("Reason hint: %s", reasonHint))
+				ui.PrintInfo(fmt.Sprintf("Failure context: availability=%s activeState=%s tracks=%d products=%d productFormats=%d",
+					errorCtx.AvailabilityType, errorCtx.ActiveState, errorCtx.Tracks, errorCtx.Products, errorCtx.ProductFormats))
+				// Redact full paths to avoid PII leakage in logs
+				ui.PrintInfo(fmt.Sprintf("Local check: audioExists=%t path=%s", errorCtx.LocalAudioExists, filepath.Base(errorCtx.LocalAudioPath)))
+				ui.PrintInfo(fmt.Sprintf("Local check: videoExists=%t path=%s", errorCtx.LocalVideoExists, filepath.Base(errorCtx.LocalVideoPath)))
+				if cfg.RcloneEnabled {
+					ui.PrintInfo(fmt.Sprintf("Remote check: audioExists=%t path=%s err=%s",
+						errorCtx.RemoteAudioExists, filepath.Base(errorCtx.RemoteAudioPath), errorCtx.RemoteAudioError))
+					ui.PrintInfo(fmt.Sprintf("Remote check: videoExists=%t path=%s err=%s",
+						errorCtx.RemoteVideoExists, filepath.Base(errorCtx.RemoteVideoPath), errorCtx.RemoteVideoError))
+				}
 			}
 		} else {
 			successCount++
@@ -548,6 +750,7 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 	}
 
 	var allStats []coverageStats
+	var remoteScanErr error
 
 	if len(artistIds) == 0 {
 		if jsonLevel == "" {
@@ -573,8 +776,11 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		}
 
 		remoteArtistDirs, err := ListAllRemoteArtistFolders(ctx, cfg)
-		if err != nil && jsonLevel == "" {
-			ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
+		if err != nil {
+			remoteScanErr = err
+			if jsonLevel == "" {
+				ui.PrintWarning(fmt.Sprintf("Remote artist scan failed: %v", err))
+			}
 		}
 		for artistDir := range remoteArtistDirs {
 			discoveredArtistDirs[artistDir] = struct{}{}
@@ -650,22 +856,60 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		}
 	}
 
-	for _, artistId := range artistIds {
-		analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
-		if err != nil {
+	type coverageResult struct {
+		stats coverageStats
+		err   error
+	}
+	jobs := make(chan string)
+	results := make(chan coverageResult, len(artistIds))
+	workerCount := min(coverageArtistConcurrency, len(artistIds))
+	var wg sync.WaitGroup
+
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for artistID := range jobs {
+				analysis, err := AnalyzeArtistCatalog(ctx, artistID, cfg, jsonLevel, mediaFilter, deps)
+				if err != nil {
+					results <- coverageResult{err: fmt.Errorf("artist %s: %w", artistID, err)}
+					continue
+				}
+				results <- coverageResult{
+					stats: coverageStats{
+						artistID:        artistID,
+						artistName:      analysis.ArtistName,
+						totalShows:      analysis.TotalShows,
+						downloadedCount: analysis.Downloaded,
+						coveragePct:     analysis.DownloadPct,
+					},
+				}
+			}
+		}()
+	}
+
+	for _, artistID := range artistIds {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			close(results)
+			return ctx.Err()
+		case jobs <- artistID:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	for result := range results {
+		if result.err != nil {
 			if jsonLevel == "" {
-				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for artist %s: %v", artistId, err))
+				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for %v", result.err))
 			}
 			continue
 		}
-
-		allStats = append(allStats, coverageStats{
-			artistID:        artistId,
-			artistName:      analysis.ArtistName,
-			totalShows:      analysis.TotalShows,
-			downloadedCount: analysis.Downloaded,
-			coveragePct:     analysis.DownloadPct,
-		})
+		allStats = append(allStats, result.stats)
 	}
 
 	sort.Slice(allStats, func(i, j int) bool {
@@ -704,6 +948,10 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 				"missing":    totalShows - totalDownloaded,
 				"coverage":   totalCoveragePct,
 			},
+			"remoteScanError": nil,
+		}
+		if remoteScanErr != nil {
+			output["remoteScanError"] = remoteScanErr.Error()
 		}
 		if err := PrintJSON(output); err != nil {
 			return err

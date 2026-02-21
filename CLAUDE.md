@@ -4,10 +4,10 @@ This is the main development guide for contributors. For specialized topics, see
 
 ## 📚 Documentation Index
 
-- **[ARCHITECTURE.md](./ARCHITECTURE.md)** - Package structure, dependencies, design patterns
-- **[CONFIG.md](./CONFIG.md)** - Complete configuration reference (all 23 fields)
+- **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - Package structure, dependencies, design patterns
+- **[CONFIG.md](./docs/CONFIG.md)** - Complete configuration reference (all 23 fields)
 - **[README.md](./README.md)** - User documentation and command reference
-- **[COMMANDS.md](./COMMANDS.md)** - Comprehensive command examples
+- **[COMMANDS.md](./docs/COMMANDS.md)** - Comprehensive command examples
 
 ## Table of Contents
 
@@ -102,9 +102,9 @@ Root: Command Orchestration (cmd/nugs/main.go)
 - Timezone-aware refresh times
 - Automatic updates at startup if needed
 
-**For detailed architecture:** See [ARCHITECTURE.md](./ARCHITECTURE.md)
+**For detailed architecture:** See [ARCHITECTURE.md](./docs/ARCHITECTURE.md)
 
-**For configuration details:** See [CONFIG.md](./CONFIG.md)
+**For configuration details:** See [CONFIG.md](./docs/CONFIG.md)
 
 ---
 
@@ -168,7 +168,7 @@ GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 3. Import from `cmd/nugs/main.go` if user-facing
 4. Update package `deps.go` if adding new dependencies
 
-**For detailed patterns:** See [ARCHITECTURE.md - Where New Code Goes](./ARCHITECTURE.md#where-new-code-goes)
+**For detailed patterns:** See [ARCHITECTURE.md - Where New Code Goes](./docs/ARCHITECTURE.md#where-new-code-goes)
 
 ---
 
@@ -512,7 +512,7 @@ go build ./cmd/nugs
 make build
 ```
 
-**For more gotchas:** See [ARCHITECTURE.md - Common Gotchas](./ARCHITECTURE.md#common-gotchas)
+**For more gotchas:** See [ARCHITECTURE.md - Common Gotchas](./docs/ARCHITECTURE.md#common-gotchas)
 
 ---
 
@@ -624,7 +624,7 @@ nugs completion fish > ~/.config/fish/completions/nugs.fish
 }
 ```
 
-**See [CONFIG.md - Migrations](./CONFIG.md#migrations) for full details.**
+**See [CONFIG.md - Migrations](./docs/CONFIG.md#migrations) for full details.**
 
 ---
 

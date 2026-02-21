@@ -50,6 +50,9 @@ func TestDepsUploadPathUsesStorageProviderWhenLegacyCallbackMissing(t *testing.T
 	if storage.lastUpload.ArtistFolder != "artist" {
 		t.Fatalf("artist folder = %q", storage.lastUpload.ArtistFolder)
 	}
+	if storage.lastUpload.IsVideo {
+		t.Fatal("expected isVideo=false for audio upload")
+	}
 }
 
 func TestDepsCheckRemotePathExistsUsesStorageProviderWhenLegacyCallbackMissing(t *testing.T) {

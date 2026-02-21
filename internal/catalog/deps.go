@@ -33,6 +33,10 @@ type Deps struct {
 	// GetShowMediaType determines what media types a show offers.
 	GetShowMediaType func(show *model.AlbArtResp) model.MediaType
 
+	// FetchCatalog retrieves the latest catalog from the API.
+	// Injected here so CatalogUpdate can be tested without network calls.
+	FetchCatalog func(ctx context.Context) (*model.LatestCatalogResp, error)
+
 	// FormatDuration formats a time.Duration as a human-readable string.
 	FormatDuration func(d time.Duration) string
 

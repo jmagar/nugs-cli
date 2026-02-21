@@ -87,6 +87,26 @@ func resolveArtistName(allMeta []*model.ArtistMeta) string {
 	return "Unknown Artist"
 }
 
+func sortArtistsByNameCaseInsensitive(artists []model.Artist) {
+	type indexedArtist struct {
+		artist model.Artist
+		lower  string
+	}
+	indexed := make([]indexedArtist, len(artists))
+	for i, artist := range artists {
+		indexed[i] = indexedArtist{
+			artist: artist,
+			lower:  strings.ToLower(artist.ArtistName),
+		}
+	}
+	sort.Slice(indexed, func(i, j int) bool {
+		return indexed[i].lower < indexed[j].lower
+	})
+	for i := range indexed {
+		artists[i] = indexed[i].artist
+	}
+}
+
 // collectContainers gathers containers from metadata, applying optional media filtering.
 func collectContainers(allMeta []*model.ArtistMeta, deps *Deps, mf model.MediaType) []model.ContainerWithDate {
 	var containers []model.ContainerWithDate
@@ -266,9 +286,7 @@ func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error
 			return nil
 		}
 
-		sort.Slice(artists, func(i, j int) bool {
-			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
-		})
+		sortArtistsByNameCaseInsensitive(artists)
 
 		output := model.ArtistListOutput{
 			Artists: make([]model.ArtistOutput, len(artists)),
@@ -288,9 +306,7 @@ func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error
 		}
 		fmt.Println(string(jsonData))
 	} else {
-		sort.Slice(artists, func(i, j int) bool {
-			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
-		})
+		sortArtistsByNameCaseInsensitive(artists)
 
 		if showFilter != "" {
 			ui.PrintSection(fmt.Sprintf("Found %d artists with shows %s%d", len(artists), filterOperator, filterValue))

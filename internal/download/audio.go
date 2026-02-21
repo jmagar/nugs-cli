@@ -246,6 +246,91 @@ func TsToAac(decData []byte, outPath, ffmpegNameStr string) error {
 	return nil
 }
 
+// DecryptTrackToFile decrypts an encrypted TS track file to disk using bounded memory.
+func DecryptTrackToFile(tempPath, decryptedPath string, key, iv []byte) error {
+	inFile, err := os.Open(tempPath)
+	if err != nil {
+		return err
+	}
+	defer inFile.Close()
+
+	outFile, err := os.OpenFile(decryptedPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer outFile.Close()
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return err
+	}
+	decrypter := cipher.NewCBCDecrypter(block, iv)
+	blockSize := aes.BlockSize
+
+	buf := make([]byte, 64*1024)
+	tail := make([]byte, 0, blockSize)
+
+	for {
+		n, readErr := inFile.Read(buf)
+		isEOF := errors.Is(readErr, io.EOF)
+		if readErr != nil && !isEOF {
+			return readErr
+		}
+
+		if n > 0 {
+			chunk := append(tail, buf[:n]...)
+			if !isEOF {
+				processLen := len(chunk) - (len(chunk) % blockSize)
+				if processLen >= blockSize {
+					// Hold final block for PKCS5 trimming on final write.
+					processLen -= blockSize
+				} else {
+					processLen = 0
+				}
+				if processLen > 0 {
+					decryptedChunk := make([]byte, processLen)
+					decrypter.CryptBlocks(decryptedChunk, chunk[:processLen])
+					if _, err := outFile.Write(decryptedChunk); err != nil {
+						return err
+					}
+				}
+				tail = append(tail[:0], chunk[processLen:]...)
+			} else {
+				if len(chunk)%blockSize != 0 {
+					return fmt.Errorf("encrypted data length %d is not multiple of AES block size %d", len(chunk), blockSize)
+				}
+				decryptedFinal := make([]byte, len(chunk))
+				decrypter.CryptBlocks(decryptedFinal, chunk)
+				trimmed, err := Pkcs5Trimming(decryptedFinal)
+				if err != nil {
+					return err
+				}
+				if _, err := outFile.Write(trimmed); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
+
+		if isEOF {
+			break
+		}
+	}
+
+	return errors.New("no encrypted data to decrypt")
+}
+
+// TsFileToAac converts a decrypted TS file to AAC using ffmpeg.
+func TsFileToAac(decPath, outPath, ffmpegNameStr string) error {
+	var errBuffer bytes.Buffer
+	cmd := exec.Command(ffmpegNameStr, "-i", decPath, "-c:a", "copy", outPath)
+	cmd.Stderr = &errBuffer
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s\n%s", err, errBuffer.String())
+	}
+	return nil
+}
+
 // HlsOnly downloads an HLS-only track (encrypted), decrypts it, and converts to AAC.
 func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
 	req, err := api.Client.Get(manUrl)
@@ -302,12 +387,18 @@ func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onPro
 	if err != nil {
 		return err
 	}
-	decData, err := DecryptTrack(tempPath, keyBytes, iv)
+	decryptedFile, err := os.CreateTemp("", "nugs-dec-*.ts")
 	if err != nil {
+		return fmt.Errorf("failed to create decrypted temp file: %w", err)
+	}
+	decryptedPath := decryptedFile.Name()
+	decryptedFile.Close()
+	defer os.Remove(decryptedPath)
+
+	if err := DecryptTrackToFile(tempPath, decryptedPath, keyBytes, iv); err != nil {
 		return err
 	}
-	err = TsToAac(decData, trackPath, ffmpegNameStr)
-	return err
+	return TsFileToAac(decryptedPath, trackPath, ffmpegNameStr)
 }
 
 // CheckIfHlsOnly checks if all qualities are HLS-only streams.
@@ -320,12 +411,30 @@ func CheckIfHlsOnly(quals []*model.Quality) bool {
 	return true
 }
 
-// selectTrackQuality probes available formats and selects the best quality for a track.
-// Returns the chosen quality, whether the track is HLS-only, and the resolved format ID.
+// selectTrackQuality resolves the stream URL and quality for a track.
+// Uses the URL already present in track.TrackURL (from the album metadata response),
+// avoiding any additional API calls. Falls back to GetStreamMeta only when TrackURL
+// is empty (e.g. older API responses).
 func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *model.StreamParams, wantFmt int) (*model.Quality, bool, int, error) {
+	// Fast path: the metadata response already contains the stream URL.
+	if track.TrackURL != "" {
+		qual := api.QueryQuality(track.TrackURL)
+		if qual != nil {
+			isHlsOnly := strings.Contains(track.TrackURL, ".m3u8?")
+			if isHlsOnly {
+				ui.PrintInfo("HLS-only track. Only AAC is available, tags currently unsupported")
+				if err := ParseHlsMaster(qual); err != nil {
+					return nil, true, wantFmt, err
+				}
+			}
+			return qual, isHlsOnly, qual.Format, nil
+		}
+	}
+
+	// Fallback: probe formats via API (older responses without TrackURL).
 	var quals []*model.Quality
-	for _, i := range model.TrackStreamMetaFormatProbeOrder {
-		streamUrl, err := api.GetStreamMeta(ctx, track.TrackID, 0, i, streamParams)
+	for _, platformID := range model.TrackStreamMetaFormatProbeOrder {
+		streamUrl, err := api.GetStreamMeta(ctx, track.TrackID, 0, platformID, streamParams)
 		if err != nil {
 			ui.PrintError("Failed to get track stream metadata")
 			return nil, false, wantFmt, err
@@ -339,6 +448,7 @@ func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *m
 		}
 		quals = append(quals, quality)
 	}
+
 	if len(quals) == 0 {
 		return nil, false, wantFmt, errors.New("the api didn't return any formats")
 	}
@@ -353,7 +463,6 @@ func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *m
 		return chosenQual, true, wantFmt, nil
 	}
 
-	// Non-HLS: try requested format with fallback chain
 	for i := 0; i < model.MaxFormatFallbackAttempts; i++ {
 		if chosen := api.GetTrackQual(quals, wantFmt); chosen != nil {
 			return chosen, false, wantFmt, nil
@@ -417,6 +526,15 @@ func buildTrackProgressCallback(progressBox *model.ProgressBoxState, deps *Deps,
 		progressBox.DownloadTotal = trackTotalStr
 		progressBox.ShowPercent = showPercentage
 		progressBox.ShowDownloaded = humanize.Bytes(uint64(accumulatedBeforeCurrent + downloaded))
+
+		// Update ShowTotal dynamically using the full track size (not bytes downloaded so far)
+		// so the displayed total stays stable throughout each track's download.
+		if total > 0 {
+			// Estimate: completed tracks + full current track size + remaining tracks at same size
+			estimatedRemaining := total * int64(trackTotal-trackNum)
+			estimatedTotal := accumulatedBeforeCurrent + total + estimatedRemaining
+			progressBox.ShowTotal = humanize.Bytes(uint64(estimatedTotal))
+		}
 
 		if speed > 0 && total > 0 && downloaded < total {
 			if deps.UpdateSpeedHistory != nil {
@@ -520,66 +638,77 @@ func ProcessTrack(ctx context.Context, folPath string, trackNum, trackTotal int,
 
 // PreCalculateShowSize calculates the total size of all tracks in a show.
 // Uses parallel HEAD requests with 8-concurrent semaphore and 5-second timeout per request.
-func PreCalculateShowSize(tracks []model.Track, streamParams *model.StreamParams, cfg *model.Config) (int64, error) {
+func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParams *model.StreamParams, cfg *model.Config) (int64, error) {
 	if cfg.SkipSizePreCalculation {
 		return 0, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	var totalSize int64
 	var mu sync.Mutex
 	var wg sync.WaitGroup
+	workerCount := min(model.PreCalcConcurrency, len(tracks))
+	if workerCount == 0 {
+		return 0, nil
+	}
+	jobs := make(chan model.Track)
 
-	// Semaphore to limit concurrent requests to 8
-	sem := make(chan struct{}, model.PreCalcConcurrency)
-
-	// Use background context for orchestration; per-request timeouts handle individual HEADs
-	ctx := context.Background()
-
-	for _, track := range tracks {
+	for range workerCount {
 		wg.Add(1)
-		go func(t model.Track) {
+		go func() {
 			defer wg.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case track, ok := <-jobs:
+					if !ok {
+						return
+					}
 
-			// Acquire semaphore
-			select {
-			case sem <- struct{}{}:
-				defer func() { <-sem }()
-			case <-ctx.Done():
-				return
+					streamURL, err := api.GetStreamMeta(ctx, track.TrackID, 0, 1, streamParams)
+					if err != nil || streamURL == "" {
+						continue
+					}
+
+					reqCtx, reqCancel := context.WithTimeout(ctx, model.PreCalcPerRequestTimeout)
+					req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, streamURL, nil)
+					if err != nil {
+						reqCancel()
+						continue
+					}
+					resp, err := api.Client.Do(req)
+					reqCancel()
+					if err != nil {
+						continue
+					}
+					if resp.ContentLength > 0 {
+						mu.Lock()
+						totalSize += resp.ContentLength
+						mu.Unlock()
+					}
+					resp.Body.Close()
+				}
 			}
-
-			// Try to get stream URL (using format 1 as a representative format)
-			streamUrl, err := api.GetStreamMeta(ctx, t.TrackID, 0, 1, streamParams)
-			if err != nil || streamUrl == "" {
-				return
-			}
-
-			// Create HEAD request with timeout
-			reqCtx, reqCancel := context.WithTimeout(ctx, model.PreCalcPerRequestTimeout)
-			defer reqCancel()
-
-			req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, streamUrl, nil)
-			if err != nil {
-				return
-			}
-
-			resp, err := api.Client.Do(req)
-			if err != nil {
-				return
-			}
-			defer resp.Body.Close()
-
-			// Get content length
-			if resp.ContentLength > 0 {
-				mu.Lock()
-				totalSize += resp.ContentLength
-				mu.Unlock()
-			}
-		}(track)
+		}()
 	}
 
+	for _, track := range tracks {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return totalSize, ctx.Err()
+		case jobs <- track:
+		}
+	}
+	close(jobs)
 	wg.Wait()
-
+	if err := ctx.Err(); err != nil {
+		return totalSize, err
+	}
 	return totalSize, nil
 }
 
@@ -665,14 +794,14 @@ func prepareAlbumPaths(ctx context.Context, cfg *model.Config, meta *model.AlbAr
 	return artistFolder, albumPath, false, nil
 }
 
-func calculateAlbumShowSize(tracks []model.Track, streamParams *model.StreamParams, cfg *model.Config) (int64, string) {
+func calculateAlbumShowSize(ctx context.Context, tracks []model.Track, streamParams *model.StreamParams, cfg *model.Config) (int64, string) {
 	totalShowSize := int64(0)
 	showTotalStr := model.CalculatingSizeLabel
 	if cfg.SkipSizePreCalculation {
 		return totalShowSize, showTotalStr
 	}
 	ui.PrintInfo("Pre-calculating total show size...")
-	calculatedSize, err := PreCalculateShowSize(tracks, streamParams, cfg)
+	calculatedSize, err := PreCalculateShowSize(ctx, tracks, streamParams, cfg)
 	if err == nil && calculatedSize > 0 {
 		totalShowSize = calculatedSize
 		showTotalStr = humanize.Bytes(uint64(totalShowSize))
@@ -775,7 +904,7 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 	trackTotal := len(tracks)
 	skuID := GetVideoSku(meta.Products)
 	if skuID == 0 && trackTotal < 1 {
-		return errors.New("release has no tracks or videos")
+		return model.ErrReleaseHasNoContent
 	}
 	downloadAudio, downloadVideo := resolveAlbumDownloadModes(cfg, meta)
 	handled, err := handleVideoOnlyAlbum(ctx, albumID, cfg, streamParams, meta, trackTotal, skuID, downloadVideo, deps)
@@ -788,7 +917,7 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 		return err
 	}
 
-	totalShowSize, showTotalStr := calculateAlbumShowSize(tracks, streamParams, cfg)
+	totalShowSize, showTotalStr := calculateAlbumShowSize(ctx, tracks, streamParams, cfg)
 	progressBox, created := prepareAlbumProgressBox(meta, cfg, batchState, progressBox, trackTotal, totalShowSize, showTotalStr, deps)
 	if created {
 		defer func() {

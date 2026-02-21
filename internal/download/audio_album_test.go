@@ -97,9 +97,9 @@ func TestHandleVideoOnlyAlbumSkipsWhenDisabled(t *testing.T) {
 		&model.Config{SkipVideos: true},
 		&model.StreamParams{},
 		&model.AlbArtResp{},
-		0,
-		999,
-		false,
+		0,     // trackTotal - no tracks expected for this test
+		999,   // skuID - arbitrary non-zero value
+		false, // downloadVideo - disabled to test skip path
 		&Deps{},
 	)
 	if err != nil {

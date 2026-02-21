@@ -29,6 +29,9 @@ func httpResponse(status int, body string) *http.Response {
 	}
 }
 
+// NOTE: Tests in this file mutate the global api.Client and restore it via t.Cleanup.
+// They MUST NOT use t.Parallel() — concurrent subtests would race on the shared client.
+
 func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 	tests := []struct {
 		name      string

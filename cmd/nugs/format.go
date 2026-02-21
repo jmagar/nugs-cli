@@ -446,18 +446,18 @@ func generateSparkline(values []float64, maxWidth int) string {
 
 // completionSnapshot holds all state needed to render the completion summary.
 type completionSnapshot struct {
-	ShowTitle        string
+	ShowTitle         string
 	AccumulatedTracks int
-	TrackTotal       int
-	ShowTotal        string
-	TotalDuration    time.Duration
-	AccumulatedBytes int64
-	SkippedTracks    int
-	ErrorTracks      int
-	RcloneEnabled    bool
-	UploadDuration   time.Duration
-	UploadTotal      string
-	LinesDrawn       int
+	TrackTotal        int
+	ShowTotal         string
+	TotalDuration     time.Duration
+	AccumulatedBytes  int64
+	SkippedTracks     int
+	ErrorTracks       int
+	RcloneEnabled     bool
+	UploadDuration    time.Duration
+	UploadTotal       string
+	LinesDrawn        int
 }
 
 // renderCompletionSummary displays final summary when all tracks complete

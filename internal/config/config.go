@@ -161,11 +161,11 @@ func promptFfmpegFlag(scanner *bufio.Scanner) (bool, error) {
 
 // rcloneSettings holds all rclone-related configuration from the setup prompt.
 type rcloneSettings struct {
-	enabled          bool
-	remote           string
-	path             string
-	videoPath        string
-	transfers        int
+	enabled           bool
+	remote            string
+	path              string
+	videoPath         string
+	transfers         int
 	deleteAfterUpload bool
 }
 
@@ -230,11 +230,11 @@ func promptRclone(scanner *bufio.Scanner) (rcloneSettings, error) {
 	deleteAfterUpload := deleteStr != "n" && deleteStr != "no"
 
 	return rcloneSettings{
-		enabled:          true,
-		remote:           remote,
-		path:             path,
-		videoPath:        videoPath,
-		transfers:        transfers,
+		enabled:           true,
+		remote:            remote,
+		path:              path,
+		videoPath:         videoPath,
+		transfers:         transfers,
 		deleteAfterUpload: deleteAfterUpload,
 	}, nil
 }

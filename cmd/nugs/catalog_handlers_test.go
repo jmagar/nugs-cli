@@ -62,6 +62,8 @@ func TestAnalyzeArtistCatalog_UsesCacheAndComputesCounts(t *testing.T) {
 			ContainerID:                   101,
 			PerformanceDate:               "24/01/01",
 			PerformanceDateShortYearFirst: "24/01/01",
+			AvailabilityTypeStr:           "AVAILABLE",
+			ProductFormatList:             []*ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
 		},
 		{
 			ArtistName:                    "Test Artist",
@@ -69,6 +71,8 @@ func TestAnalyzeArtistCatalog_UsesCacheAndComputesCounts(t *testing.T) {
 			ContainerID:                   102,
 			PerformanceDate:               "23/01/01",
 			PerformanceDateShortYearFirst: "23/01/01",
+			AvailabilityTypeStr:           "AVAILABLE",
+			ProductFormatList:             []*ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
 		},
 	}
 
@@ -123,6 +127,8 @@ func TestCatalogGapsForArtist_DefaultOutputIsMissingListOnly(t *testing.T) {
 			ContainerID:                   201,
 			PerformanceDate:               "24/01/01",
 			PerformanceDateShortYearFirst: "24/01/01",
+			AvailabilityTypeStr:           "AVAILABLE",
+			ProductFormatList:             []*ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
 		},
 		{
 			ArtistName:                    "Test Artist",
@@ -130,6 +136,8 @@ func TestCatalogGapsForArtist_DefaultOutputIsMissingListOnly(t *testing.T) {
 			ContainerID:                   202,
 			PerformanceDate:               "23/01/01",
 			PerformanceDateShortYearFirst: "23/01/01",
+			AvailabilityTypeStr:           "AVAILABLE",
+			ProductFormatList:             []*ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
 		},
 	}
 
@@ -169,6 +177,8 @@ func TestGetArtistMetaCached_UsesFreshCache(t *testing.T) {
 			ContainerID:                   999,
 			PerformanceDate:               "24/01/01",
 			PerformanceDateShortYearFirst: "24/01/01",
+			AvailabilityTypeStr:           "AVAILABLE",
+			ProductFormatList:             []*ProductFormatList{{FormatStr: "16-bit / 44.1 kHz FLAC"}},
 		},
 	}
 	if err := writeArtistMetaCache("555", buildTestArtistMeta(555, "Cache Artist", shows)); err != nil {

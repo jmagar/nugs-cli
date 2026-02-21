@@ -40,6 +40,9 @@ Thumbs.db
 
 # Documentation (session logs, etc.)
 .docs/
+docs/plans/
+docs/sessions/
+docs/reports/
 
 # Serena agent files
 .serena/
