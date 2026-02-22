@@ -8,12 +8,16 @@ import (
 
 	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/catalog"
+	"github.com/jmagar/nugs-cli/internal/model"
 )
 
 // buildCatalogDeps wires root-level callbacks into the internal/catalog package.
 func buildCatalogDeps() *catalog.Deps {
 	return &catalog.Deps{
-		FetchCatalog:            api.GetLatestCatalog,
+		FetchCatalog: api.GetLatestCatalog,
+		FetchArtistList: func(ctx context.Context) (*model.ArtistListResp, error) {
+			return getArtistListCached(ctx, catalog.ArtistMetaCacheTTL)
+		},
 		RemotePathExists:        remotePathExists,
 		ListRemoteArtistFolders: listRemoteArtistFolders,
 		Album:                   album,
@@ -37,8 +41,8 @@ func catalogCacheStatus(jsonLevel string) error {
 	return catalog.CatalogCacheStatus(jsonLevel, buildCatalogDeps())
 }
 
-func catalogStats(ctx context.Context, jsonLevel string) error {
-	return catalog.CatalogStats(ctx, jsonLevel)
+func catalogStats(ctx context.Context, cfg *Config, jsonLevel string) error {
+	return catalog.CatalogStats(ctx, cfg, jsonLevel, buildCatalogDeps())
 }
 
 func catalogLatest(ctx context.Context, limit int, jsonLevel string) error {
@@ -54,7 +58,8 @@ func catalogGaps(ctx context.Context, artistIds []string, cfg *Config, jsonLevel
 }
 
 func catalogGapsFill(ctx context.Context, artistId string, cfg *Config, streamParams *StreamParams, jsonLevel string, mediaFilter MediaType) error {
-	return catalog.CatalogGapsFill(ctx, artistId, cfg, streamParams, jsonLevel, mediaFilter, buildCatalogDeps())
+	_, err := catalog.CatalogGapsFill(ctx, artistId, cfg, streamParams, jsonLevel, mediaFilter, buildCatalogDeps())
+	return err
 }
 
 func catalogCoverage(ctx context.Context, artistIds []string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {

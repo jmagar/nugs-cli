@@ -235,11 +235,19 @@ func renderShowsJSON(containers []model.ContainerWithDate, artistId string, arti
 }
 
 // ListArtists fetches and displays a formatted list of all artists.
-func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error {
+// If deps.FetchArtistList is set it is used (supports caching); otherwise
+// falls back to a direct api.GetArtistList call.
+func ListArtists(ctx context.Context, jsonLevel string, showFilter string, deps ...*Deps) error {
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist catalog...")
 	}
-	artistList, err := api.GetArtistList(ctx)
+
+	fetch := api.GetArtistList
+	if len(deps) > 0 && deps[0] != nil && deps[0].FetchArtistList != nil {
+		fetch = deps[0].FetchArtistList
+	}
+
+	artistList, err := fetch(ctx)
 	if err != nil {
 		ui.PrintError("Failed to get artist list")
 		return err

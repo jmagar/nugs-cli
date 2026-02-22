@@ -145,7 +145,7 @@ func argsDescription() string {
 	example(`nugs list 461 "Red Rocks"`)
 	example("nugs list 1125 latest 5")
 	example(`nugs list ">100"`)
-	exampleWithDesc("nugs 12345", "                       Download show by ID")
+	exampleWithDesc("nugs grab 12345", "                  Download show by ID")
 	example("nugs grab 461 latest")
 	example("nugs update")
 	example("nugs gaps 1125")

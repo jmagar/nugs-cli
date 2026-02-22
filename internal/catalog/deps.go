@@ -37,9 +37,24 @@ type Deps struct {
 	// Injected here so CatalogUpdate can be tested without network calls.
 	FetchCatalog func(ctx context.Context) (*model.LatestCatalogResp, error)
 
+	// FetchArtistList retrieves the full artist list (catalog.artists) from the API.
+	// Each entry includes NumShows — the authoritative per-artist show count on Nugs.net.
+	FetchArtistList func(ctx context.Context) (*model.ArtistListResp, error)
+
 	// FormatDuration formats a time.Duration as a human-readable string.
 	FormatDuration func(d time.Duration) string
 
 	// GetArtistMetaCached retrieves artist metadata, using the cache when fresh.
 	GetArtistMetaCached func(ctx context.Context, artistID string, ttl time.Duration) (pages []*model.ArtistMeta, cacheUsed bool, cacheStaleUse bool, err error)
+
+	// Notify sends a push notification. nil means notifications are disabled.
+	Notify func(ctx context.Context, title, message string, priority int) error
+}
+
+// GapFillResult summarises the outcome of a CatalogGapsFill call.
+type GapFillResult struct {
+	ArtistName  string
+	Downloaded  int
+	Failed      int
+	Interrupted bool
 }

@@ -17,4 +17,8 @@ type Deps struct {
 
 	// Playlist downloads a catalog playlist by GUID.
 	Playlist func(ctx context.Context, plistId, legacyToken string, cfg *model.Config, streamParams *model.StreamParams, cat bool) error
+
+	// FetchArtistList retrieves the full artist list. If nil, falls back to
+	// calling api.GetArtistList directly (no caching).
+	FetchArtistList func(ctx context.Context) (*model.ArtistListResp, error)
 }

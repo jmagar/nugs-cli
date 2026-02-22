@@ -17,6 +17,16 @@ func IsReadOnlyCommand(urls []string) bool {
 		return true
 	case "list":
 		return true
+	case "watch":
+		if len(urls) < 2 {
+			return true
+		}
+		switch urls[1] {
+		case "check":
+			return false // downloads
+		default:
+			return true // add/remove/list/enable/disable are read-only
+		}
 	case "catalog":
 		if len(urls) < 2 {
 			return true

@@ -1,0 +1,36 @@
+{
+  "email": "you@example.com",
+  "password": "your-password",
+  "token": "",
+
+  "format": 4,
+  "videoFormat": 5,
+  "defaultOutputs": "audio",
+
+  "outPath": "/path/to/audio/downloads",
+  "videoOutPath": "/path/to/video/downloads",
+
+  "useFfmpegEnvVar": false,
+  "ffmpegNameStr": "/usr/bin/ffmpeg",
+
+  "rcloneEnabled": false,
+  "rcloneRemote": "myremote",
+  "rclonePath": "/remote/path/to/music",
+  "rcloneVideoPath": "/remote/path/to/video",
+  "deleteAfterUpload": false,
+  "rcloneTransfers": 4,
+
+  "catalogAutoRefresh": true,
+  "catalogRefreshTime": "05:00",
+  "catalogRefreshTimezone": "America/New_York",
+  "catalogRefreshInterval": "daily",
+
+  "watchedArtists": ["1125"],
+  "watchInterval": "1h",
+
+  "gotifyUrl": "https://gotify.example.com",
+  "gotifyToken": "your-gotify-token",
+
+  "skipSizePreCalculation": false,
+  "skipChapters": false
+}

@@ -60,3 +60,9 @@ type ArtistMetaCache struct {
 	CachedAt time.Time     `json:"cachedAt"`
 	Pages    []*ArtistMeta `json:"pages"`
 }
+
+// ArtistListCache stores the cached catalog.artists response.
+type ArtistListCache struct {
+	CachedAt time.Time       `json:"cachedAt"`
+	Resp     *ArtistListResp `json:"resp"`
+}

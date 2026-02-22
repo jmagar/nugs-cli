@@ -6,7 +6,9 @@ package main
 import (
 	"context"
 
+	"github.com/jmagar/nugs-cli/internal/catalog"
 	"github.com/jmagar/nugs-cli/internal/list"
+	"github.com/jmagar/nugs-cli/internal/model"
 )
 
 // buildListDeps wires root-level callbacks into the internal/list package.
@@ -15,6 +17,9 @@ func buildListDeps() *list.Deps {
 		GetShowMediaType:   getShowMediaType,
 		MatchesMediaFilter: matchesMediaFilter,
 		Playlist:           playlist,
+		FetchArtistList: func(ctx context.Context) (*model.ArtistListResp, error) {
+			return getArtistListCached(ctx, catalog.ArtistMetaCacheTTL)
+		},
 	}
 }
 
@@ -27,7 +32,7 @@ func applyShowFilter(artists []Artist, operator string, value int) []Artist {
 }
 
 func listArtists(ctx context.Context, jsonLevel string, showFilter string) error {
-	return list.ListArtists(ctx, jsonLevel, showFilter)
+	return list.ListArtists(ctx, jsonLevel, showFilter, buildListDeps())
 }
 
 func displayWelcome(ctx context.Context) error {

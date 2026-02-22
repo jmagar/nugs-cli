@@ -202,6 +202,9 @@ func run(cfg *Config, jsonLevel string) {
 	if handleCatalogCommand(ctx, cfg, jsonLevel) {
 		return
 	}
+	if handleWatchCommand(ctx, cfg, jsonLevel) {
+		return
+	}
 
 	// Handle "<artistID> latest/full" shorthand
 	if len(cfg.Urls) == 2 || len(cfg.Urls) == 3 {
@@ -249,6 +252,11 @@ func run(cfg *Config, jsonLevel string) {
 	// Handle "catalog gaps <artist_id> [...] fill" (requires auth)
 	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
 		handleCatalogGapsFill(ctx, cfg, streamParams, jsonLevel)
+		return
+	}
+
+	// Handle "watch check" (requires auth)
+	if handleWatchCheckCommand(ctx, cfg, streamParams, jsonLevel) {
 		return
 	}
 
@@ -398,7 +406,7 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 			handleErr("Catalog cache status failed.", err, true)
 		}
 	case "stats":
-		err := catalogStats(ctx, jsonLevel)
+		err := catalogStats(ctx, cfg, jsonLevel)
 		if err != nil {
 			handleErr("Catalog stats failed.", err, true)
 		}

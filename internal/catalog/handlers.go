@@ -172,6 +172,18 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 		return err
 	}
 
+	// Warm the artist list cache so that subsequent stats/list commands don't
+	// need a live API call. Best-effort: a failure here doesn't fail the update.
+	if deps.FetchArtistList != nil {
+		if artistList, fetchErr := deps.FetchArtistList(ctx); fetchErr == nil {
+			if writeErr := cache.WriteArtistListCache(artistList); writeErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: failed to cache artist list: %v\n", writeErr)
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: failed to fetch artist list during update: %v\n", fetchErr)
+		}
+	}
+
 	cacheDir, _ := cache.GetCacheDir()
 
 	if jsonLevel != "" {
@@ -312,108 +324,194 @@ func CatalogCacheStatus(jsonLevel string, deps *Deps) error {
 	return nil
 }
 
-// CatalogStats shows catalog statistics.
-func CatalogStats(_ context.Context, jsonLevel string) error {
-	catalog, err := cache.ReadCatalogCache()
-	if err != nil {
-		return err
+// countDownloadedShowsPerArtist counts shows per artist from the canonical
+// storage target. When rclone is enabled the remote paths are the target
+// (one bulk lsf call); otherwise the local output directories are scanned.
+// Returns (artistFolder→count, total, error).
+func countDownloadedShowsPerArtist(ctx context.Context, cfg *model.Config) (map[string]int, int, error) {
+	if cfg.RcloneEnabled {
+		return CountRemoteShowsPerArtist(ctx, cfg)
 	}
 
-	// Build statistics
-	showsPerArtist := make(map[int]int)
-	artistNames := make(map[int]string)
-	var earliestTime, latestTime time.Time
+	// Local scan: outPath + videoOutPath (deduplicated).
+	basePaths := []string{cfg.OutPath}
+	if cfg.VideoOutPath != "" && cfg.VideoOutPath != cfg.OutPath {
+		basePaths = append(basePaths, cfg.VideoOutPath)
+	}
 
-	for _, item := range catalog.Response.RecentItems {
-		showsPerArtist[item.ArtistID]++
-		artistNames[item.ArtistID] = item.ArtistName
-
-		if item.PerformanceDateStr != "" {
-			t, err := time.Parse("Jan 02, 2006", item.PerformanceDateStr)
-			if err == nil {
-				if earliestTime.IsZero() || t.Before(earliestTime) {
-					earliestTime = t
-				}
-				if latestTime.IsZero() || t.After(latestTime) {
-					latestTime = t
+	artistShows := make(map[string]map[string]struct{})
+	for _, basePath := range basePaths {
+		entries, err := os.ReadDir(basePath)
+		if err != nil {
+			continue
+		}
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				continue
+			}
+			artistFolder := entry.Name()
+			subEntries, err := os.ReadDir(filepath.Join(basePath, artistFolder))
+			if err != nil {
+				continue
+			}
+			if _, exists := artistShows[artistFolder]; !exists {
+				artistShows[artistFolder] = make(map[string]struct{})
+			}
+			for _, sub := range subEntries {
+				if sub.IsDir() {
+					artistShows[artistFolder][sub.Name()] = struct{}{}
 				}
 			}
 		}
 	}
 
-	var earliestDate, latestDate string
-	if !earliestTime.IsZero() {
-		earliestDate = earliestTime.Format("Jan 02, 2006")
+	counts := make(map[string]int, len(artistShows))
+	total := 0
+	for folder, shows := range artistShows {
+		count := len(shows)
+		if count > 0 {
+			counts[folder] = count
+			total += count
+		}
 	}
-	if !latestTime.IsZero() {
-		latestDate = latestTime.Format("Jan 02, 2006")
+	return counts, total, nil
+}
+
+// CatalogStats shows catalog statistics.
+// It uses catalog.artists (authoritative per-artist show counts) as the
+// denominator and scans the canonical storage target for "what I have".
+func CatalogStats(ctx context.Context, cfg *model.Config, jsonLevel string, deps *Deps) error {
+	if deps.FetchArtistList == nil {
+		return fmt.Errorf("FetchArtistList callback not configured")
 	}
 
-	type artistCount struct {
-		id    int
-		name  string
-		count int
+	// Fetch authoritative artist list from Nugs — NumShows is the real total.
+	artistListResp, err := deps.FetchArtistList(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch artist list: %w", err)
 	}
-	var sortedArtists []artistCount
-	for id, count := range showsPerArtist {
-		sortedArtists = append(sortedArtists, artistCount{id, artistNames[id], count})
+	artists := artistListResp.Response.Artists
+
+	// Count downloaded shows from the canonical storage target (remote if rclone
+	// enabled, local otherwise). One bulk rclone lsf call when remote.
+	localCounts, _, err := countDownloadedShowsPerArtist(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to count downloaded shows: %w", err)
 	}
-	sort.Slice(sortedArtists, func(i, j int) bool {
-		return sortedArtists[i].count > sortedArtists[j].count
+
+	// Build lookup: sanitized Nugs artist name → Artist entry.
+	type artistStat struct {
+		id         int
+		name       string
+		nugsTotal  int // NumShows from catalog.artists
+		downloaded int // folders found in storage target that match a Nugs artist
+	}
+
+	sanitizedToIdx := make(map[string]int, len(artists)) // sanitized name → index in stats slice
+	stats := make([]artistStat, len(artists))
+	totalNugsShows := 0
+	for i, a := range artists {
+		stats[i] = artistStat{id: a.ArtistID, name: a.ArtistName, nugsTotal: a.NumShows}
+		sanitizedToIdx[helpers.Sanitise(a.ArtistName)] = i
+		totalNugsShows += a.NumShows
+	}
+
+	// Match remote/local folder names to Nugs artists.
+	// Folders that don't match any Nugs artist (e.g. non-Nugs albums in the
+	// same directory) are silently ignored — they must not inflate the count.
+	for folder, count := range localCounts {
+		if idx, ok := sanitizedToIdx[folder]; ok {
+			stats[idx].downloaded += count
+		}
+	}
+
+	// Sum only the matched shows so non-Nugs folders don't skew the percentage.
+	totalDownloaded := 0
+	for _, s := range stats {
+		totalDownloaded += s.downloaded
+	}
+
+	overallPct := 0.0
+	if totalNugsShows > 0 {
+		overallPct = float64(totalDownloaded) / float64(totalNugsShows) * 100
+	}
+
+	// Sort by Nugs catalog size descending.
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].nugsTotal > stats[j].nugsTotal
 	})
 
-	top10 := sortedArtists
+	top10 := stats
 	if len(top10) > 10 {
-		top10 = sortedArtists[:10]
+		top10 = stats[:10]
 	}
 
 	if jsonLevel != "" {
 		topArtists := make([]map[string]any, len(top10))
 		for i, a := range top10 {
+			pct := 0.0
+			if a.nugsTotal > 0 {
+				pct = float64(a.downloaded) / float64(a.nugsTotal) * 100
+			}
 			topArtists[i] = map[string]any{
-				"artistID":   a.id,
-				"artistName": a.name,
-				"showCount":  a.count,
+				"artistID":      a.id,
+				"artistName":    a.name,
+				"nugsTotal":     a.nugsTotal,
+				"downloaded":    a.downloaded,
+				"downloadedPct": pct,
 			}
 		}
 		output := map[string]any{
-			"totalShows":   len(catalog.Response.RecentItems),
-			"totalArtists": len(showsPerArtist),
-			"dateRange": map[string]string{
-				"earliest": earliestDate,
-				"latest":   latestDate,
-			},
-			"topArtists": topArtists,
+			"totalNugsShows":  totalNugsShows,
+			"totalArtists":    len(artists),
+			"totalDownloaded": totalDownloaded,
+			"overallPct":      overallPct,
+			"topArtists":      topArtists,
 		}
-		if err := PrintJSON(output); err != nil {
-			return err
-		}
-	} else {
-		ui.PrintHeader("Catalog Statistics")
-
-		ui.PrintKeyValue("Total Shows", fmt.Sprintf("%d", len(catalog.Response.RecentItems)), ui.ColorGreen)
-		ui.PrintKeyValue("Total Artists", fmt.Sprintf("%d unique", len(showsPerArtist)), ui.ColorCyan)
-		ui.PrintKeyValue("Date Range", fmt.Sprintf("%s to %s", earliestDate, latestDate), "")
-
-		ui.PrintSection("Top 10 Artists by Show Count")
-
-		table := ui.NewTable([]ui.TableColumn{
-			{Header: "ID", Width: 10, Align: "right"},
-			{Header: "Artist", Width: 50, Align: "left"},
-			{Header: "Shows", Width: 10, Align: "right"},
-		})
-
-		for _, a := range top10 {
-			table.AddRow(
-				fmt.Sprintf("%d", a.id),
-				a.name,
-				fmt.Sprintf("%s%d%s", ui.ColorGreen, a.count, ui.ColorReset),
-			)
-		}
-
-		table.Print()
-		fmt.Println()
+		return PrintJSON(output)
 	}
+
+	ui.PrintHeader("Catalog Statistics")
+	ui.PrintKeyValue("Nugs Artists", fmt.Sprintf("%d", len(artists)), ui.ColorCyan)
+	ui.PrintKeyValue("Nugs Shows", fmt.Sprintf("%d total", totalNugsShows), ui.ColorGreen)
+	ui.PrintKeyValue("You Have", fmt.Sprintf("%d / %d (%.1f%%)", totalDownloaded, totalNugsShows, overallPct), ui.ColorYellow)
+
+	ui.PrintSection("Top 10 Artists by Nugs Show Count")
+
+	table := ui.NewTable([]ui.TableColumn{
+		{Header: "ID", Width: 10, Align: "right"},
+		{Header: "Artist", Width: 44, Align: "left"},
+		{Header: "On Nugs", Width: 9, Align: "right"},
+		{Header: "Have", Width: 7, Align: "right"},
+		{Header: "Coverage", Width: 10, Align: "right"},
+	})
+
+	for _, a := range top10 {
+		pct := 0.0
+		if a.nugsTotal > 0 {
+			pct = float64(a.downloaded) / float64(a.nugsTotal) * 100
+		}
+		coverageColor := ui.ColorReset
+		if a.downloaded > 0 {
+			coverageColor = ui.ColorRed
+			if pct >= 25 {
+				coverageColor = ui.ColorYellow
+			}
+			if pct >= 50 {
+				coverageColor = ui.ColorGreen
+			}
+		}
+		table.AddRow(
+			fmt.Sprintf("%d", a.id),
+			a.name,
+			fmt.Sprintf("%d", a.nugsTotal),
+			fmt.Sprintf("%d", a.downloaded),
+			fmt.Sprintf("%s%.1f%%%s", coverageColor, pct, ui.ColorReset),
+		)
+	}
+
+	table.Print()
+	fmt.Println()
 	return nil
 }
 
@@ -576,10 +674,10 @@ func CatalogGaps(ctx context.Context, artistIds []string, cfg *model.Config, jso
 }
 
 // CatalogGapsFill downloads all missing shows for an artist.
-func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {
+func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, jsonLevel string, mediaFilter model.MediaType, deps *Deps) (GapFillResult, error) {
 	analysis, err := AnalyzeArtistCatalog(ctx, artistId, cfg, jsonLevel, mediaFilter, deps)
 	if err != nil {
-		return err
+		return GapFillResult{}, err
 	}
 	missingShows := analysis.MissingShows
 
@@ -595,12 +693,12 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 				"cacheUsed":  analysis.CacheUsed,
 			}
 			if err := PrintJSON(output); err != nil {
-				return err
+				return GapFillResult{}, err
 			}
 		} else {
 			ui.PrintSuccess(fmt.Sprintf("All shows already downloaded for %s%s%s", ui.ColorCyan, analysis.ArtistName, ui.ColorReset))
 		}
-		return nil
+		return GapFillResult{ArtistName: analysis.ArtistName}, nil
 	}
 
 	if jsonLevel == "" {
@@ -693,6 +791,13 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 	attempted := successCount + failedCount
 	remaining := len(missingShows) - attempted
 
+	result := GapFillResult{
+		ArtistName:  analysis.ArtistName,
+		Downloaded:  successCount,
+		Failed:      failedCount,
+		Interrupted: interrupted,
+	}
+
 	if jsonLevel != "" {
 		output := map[string]any{
 			"success":       failedCount == 0 && !interrupted,
@@ -710,7 +815,7 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 			"cacheStaleUse": analysis.CacheStaleUse,
 		}
 		if err := PrintJSON(output); err != nil {
-			return err
+			return result, err
 		}
 	} else {
 		fmt.Println()
@@ -736,7 +841,7 @@ func CatalogGapsFill(ctx context.Context, artistId string, cfg *model.Config, st
 		fmt.Println()
 	}
 
-	return nil
+	return result, nil
 }
 
 // CatalogCoverage shows download coverage statistics for artists.

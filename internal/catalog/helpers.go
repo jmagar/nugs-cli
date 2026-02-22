@@ -221,6 +221,66 @@ func IsShowDownloaded(ctx context.Context, show *model.AlbArtResp, idx ArtistPre
 	return false
 }
 
+// CountRemoteShowsPerArtist counts downloaded show subdirectories per artist
+// using a single bulk `rclone lsf --recursive --dirs-only` call per remote
+// path. Audio and video paths are deduplicated so a show present in both is
+// counted once. Returns (artistFolder→count, total, error).
+func CountRemoteShowsPerArtist(ctx context.Context, cfg *model.Config) (map[string]int, int, error) {
+	// Collect unique remote destinations to scan.
+	audioDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	remoteDests := []string{audioDest}
+	if cfg.RcloneVideoPath != "" {
+		videoDest := cfg.RcloneRemote + ":" + cfg.RcloneVideoPath
+		if videoDest != audioDest {
+			remoteDests = append(remoteDests, videoDest)
+		}
+	}
+
+	// artistShows[artistFolder][showFolder] — deduplicates across paths.
+	artistShows := make(map[string]map[string]struct{})
+
+	for _, dest := range remoteDests {
+		cmd := exec.CommandContext(ctx, "rclone", "lsf", dest, "--dirs-only", "--recursive")
+		output, err := cmd.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
+				continue // remote path doesn't exist yet — not an error
+			}
+			return nil, 0, fmt.Errorf("rclone lsf %s: %w", dest, err)
+		}
+
+		for _, line := range strings.Split(string(output), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Entries look like "Artist Name/Show Folder/" — split into exactly
+			// two parts (artist + show) to stay at depth 1 within the remote base.
+			parts := strings.SplitN(strings.TrimSuffix(line, "/"), "/", 3)
+			if len(parts) == 2 {
+				artistFolder := parts[0]
+				showFolder := parts[1]
+				if _, exists := artistShows[artistFolder]; !exists {
+					artistShows[artistFolder] = make(map[string]struct{})
+				}
+				artistShows[artistFolder][showFolder] = struct{}{}
+			}
+		}
+	}
+
+	counts := make(map[string]int, len(artistShows))
+	total := 0
+	for artistFolder, shows := range artistShows {
+		count := len(shows)
+		if count > 0 {
+			counts[artistFolder] = count
+			total += count
+		}
+	}
+	return counts, total, nil
+}
+
 // PrintJSON marshals data to JSON and prints it.
 func PrintJSON(data any) error {
 	jsonData, err := json.MarshalIndent(data, "", "  ")

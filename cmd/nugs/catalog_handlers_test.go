@@ -167,6 +167,86 @@ func TestCatalogGapsForArtist_DefaultOutputIsMissingListOnly(t *testing.T) {
 	}
 }
 
+// TestHasPendingShows verifies that hasPendingShows correctly detects non-AVAILABLE shows.
+// This is the guard against re-introducing availType=2 (which returns only PREORDER shows,
+// causing IsShowDownloadable to filter everything out and gaps to always report "no missing shows").
+func TestHasPendingShows(t *testing.T) {
+	tests := []struct {
+		name  string
+		pages []*ArtistMeta
+		want  bool
+	}{
+		{
+			name:  "nil pages",
+			pages: nil,
+			want:  false,
+		},
+		{
+			name:  "all available shows",
+			pages: buildTestArtistMeta(1, "A", []*AlbArtResp{{AvailabilityTypeStr: "AVAILABLE"}}),
+			want:  false,
+		},
+		{
+			name:  "empty availabilityTypeStr treated as not-pending",
+			pages: buildTestArtistMeta(1, "A", []*AlbArtResp{{AvailabilityTypeStr: ""}}),
+			want:  false,
+		},
+		{
+			name:  "one preorder show",
+			pages: buildTestArtistMeta(1, "A", []*AlbArtResp{{AvailabilityTypeStr: "PREORDER"}}),
+			want:  true,
+		},
+		{
+			name: "mix of available and preorder",
+			pages: buildTestArtistMeta(1, "A", []*AlbArtResp{
+				{AvailabilityTypeStr: "AVAILABLE"},
+				{AvailabilityTypeStr: "PREORDER"},
+			}),
+			want: true,
+		},
+		{
+			name:  "case-insensitive available check",
+			pages: buildTestArtistMeta(1, "A", []*AlbArtResp{{AvailabilityTypeStr: "available"}}),
+			want:  false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hasPendingShows(tc.pages); got != tc.want {
+				t.Errorf("hasPendingShows() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGetArtistMetaCached_PreorderReducesTTL verifies that a cache containing PREORDER shows
+// uses the shorter preorderCacheTTL instead of the caller-supplied TTL.
+func TestGetArtistMetaCached_PreorderReducesTTL(t *testing.T) {
+	withTempHome(t)
+
+	preorderShow := &AlbArtResp{
+		ArtistName:          "Test Artist",
+		ContainerInfo:       "Upcoming Show",
+		ContainerID:         1001,
+		AvailabilityTypeStr: "PREORDER",
+	}
+	if err := writeArtistMetaCache("777", buildTestArtistMeta(777, "Test Artist", []*AlbArtResp{preorderShow})); err != nil {
+		t.Fatalf("failed to seed cache: %v", err)
+	}
+
+	// Cache is brand-new (< 1 hour old). Both 24h TTL and 1h preorder TTL allow it — should hit.
+	pages, cacheUsed, _, err := getArtistMetaCached(context.Background(), "777", 24*time.Hour)
+	if err != nil {
+		t.Fatalf("getArtistMetaCached failed: %v", err)
+	}
+	if !cacheUsed {
+		t.Fatalf("expected cache hit for fresh preorder cache")
+	}
+	if len(pages) == 0 || len(pages[0].Response.Containers) != 1 {
+		t.Fatalf("unexpected pages shape: %+v", pages)
+	}
+}
+
 func TestGetArtistMetaCached_UsesFreshCache(t *testing.T) {
 	withTempHome(t)
 

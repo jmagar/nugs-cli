@@ -6,7 +6,7 @@ import "time"
 type Config struct {
 	Email                  string   `json:"email"`
 	Password               string   `json:"password"`
-	Urls                   []string `json:"urls,omitempty"`
+	Urls                   []string `json:"-"`
 	Format                 int      `json:"format"`
 	OutPath                string   `json:"outPath"`
 	VideoOutPath           string   `json:"videoOutPath,omitempty"`
@@ -29,6 +29,10 @@ type Config struct {
 	CatalogRefreshTime     string   `json:"catalogRefreshTime,omitempty"`
 	CatalogRefreshTimezone string   `json:"catalogRefreshTimezone,omitempty"`
 	CatalogRefreshInterval string   `json:"catalogRefreshInterval,omitempty"`
+	WatchedArtists         []string `json:"watchedArtists,omitempty"`
+	WatchInterval          string   `json:"watchInterval,omitempty"` // Go duration string: "1h", "30m", "6h"
+	GotifyURL              string   `json:"gotifyUrl,omitempty"`
+	GotifyToken            string   `json:"gotifyToken,omitempty"`
 	SkipSizePreCalculation bool     `json:"skipSizePreCalculation,omitempty"`
 }
 
