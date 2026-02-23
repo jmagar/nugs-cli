@@ -10,17 +10,10 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-func printSuccess(msg string)  { ui.PrintSuccess(msg) }
-func printError(msg string)    { ui.PrintError(msg) }
-func printInfo(msg string)     { ui.PrintInfo(msg) }
-func printWarning(msg string)  { ui.PrintWarning(msg) }
-func printDownload(msg string) { ui.PrintDownload(msg) }
-func printUpload(msg string)   { ui.PrintUpload(msg) }
-func printMusic(msg string)    { ui.PrintMusic(msg) }
-
-func getMediaTypeIndicator(mediaType MediaType) string {
-	return ui.GetMediaTypeIndicator(mediaType)
-}
+func printSuccess(msg string) { ui.PrintSuccess(msg) }
+func printInfo(msg string)    { ui.PrintInfo(msg) }
+func printWarning(msg string) { ui.PrintWarning(msg) }
+func printMusic(msg string)   { ui.PrintMusic(msg) }
 
 func describeAudioFormat(format int) string      { return ui.DescribeAudioFormat(format) }
 func describeVideoFormat(videoFormat int) string { return ui.DescribeVideoFormat(videoFormat) }

@@ -9,10 +9,6 @@ import (
 	"github.com/jmagar/nugs-cli/internal/catalog"
 )
 
-func shouldAutoRefresh(cfg *Config) (bool, error) {
-	return catalog.ShouldAutoRefresh(cfg)
-}
-
 func autoRefreshIfNeeded(ctx context.Context, cfg *Config) error {
 	return catalog.AutoRefreshIfNeeded(ctx, cfg, buildCatalogDeps())
 }

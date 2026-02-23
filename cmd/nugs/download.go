@@ -31,22 +31,6 @@ func album(ctx context.Context, albumID string, cfg *Config, streamParams *Strea
 	return download.Album(ctx, albumID, cfg, streamParams, artResp, batchState, progressBox, buildDownloadDeps())
 }
 
-func processTrack(ctx context.Context, folPath string, trackNum, trackTotal int, cfg *Config, track *Track, streamParams *StreamParams, progressBox *ProgressBoxState) error {
-	return download.ProcessTrack(ctx, folPath, trackNum, trackTotal, cfg, track, streamParams, progressBox, buildDownloadDeps())
-}
-
-func preCalculateShowSize(ctx context.Context, tracks []Track, streamParams *StreamParams, cfg *Config) (int64, error) {
-	return download.PreCalculateShowSize(ctx, tracks, streamParams, cfg)
-}
-
-func getAlbumTotal(meta []*ArtistMeta) int {
-	return download.GetAlbumTotal(meta)
-}
-
-func getVideoSku(products []Product) int {
-	return download.GetVideoSku(products)
-}
-
 func getShowMediaType(show *AlbArtResp) model.MediaType {
 	return download.GetShowMediaType(show)
 }

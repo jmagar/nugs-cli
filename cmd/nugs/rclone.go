@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -119,29 +118,7 @@ func uploadWithProgressBox(ctx context.Context, localPath string, artistFolder s
 	return err
 }
 
-func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
-	return rclone.BuildRcloneUploadCommand(localPath, artistFolder, cfg, transfers, isVideo)
-}
-
-func parseHumanizedBytes(s string) int64 {
-	return rclone.ParseHumanizedBytes(s)
-}
-
-func parseRcloneProgressLine(line string) (int, string, string, string, bool) {
-	return rclone.ParseRcloneProgressLine(line)
-}
-
-func computeProgressPercent(uploaded, total string) (int, bool) {
-	return rclone.ComputeProgressPercent(uploaded, total)
-}
-
-func runRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, uploaded, total string)) error {
-	return rclone.RunRcloneWithProgress(cmd, onProgress)
-}
-
-func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
-	return rclone.BuildRcloneVerifyCommand(localPath, remoteFullPath)
-}
+func parseHumanizedBytes(s string) int64 { return rclone.ParseHumanizedBytes(s) }
 
 func remotePathExists(ctx context.Context, remotePath string, cfg *Config, isVideo bool) (bool, error) {
 	return rclone.RemotePathExists(ctx, remotePath, cfg, isVideo)

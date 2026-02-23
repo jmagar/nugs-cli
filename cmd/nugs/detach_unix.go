@@ -7,8 +7,6 @@ package main
 
 import "github.com/jmagar/nugs-cli/internal/runtime"
 
-func spawnDetached(args []string) (int, string, error) { return runtime.SpawnDetached(args) }
-
 func maybeDetachAndExit(args []string, urls []string) bool {
 	return runtime.MaybeDetachAndExit(args, urls)
 }

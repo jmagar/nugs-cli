@@ -78,15 +78,6 @@ func printProgress(percentage int, speed, downloaded, total string) {
 	renderProgress("DL", percentage, speed, downloaded, total, colorGreen, false)
 }
 
-func printUploadProgress(percentage int, speed, uploaded, total string) {
-	renderProgress("UP", percentage, speed, uploaded, total, colorBlue, true)
-}
-
-// getQualityName delegates to model.GetQualityName.
-func getQualityName(format int) string {
-	return model.GetQualityName(format)
-}
-
 // calculateBoxWidth determines optimal box width based on terminal size (Tier 1 enhancement)
 // Returns a width between 79 (minimum) and 120 (maximum) characters
 func calculateBoxWidth() int {

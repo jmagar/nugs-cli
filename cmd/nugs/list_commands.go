@@ -23,14 +23,6 @@ func buildListDeps() *list.Deps {
 	}
 }
 
-func parseShowFilter(filter string) (string, int, error) {
-	return list.ParseShowFilter(filter)
-}
-
-func applyShowFilter(artists []Artist, operator string, value int) []Artist {
-	return list.ApplyShowFilter(artists, operator, value)
-}
-
 func listArtists(ctx context.Context, jsonLevel string, showFilter string) error {
 	return list.ListArtists(ctx, jsonLevel, showFilter, buildListDeps())
 }
@@ -49,10 +41,6 @@ func listArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 
 func listArtistLatestShows(ctx context.Context, artistId string, limit int, jsonLevel string) error {
 	return list.ListArtistLatestShows(ctx, artistId, limit, jsonLevel)
-}
-
-func resolveCatPlistId(ctx context.Context, plistUrl string) (string, error) {
-	return list.ResolveCatPlistID(ctx, plistUrl)
 }
 
 func catalogPlist(ctx context.Context, plistId, legacyToken string, cfg *Config, streamParams *StreamParams) error {

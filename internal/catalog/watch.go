@@ -174,6 +174,9 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 		} else {
 			totalDownloaded += result.Downloaded
 			totalFailed += result.Failed
+			if len(cfg.WatchedArtists) > 1 {
+				sendArtistUpdate(ctx, deps.Notify, result, artistID)
+			}
 			if result.Interrupted {
 				break // user cancelled mid-download; don't process remaining artists
 			}
@@ -182,6 +185,21 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 
 	sendWatchSummary(ctx, deps.Notify, totalDownloaded, totalFailed, artistErrors)
 	return nil
+}
+
+// sendArtistUpdate fires a per-artist notification immediately after that artist's gap-fill
+// completes with downloads. Only called when multiple artists are being watched —
+// single-artist runs rely on the final sendWatchSummary to avoid a redundant double-ping.
+func sendArtistUpdate(ctx context.Context, notify func(ctx context.Context, title, message string, priority int) error, result GapFillResult, artistID string) {
+	if notify == nil || result.Downloaded == 0 {
+		return
+	}
+	name := result.ArtistName
+	if name == "" {
+		name = artistID
+	}
+	msg := fmt.Sprintf("%d new show(s) downloaded for %s", result.Downloaded, name)
+	_ = notify(ctx, "Nugs Watch", msg, 5)
 }
 
 // sendWatchSummary fires a single Gotify notification summarising the watch check outcome.

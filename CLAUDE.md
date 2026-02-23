@@ -26,7 +26,7 @@ This is the main development guide for contributors. For specialized topics, see
 ## Quick Start
 
 **Prerequisites:**
-- Go 1.16 or later
+- Go 1.24+ (required — `go.mod` specifies `go 1.24`)
 - FFmpeg (for video downloads)
 - Make (required for building)
 
@@ -73,9 +73,9 @@ Root: Command Orchestration (cmd/nugs/main.go)
 ```
 
 **Key Stats:**
-- **50 Go source files** across 13 internal packages
+- **112 Go source files** across 14 internal packages
 - **Module:** `github.com/jmagar/nugs-cli`
-- **Entry Point:** `cmd/nugs/main.go` (648 lines)
+- **Entry Point:** `cmd/nugs/main.go` (675 lines)
 - **No Circular Dependencies** - Strict upward dependency flow
 
 ### Core Components
@@ -154,12 +154,15 @@ GOOS=linux GOARCH=arm64 go build ./cmd/nugs  # Linux ARM check
 | Data type | `internal/model/` | New response struct |
 | Path logic | `internal/helpers/` | Filename sanitization |
 | Display | `internal/ui/` | Progress rendering |
-| Catalog cmd | `internal/catalog/` | New gap analysis |
+| Catalog cmd | `internal/catalog/` | New gap analysis, watch mode |
 | Download | `internal/download/` | New format support |
 | Config field | `internal/config/` | New option parsing |
 | Cloud upload | `internal/rclone/` | Upload verification |
 | Process ctrl | `internal/runtime/` | New signal handler |
 | Cache logic | `internal/cache/` | Index optimization |
+| Notifications | `internal/notify/` | Gotify push alerts |
+| Listing cmds | `internal/list/` | Artist/show list output |
+| Shell complete | `internal/completion/` | Completions for bash/zsh/fish |
 
 ### Adding New Functionality
 
@@ -298,17 +301,25 @@ ffmpeg -hide_banner \
 
 Run `go test ./... -cover` to get the latest coverage report.
 
-**Well-tested components:**
-- Media type detection
-- Upload progress tracking
-- FFmpeg binary resolution
+**Current coverage** (run `go test ./... -cover` for latest):
+
+| Package | Coverage | Status |
+|---------|----------|--------|
+| `internal/cache` | 45.5% | Good |
+| `internal/helpers` | 41.6% | Good |
+| `internal/rclone` | 39.2% | Good |
+| `internal/catalog` | 31.1% | Growing (watch_test.go: 558 lines) |
+| `internal/download` | 13.9% | Needs work |
+| `internal/model` | 22.2% | Partial |
+| `cmd/nugs` | 6.0% | Needs work |
+| `internal/api` | 0.0% | Needs work |
+| `internal/config` | 0.0% | Needs work |
 
 **Key areas needing coverage:**
-- `internal/api` - Authentication, API calls
-- `internal/download` - Download logic, FFmpeg
-- `internal/cache` - File locking, concurrency
-- `internal/catalog` - Catalog operations
-- `internal/config` - Config loading
+- `internal/api` - Authentication, rate limiting, circuit breaker
+- `internal/config` - Config loading, all 23 fields
+- `internal/download` - Download logic, FFmpeg integration
+- `internal/notify` - Gotify client (new)
 
 ### Test Utilities
 
@@ -516,84 +527,33 @@ make build
 
 ---
 
-## Recent Improvements
+## Current Features
 
-### Video First-Class Citizen (2026-02-08)
+Key capabilities implemented as of the current branch (see `git log` for full history):
 
-**Implemented:**
-- `defaultOutputs` config field for media type preference
-- Media type modifiers for all catalog commands
-- Emoji indicators for media availability (🎵 audio, 🎬 video, 📹 both)
-- Video-aware gap detection and coverage
-- Both-format downloads
+**Watch / Catalog Monitoring**
+- `nugs watch [artistID]` — Poll for new shows and auto-download or notify
+- Systemd integration: `nugs watch install` generates a `.service` + `.timer` unit
+- Files: `internal/catalog/watch.go`, `watch_systemd.go`, `watch_systemd_other.go`
 
-**Command Examples:**
-```bash
-# List commands with media filters
-nugs list video                  # Only video artists
-nugs list 1125 video             # Billy Strings videos only
+**Gotify Push Notifications**
+- Download completions, catalog updates, and errors trigger Gotify push alerts
+- Config fields: `gotifyURL`, `gotifyToken`, `gotifyPriority`
+- File: `internal/notify/gotify.go`
 
-# Gap detection
-nugs gaps 1125 video             # Video gaps only
-nugs gaps 1125 both              # Shows missing either format
-nugs gaps 1125 fill video        # Download all video gaps
-```
+**API Resilience**
+- Rate limiting, circuit breaker, and automatic retry with backoff
+- Prevents hammering the Nugs.net API during batch operations
+- File: `internal/api/`
 
-**Files Modified:**
-- `internal/model/structs.go` - Added `defaultOutputs` to Config, MediaType enum
-- `internal/catalog/handlers.go` - Media-aware analysis functions
-- `internal/catalog/media_filter.go` - Media type detection and helpers
-- `internal/helpers/` - Path detection for audio/video formats
-- `cmd/nugs/main.go` - Media type command parsing and download integration
+**Media Type Filtering**
+- All catalog commands accept `audio`, `video`, or `both` modifiers
+- Emoji indicators in output: 🎵 audio, 🎬 video, 📹 both
+- `nugs gaps 1125 video` — video-only gap detection and fill
 
-### Shell Completions (2026-02-06)
-
-**Implemented:**
-- `nugs completion <shell>` - Generate shell-specific completion scripts
-- Support for bash, zsh, fish, and PowerShell
-- Comprehensive command, flag, and argument completions
-
-**Installation:**
-```bash
-# Zsh (oh-my-zsh) - most common setup
-mkdir -p ~/.oh-my-zsh/custom/completions
-nugs completion zsh > ~/.oh-my-zsh/custom/completions/_nugs
-# Add to .zshrc BEFORE oh-my-zsh.sh: fpath=($ZSH/custom/completions $fpath)
-
-# Bash
-nugs completion bash > ~/.bash_completion.d/nugs
-
-# Fish
-nugs completion fish > ~/.config/fish/completions/nugs.fish
-```
-
-### Catalog Caching System (2026-02-05)
-
-**Implemented:**
-- Local catalog caching at `~/.cache/nugs/`
-- Four index files for fast lookups
-- Five catalog commands (update, cache, stats, latest, gaps)
-- Auto-refresh with configurable schedule
-- Gap detection with --ids-only flag
-- JSON output for all catalog commands
-- File locking for concurrent safety
-
-**Files Created:**
-- `internal/catalog/handlers.go` - Catalog command implementations
-- `internal/catalog/autorefresh.go` - Auto-refresh logic
-- `internal/cache/filelock_unix.go` - POSIX file locking
-
-### Code Quality Improvements (2026-02-05)
-
-**Replaced deprecated APIs:**
-- `ioutil.ReadFile` → `os.ReadFile` (Go 1.16+)
-- `ioutil.WriteFile` → `os.WriteFile` (Go 1.16+)
-- 10 occurrences updated across codebase
-
-**Added concurrent safety:**
-- POSIX file locking with `syscall.Flock`
-- Atomic write operations (temp file + rename)
-- Retry logic for lock acquisition
+**Shell Completions**
+- `nugs completion <shell>` — generates bash/zsh/fish/PowerShell completions
+- Zsh (oh-my-zsh): `nugs completion zsh > ~/.oh-my-zsh/custom/completions/_nugs`
 
 ---
 

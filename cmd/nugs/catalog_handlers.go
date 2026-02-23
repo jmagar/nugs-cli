@@ -70,6 +70,3 @@ func catalogList(ctx context.Context, artistIds []string, cfg *Config, jsonLevel
 	return catalog.CatalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter, buildCatalogDeps())
 }
 
-func catalogListForArtist(ctx context.Context, artistId string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {
-	return catalog.CatalogListForArtist(ctx, artistId, cfg, jsonLevel, mediaFilter, buildCatalogDeps())
-}
