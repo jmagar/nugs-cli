@@ -78,15 +78,6 @@ func printProgress(percentage int, speed, downloaded, total string) {
 	renderProgress("DL", percentage, speed, downloaded, total, colorGreen, false)
 }
 
-func printUploadProgress(percentage int, speed, uploaded, total string) {
-	renderProgress("UP", percentage, speed, uploaded, total, colorBlue, true)
-}
-
-// getQualityName delegates to model.GetQualityName.
-func getQualityName(format int) string {
-	return model.GetQualityName(format)
-}
-
 // calculateBoxWidth determines optimal box width based on terminal size (Tier 1 enhancement)
 // Returns a width between 79 (minimum) and 120 (maximum) characters
 func calculateBoxWidth() int {
@@ -446,18 +437,18 @@ func generateSparkline(values []float64, maxWidth int) string {
 
 // completionSnapshot holds all state needed to render the completion summary.
 type completionSnapshot struct {
-	ShowTitle        string
+	ShowTitle         string
 	AccumulatedTracks int
-	TrackTotal       int
-	ShowTotal        string
-	TotalDuration    time.Duration
-	AccumulatedBytes int64
-	SkippedTracks    int
-	ErrorTracks      int
-	RcloneEnabled    bool
-	UploadDuration   time.Duration
-	UploadTotal      string
-	LinesDrawn       int
+	TrackTotal        int
+	ShowTotal         string
+	TotalDuration     time.Duration
+	AccumulatedBytes  int64
+	SkippedTracks     int
+	ErrorTracks       int
+	RcloneEnabled     bool
+	UploadDuration    time.Duration
+	UploadTotal       string
+	LinesDrawn        int
 }
 
 // renderCompletionSummary displays final summary when all tracks complete

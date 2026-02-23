@@ -10,7 +10,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"unicode"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
@@ -26,17 +26,30 @@ type ArtistPresenceIndex struct {
 	RemoteListErr error
 }
 
-var remoteCheckWarnOnce sync.Once
-
 var (
 	ErrRemoteArtistFolderListFailed = errors.New("failed to list remote artist folders")
 )
 
-// WarnRemoteCheckError prints a one-time warning about remote check failures.
+// remoteCheckErrCount tracks how many remote check warnings have been emitted
+// so large batch runs don't flood the log.
+var remoteCheckErrCount atomic.Int64
+
+// remoteCheckErrLimit is the number of individual warnings to show before
+// switching to a single suppression notice.
+const remoteCheckErrLimit = 3
+
+// WarnRemoteCheckError logs a warning about a remote existence check failure.
+// The first remoteCheckErrLimit failures are logged individually; subsequent
+// failures emit a single suppression notice to avoid flooding the log during
+// large catalog scans with persistent network issues.
 func WarnRemoteCheckError(err error) {
-	remoteCheckWarnOnce.Do(func() {
-		ui.PrintWarning(fmt.Sprintf("Remote existence checks failed; treating as not found. First error: %v", err))
-	})
+	n := remoteCheckErrCount.Add(1)
+	switch {
+	case n <= remoteCheckErrLimit:
+		ui.PrintWarning(fmt.Sprintf("Remote existence check failed: %v", err))
+	case n == remoteCheckErrLimit+1:
+		ui.PrintWarning("Remote existence checks keep failing; suppressing further warnings to reduce noise")
+	}
 }
 
 // ListAllRemoteArtistFolders lists all artist folders on the remote.
@@ -155,16 +168,28 @@ func BuildArtistPresenceIndex(ctx context.Context, artistName string, cfg *model
 	}
 
 	if cfg.RcloneEnabled && deps.ListRemoteArtistFolders != nil {
-		// For remote, determine isVideo based on mediaFilter:
-		// - Audio: check audio path (isVideo=false)
-		// - Video: check video path (isVideo=true)
-		// - Both/Unknown: check audio path (isVideo=false) as primary
-		isVideo := mediaFilter == model.MediaTypeVideo
-		remoteFolders, err := deps.ListRemoteArtistFolders(ctx, idx.ArtistFolder, cfg, isVideo)
-		if err != nil {
-			idx.RemoteListErr = err
-		} else {
-			idx.RemoteFolders = remoteFolders
+		remoteTargets := []bool{false}
+		if mediaFilter == model.MediaTypeVideo {
+			remoteTargets = []bool{true}
+		} else if mediaFilter == model.MediaTypeBoth || mediaFilter == model.MediaTypeUnknown {
+			remoteTargets = []bool{false, true}
+		}
+
+		for _, isVideo := range remoteTargets {
+			remoteFolders, err := deps.ListRemoteArtistFolders(ctx, idx.ArtistFolder, cfg, isVideo)
+			if err != nil {
+				mediaType := "audio"
+				if isVideo {
+					mediaType = "video"
+				}
+				ui.PrintWarning(fmt.Sprintf("Remote %s folder check failed for %s: %v",
+					mediaType, idx.ArtistFolder, err))
+				idx.RemoteListErr = err
+				break
+			}
+			for name := range remoteFolders {
+				idx.RemoteFolders[name] = struct{}{}
+			}
 		}
 	}
 
@@ -194,6 +219,66 @@ func IsShowDownloaded(ctx context.Context, show *model.AlbArtResp, idx ArtistPre
 	}
 
 	return false
+}
+
+// CountRemoteShowsPerArtist counts downloaded show subdirectories per artist
+// using a single bulk `rclone lsf --recursive --dirs-only` call per remote
+// path. Audio and video paths are deduplicated so a show present in both is
+// counted once. Returns (artistFolder→count, total, error).
+func CountRemoteShowsPerArtist(ctx context.Context, cfg *model.Config) (map[string]int, int, error) {
+	// Collect unique remote destinations to scan.
+	audioDest := cfg.RcloneRemote + ":" + cfg.RclonePath
+	remoteDests := []string{audioDest}
+	if cfg.RcloneVideoPath != "" {
+		videoDest := cfg.RcloneRemote + ":" + cfg.RcloneVideoPath
+		if videoDest != audioDest {
+			remoteDests = append(remoteDests, videoDest)
+		}
+	}
+
+	// artistShows[artistFolder][showFolder] — deduplicates across paths.
+	artistShows := make(map[string]map[string]struct{})
+
+	for _, dest := range remoteDests {
+		cmd := exec.CommandContext(ctx, "rclone", "lsf", dest, "--dirs-only", "--recursive")
+		output, err := cmd.Output()
+		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
+				continue // remote path doesn't exist yet — not an error
+			}
+			return nil, 0, fmt.Errorf("rclone lsf %s: %w", dest, err)
+		}
+
+		for _, line := range strings.Split(string(output), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+			// Entries look like "Artist Name/Show Folder/" — split into exactly
+			// two parts (artist + show) to stay at depth 1 within the remote base.
+			parts := strings.SplitN(strings.TrimSuffix(line, "/"), "/", 3)
+			if len(parts) == 2 {
+				artistFolder := parts[0]
+				showFolder := parts[1]
+				if _, exists := artistShows[artistFolder]; !exists {
+					artistShows[artistFolder] = make(map[string]struct{})
+				}
+				artistShows[artistFolder][showFolder] = struct{}{}
+			}
+		}
+	}
+
+	counts := make(map[string]int, len(artistShows))
+	total := 0
+	for artistFolder, shows := range artistShows {
+		count := len(shows)
+		if count > 0 {
+			counts[artistFolder] = count
+			total += count
+		}
+	}
+	return counts, total, nil
 }
 
 // PrintJSON marshals data to JSON and prints it.

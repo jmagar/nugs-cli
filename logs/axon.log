@@ -1,0 +1,265 @@
+{"timestamp":"2026-02-22T13:23:38.021347Z","level":"INFO","fields":{"message":"command=embed start_url=https:///home/jmagar/workspace/nugs/docs/sessions/2026-02-22-fix-availtype-preorder-cache-gaps.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:23:38.047837Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.072883Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.091040Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:23:38.100644Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.118211Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.144457Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:23:38.190240Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.190577Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.190814Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.191694Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.283905Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.284351Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.285681Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.285912Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:38.287010Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.428576Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:23:59.474698Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.547469Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.548156Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.548401Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.582089Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.660684Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.661172Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.662735Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.663314Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.665230Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:23:59.681197Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:06.068234Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:06.094122Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:24:06.094659Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:10.750789Z","level":"INFO","fields":{"message":"command=query start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:10.779530Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T13:24:13.454564Z","level":"INFO","fields":{"message":"command=query complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:17.385468Z","level":"INFO","fields":{"message":"command=query start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T13:24:17.417440Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.784086Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:32:59.819034Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.884983Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.885636Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.885810Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.908037Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.972898Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.973320Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.974138Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.974309Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:32:59.975374Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:02.884415Z","level":"INFO","fields":{"message":"command=embed start_url=https:///home/jmagar/workspace/nugs/docs/sessions/2026-02-22-watch-command-implementation.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:02.910636Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:02.935789Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:02.963614Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:02.999112Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:19.740371Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:19.766957Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.858606Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.858858Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.859018Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.859889Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.951351Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.951590Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.951786Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.952759Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.953003Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:19.972350Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:22.493204Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:22.518956Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.604393Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.604622Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.604831Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.605621Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.693505Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.693708Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.693939Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.695120Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:22.695420Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.398016Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:26.423616Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.507528Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.507830Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.508007Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.508912Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.575058Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.575341Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.598203Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.598387Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.599307Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:26.620817Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:31.688409Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:31.714709Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.800217Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.800467Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.800617Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.801422Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.888515Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.888868Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.889955Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.890112Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.891136Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:31.910693Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:36.766958Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T20:33:36.793352Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T20:33:36.794913Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:09:57.591280Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:09:57.618701Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.692962Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.693202Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.693346Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.694707Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.785542Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.786313Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.786693Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.787647Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.787788Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:09:57.799583Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:01.012985Z","level":"INFO","fields":{"message":"command=embed start_url=https:///home/jmagar/workspace/nugs/docs/sessions/2026-02-22-catalog-stats-coverage-percentage.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:01.040601Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:01.069999Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:01.070543Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:01.106071Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:12.455873Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:12.483124Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.572983Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.573209Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.573353Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.574271Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.663403Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.663586Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.663785Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.664574Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.664714Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:12.674579Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:17.217648Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:17.245958Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:17.247529Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:20.161181Z","level":"INFO","fields":{"message":"command=embed start_url=https:///home/jmagar/workspace/nugs/docs/sessions/2026-02-22-catalog-stats-coverage-percentage.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:20.187781Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:20.208991Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:20.234855Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:20.270954Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:33.892680Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:33.918880Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:33.984193Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:33.984477Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:33.984749Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:33.985588Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.074531Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.074772Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.076428Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.076601Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.077618Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T21:10:34.088349Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:36.964319Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:36.990202Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:40.188671Z","level":"INFO","fields":{"message":"command=query start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T21:10:40.223421Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.090098Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:09:52.116879Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.195382Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.195735Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.195997Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.196920Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.265608Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.291529Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.293457Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.293949Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.295634Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:52.298910Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:09:56.457569Z","level":"INFO","fields":{"message":"command=embed start_url=https:///home/jmagar/workspace/nugs/docs/sessions/2026-02-22-gotify-notifications-watch-check.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:09:56.483602Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:56.491431Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:56.532602Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:09:56.570689Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:05.615439Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:05.641983Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.728231Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.728479Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.728641Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.729473Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.820475Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.821999Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.822342Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.823411Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.823845Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:05.827744Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:13.292909Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:13.319132Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.405199Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.405775Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.405976Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.406749Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.494495Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.496000Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.496212Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.496333Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.498230Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:13.500975Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:17.614776Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:17.641249Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:17.641249Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:22.688446Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:22.716206Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.784107Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.784336Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.784556Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.812717Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.887125Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.887635Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.889023Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.889245Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.889753Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:22.892540Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:26.053993Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:26.083372Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.168415Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.168797Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.169227Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.170151Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.277431Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.277873Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.279524Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.279779Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.280279Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T22:10:26.283849Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:30.017049Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:30.043505Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T22:10:30.043707Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.547890Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:06.575394Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.639979Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.640221Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.640451Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.641628Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.730505Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.730885Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.732441Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.732618Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:06.732881Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:10.343628Z","level":"INFO","fields":{"message":"command=embed start_url=https://docs/sessions/2026-02-22-systemd-fix-readme-canonical.md render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:10.385824Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:10.386690Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:10.415123Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:10.454168Z","level":"INFO","fields":{"message":"command=embed enqueued","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:23.685251Z","level":"INFO","fields":{"message":"command=status start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:23.712412Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.778649Z","level":"INFO","fields":{"message":"relation \"axon_crawl_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.779014Z","level":"INFO","fields":{"message":"relation \"axon_extract_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.779195Z","level":"INFO","fields":{"message":"relation \"axon_batch_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.780601Z","level":"INFO","fields":{"message":"relation \"axon_embed_jobs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.870252Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_status\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.870471Z","level":"INFO","fields":{"message":"relation \"idx_axon_extract_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.870778Z","level":"INFO","fields":{"message":"relation \"idx_axon_batch_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.871875Z","level":"INFO","fields":{"message":"relation \"idx_axon_crawl_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.872130Z","level":"INFO","fields":{"message":"relation \"idx_axon_embed_jobs_pending\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:23.874909Z","level":"INFO","fields":{"message":"command=status complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:27.561999Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:27.592752Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:27.594271Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:30.807949Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=nugs-cli profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:30.834116Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:30.835861Z","level":"WARN","fields":{"message":"retrieve variant lookup failed for docs/sessions/2026-02-22-systemd-fix-readme-canonical.md: HTTP status client error (404 Not Found) for url (http://127.0.0.1:53333/collections/nugs-cli/points/scroll)"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:30.838640Z","level":"WARN","fields":{"message":"retrieve variant lookup failed for docs/sessions/2026-02-22-systemd-fix-readme-canonical.md: HTTP status client error (404 Not Found) for url (http://127.0.0.1:53333/collections/nugs-cli/points/scroll)"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:30.839518Z","level":"WARN","fields":{"message":"retrieve variant lookup failed for docs/sessions/2026-02-22-systemd-fix-readme-canonical.md: HTTP status client error (404 Not Found) for url (http://127.0.0.1:53333/collections/nugs-cli/points/scroll)"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:35.977105Z","level":"INFO","fields":{"message":"command=retrieve start_url= render_mode=AutoSwitch embed=true collection=cortex profile=HighStable"},"target":"axon::crates::core::logging"}
+{"timestamp":"2026-02-22T23:01:36.003747Z","level":"INFO","fields":{"message":"relation \"axon_command_runs\" already exists, skipping"},"target":"sqlx::postgres::notice"}
+{"timestamp":"2026-02-22T23:01:36.004945Z","level":"INFO","fields":{"message":"command=retrieve complete","status":"done"},"target":"axon::crates::core::logging"}

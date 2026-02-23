@@ -52,7 +52,7 @@ _nugs_completion() {
     _init_completion || return
 
     # Top-level commands
-    local commands="list catalog status cancel help completion"
+    local commands="list catalog watch status cancel help completion"
 
     # Flags
     local flags="-f -F -o --force-video --skip-videos --skip-chapters --json --help"
@@ -104,6 +104,11 @@ _nugs_completion() {
                 COMPREPLY=($(compgen -W "fill --ids-only" -- "$cur"))
             fi
             ;;
+        watch)
+            if [[ $cword -eq 2 ]]; then
+                COMPREPLY=($(compgen -W "add remove list check enable disable" -- "$cur"))
+            fi
+            ;;
         completion)
             if [[ $cword -eq 2 ]]; then
                 COMPREPLY=($(compgen -W "bash zsh fish powershell" -- "$cur"))
@@ -122,10 +127,11 @@ const ZshCompletion = `#compdef nugs
 # Then add to ~/.zshrc: fpath=(~/.zsh/completion $fpath)
 
 _nugs() {
-    local -a commands catalog_cmds config_cmds
+    local -a commands catalog_cmds config_cmds watch_cmds
     commands=(
         'list:List artists or shows'
         'catalog:Catalog management commands'
+        'watch:Artist watch management'
         'status:Show runtime status'
         'cancel:Cancel running crawl'
         'help:Display help'
@@ -147,6 +153,15 @@ _nugs() {
         'enable:Enable auto-refresh'
         'disable:Disable auto-refresh'
         'set:Configure auto-refresh settings'
+    )
+
+    watch_cmds=(
+        'add:Add artist to watch list'
+        'remove:Remove artist from watch list'
+        'list:Show watched artists'
+        'check:Update catalog and download new shows'
+        'enable:Enable systemd watch timer'
+        'disable:Disable systemd watch timer'
     )
 
     _arguments -C \
@@ -185,6 +200,11 @@ _nugs() {
                         _values 'gap options' 'fill[Download missing shows]' '--ids-only[Show IDs only]'
                     fi
                     ;;
+                watch)
+                    if [[ $CURRENT -eq 2 ]]; then
+                        _describe -t watch_cmds 'watch commands' watch_cmds
+                    fi
+                    ;;
                 completion)
                     if [[ $CURRENT -eq 2 ]]; then
                         _values 'shells' 'bash' 'zsh' 'fish' 'powershell'
@@ -208,6 +228,7 @@ complete -c nugs -f
 # Top-level commands
 complete -c nugs -n "__fish_use_subcommand" -a "list" -d "List artists or shows"
 complete -c nugs -n "__fish_use_subcommand" -a "catalog" -d "Catalog management"
+complete -c nugs -n "__fish_use_subcommand" -a "watch" -d "Artist watch management"
 complete -c nugs -n "__fish_use_subcommand" -a "status" -d "Show runtime status"
 complete -c nugs -n "__fish_use_subcommand" -a "cancel" -d "Cancel running crawl"
 complete -c nugs -n "__fish_use_subcommand" -a "help" -d "Display help"
@@ -248,6 +269,14 @@ complete -c nugs -n "__fish_seen_subcommand_from catalog; and __fish_seen_argume
 complete -c nugs -n "__fish_seen_subcommand_from catalog; and __fish_seen_argument -s gaps" -a "fill" -d "Download missing shows"
 complete -c nugs -n "__fish_seen_subcommand_from catalog; and __fish_seen_argument -s gaps" -l ids-only -d "Show IDs only"
 
+# watch command
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "add" -d "Add artist to watch list"
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "remove" -d "Remove artist from watch list"
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "list" -d "Show watched artists"
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "check" -d "Update catalog and download new shows"
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "enable" -d "Enable systemd watch timer"
+complete -c nugs -n "__fish_seen_subcommand_from watch" -n "test (count (commandline -opc)) -eq 2" -a "disable" -d "Disable systemd watch timer"
+
 # completion command
 complete -c nugs -n "__fish_seen_subcommand_from completion" -n "test (count (commandline -opc)) -eq 2" -a "bash" -d "Bash completion"
 complete -c nugs -n "__fish_seen_subcommand_from completion" -n "test (count (commandline -opc)) -eq 2" -a "zsh" -d "Zsh completion"
@@ -266,6 +295,7 @@ Register-ArgumentCompleter -Native -CommandName nugs -ScriptBlock {
     $commands = @{
         'list' = 'List artists or shows'
         'catalog' = 'Catalog management commands'
+        'watch' = 'Artist watch management'
         'status' = 'Show runtime status'
         'cancel' = 'Cancel running crawl'
         'help' = 'Display help'
@@ -287,6 +317,15 @@ Register-ArgumentCompleter -Native -CommandName nugs -ScriptBlock {
         'enable' = 'Enable auto-refresh'
         'disable' = 'Disable auto-refresh'
         'set' = 'Configure auto-refresh settings'
+    }
+
+    $watchCommands = @{
+        'add' = 'Add artist to watch list'
+        'remove' = 'Remove artist from watch list'
+        'list' = 'Show watched artists'
+        'check' = 'Update catalog and download new shows'
+        'enable' = 'Enable systemd watch timer'
+        'disable' = 'Disable systemd watch timer'
     }
 
     $shells = @('bash', 'zsh', 'fish', 'powershell')
@@ -374,6 +413,13 @@ Register-ArgumentCompleter -Native -CommandName nugs -ScriptBlock {
                     [System.Management.Automation.CompletionResult]::new('fill', 'fill', 'ParameterValue', 'Download missing shows')
                     [System.Management.Automation.CompletionResult]::new('--ids-only', '--ids-only', 'ParameterValue', 'Show IDs only')
                 )
+            }
+        }
+        'watch' {
+            if ($position -eq 2) {
+                return $watchCommands.GetEnumerator() | ForEach-Object {
+                    [System.Management.Automation.CompletionResult]::new($_.Key, $_.Key, 'ParameterValue', $_.Value)
+                } | Where-Object { $_.CompletionText -like "$wordToComplete*" }
             }
         }
         'completion' {

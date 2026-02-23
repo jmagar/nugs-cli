@@ -6,7 +6,6 @@ package main
 import "github.com/jmagar/nugs-cli/internal/api"
 
 // URL pattern indices returned by checkURL as the second return value.
-// Each constant corresponds to a regex pattern position in regexStrings.
 const (
 	urlTypeAlbum           = 0  // /release/<id>
 	urlTypePlaylist        = 1  // /#/playlists/playlist/<id>
@@ -22,18 +21,12 @@ const (
 	urlTypeNumericID       = 11 // bare numeric ID
 )
 
-var regexStrings = api.GetRegexStrings()
-
 func parsePaidLstreamShowID(query string) (string, error) {
 	return api.ParsePaidLstreamShowID(query)
 }
 
 func isLikelyLivestreamSegments(segURLs []string) (bool, error) {
 	return api.IsLikelyLivestreamSegments(segURLs)
-}
-
-func parseTimestamps(start, end string) (string, string, error) {
-	return api.ParseTimestamps(start, end)
 }
 
 func parseStreamParams(userID string, subInfo *SubInfo, isPromo bool) (*StreamParams, error) {

@@ -26,7 +26,6 @@ Built for Deadheads, jam band fans, and anyone who wants their live music collec
   - [Auto-Refresh](#auto-refresh)
   - [Gap Detection](#gap-detection)
   - [Rclone Integration](#rclone-integration)
-- [Coming Soon](#coming-soon)
   - [Watch Command](#watch-command)
 - [FFmpeg Setup](#ffmpeg-setup)
 - [Command Reference](#command-reference)
@@ -60,6 +59,8 @@ Built for Deadheads, jam band fans, and anyone who wants their live music collec
 
 ### Power User Features
 - **Rclone integration**: Auto-upload to cloud storage
+- **Watch automation**: Monitor artists, auto-download new shows via systemd timer
+- **Push notifications**: Gotify alerts when new shows are downloaded
 - **Flexible configuration**: CLI args override config file
 - **File locking**: Prevents corruption from concurrent writes
 
@@ -136,7 +137,7 @@ nugs list 1125  # Billy Strings
 
 Now that you've seen what Nugs CLI can do, let's customize it for your workflow.
 
-The config file can be placed in one of three locations (checked in this order):
+The config file can be placed in one of three locations (checked in this order, first found wins — no merging):
 1. `./config.json` - Current directory
 2. `~/.nugs/config.json` - Recommended location
 3. `~/.config/nugs/config.json` - XDG standard location
@@ -160,10 +161,12 @@ On first run, you'll be prompted to create it.
 | Option | Description | Default |
 |--------|-------------|---------|
 | `token` | Auth token for Apple/Google accounts ([guide](token.md)) | - |
-| `useFfmpegEnvVar` | Use FFmpeg from PATH vs script dir | `true` |
-| `forceVideo` | Force video when audio+video available | `false` |
-| `skipVideos` | Skip videos in artist downloads | `false` |
-| `skipChapters` | Skip chapter markers for videos | `false` |
+| `useFfmpegEnvVar` | Use FFmpeg from PATH vs local dir | `false` |
+| `ffmpegNameStr` | Custom FFmpeg binary name or absolute path | `"ffmpeg"` |
+| `skipChapters` | Skip embedding chapter markers in video files | `false` |
+| `skipSizePreCalculation` | Skip pre-download size calculation (faster start, no ETA) | `false` |
+| `forceVideo` | **Deprecated** — use `defaultOutputs: "video"` instead | `false` |
+| `skipVideos` | **Deprecated** — use `defaultOutputs: "audio"` instead | `false` |
 
 ### Rclone Settings
 
@@ -189,6 +192,15 @@ On first run, you'll be prompted to create it.
 | `catalogRefreshTime` | Time to refresh (24-hour format) | `"05:00"` |
 | `catalogRefreshTimezone` | Timezone for refresh time | `"America/New_York"` |
 | `catalogRefreshInterval` | Refresh frequency | `"daily"` |
+
+### Watch & Notifications
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `watchedArtists` | Artist IDs to monitor for new shows | `[]` |
+| `watchInterval` | How often to check for new shows (Go duration: `30m`, `1h`, `6h`) | `"1h"` |
+| `gotifyUrl` | Gotify server URL for push notifications | `""` |
+| `gotifyToken` | Gotify app token | `""` |
 
 Auto-refresh is **enabled by default** to keep your catalog up-to-date. Configure via commands:
 
@@ -273,6 +285,13 @@ nugs -F 5 video-url                # 4K video
 nugs grab -o /mnt/storage/music 23329  # Custom output path
 ```
 
+**Hotkeys during an active download:**
+
+| Key | Action |
+|-----|--------|
+| `Shift+P` | Pause / resume current download |
+| `Shift+C` | Cancel current download |
+
 ---
 
 ### Browse & List
@@ -280,9 +299,10 @@ nugs grab -o /mnt/storage/music 23329  # Custom output path
 **List all artists:**
 
 ```bash
-nugs list                # All artists with media indicators
+nugs list                # All artists with media indicators (🎵 🎬 📹)
 nugs list audio          # Only artists with audio shows
 nugs list video          # Only artists with video shows
+nugs list both           # Only artists with both formats
 ```
 
 **View artist's shows:**
@@ -291,6 +311,7 @@ nugs list video          # Only artists with video shows
 nugs list 1125           # Billy Strings (all shows with 🎵 🎬 📹 indicators)
 nugs list 1125 audio     # Billy Strings audio shows only
 nugs list 1125 video     # Billy Strings video shows only
+nugs list 1125 both      # Billy Strings shows with both formats
 nugs list 461            # Grateful Dead
 ```
 
@@ -640,36 +661,54 @@ nugs grab 23329  # Downloads and uploads to gdrive:/Music/Nugs/
 
 ---
 
-## Coming Soon
-
 ### Watch Command
 
-The `nugs watch <artist_id>` command is in development and will provide automated monitoring for your favorite artists:
+Monitor artists and automatically download new shows on a schedule. Uses a systemd user timer (Linux) — no root required.
 
-**Features:**
-- **Auto-discovery**: Watches for new shows when the catalog refreshes
-- **Smart downloads**: Automatically downloads new additions for watched artists
-- **Gap filling**: Automatically fills all gaps in your collection for the artist
-- **Multiple artists**: Watch multiple artists simultaneously
-- **Notification support**: Get notified when new shows are downloaded
-
-**Example usage:**
+**Manage your watch list:**
 
 ```bash
-# Watch Billy Strings for new shows
-nugs watch 1125
-
-# Watch multiple artists
-nugs watch 1125 461 1045
-
-# List watched artists
-nugs watch list
-
-# Stop watching an artist
-nugs watch remove 1125
+nugs watch add 1125       # Watch Billy Strings
+nugs watch add 461        # Watch Grateful Dead
+nugs watch list           # Show watched artists with names
+nugs watch remove 461     # Stop watching an artist
 ```
 
-This feature will combine catalog auto-refresh with gap detection to create a fully automated download workflow for your favorite artists.
+**One-shot check** (updates catalog and downloads gaps for all watched artists):
+
+```bash
+nugs watch check
+```
+
+**Automated scheduling** (systemd timer, fires on boot + every `watchInterval`):
+
+```bash
+nugs watch enable         # Write unit files, enable and start timer
+nugs watch disable        # Stop, disable, remove unit files
+```
+
+**With Gotify push notifications** (add to `~/.nugs/config.json`):
+
+```json
+{
+  "watchedArtists": ["1125", "461"],
+  "watchInterval": "1h",
+  "gotifyUrl": "http://your-gotify-server:8080",
+  "gotifyToken": "your-app-token"
+}
+```
+
+Notification behavior:
+- **New downloads**: single summary notification (priority 5) — `"3 new show(s) downloaded"`
+- **Errors only**: error notification (priority 7) with failure details
+- **Nothing new**: silent — no hourly noise when everything is up-to-date
+
+View timer logs:
+
+```bash
+journalctl --user -u nugs-watch.service -f
+systemctl --user list-timers
+```
 
 ---
 
@@ -777,32 +816,54 @@ nugs list video
 
 ### Catalog Commands
 
+Short-form aliases (recommended):
+
 ```bash
-nugs update                             # Update catalog cache
-nugs cache                              # View cache status
-nugs stats                              # View statistics
-nugs latest [limit] [audio|video|both]  # View latest additions (with media filter)
-nugs gaps <id> [audio|video|both]       # List missing shows (with media type)
-nugs gaps <id> [...]  --ids-only        # IDs only (for piping)
-nugs gaps <id> [audio|video|both] fill  # Auto-download missing shows
-nugs coverage [ids...] [audio|video|both]  # Coverage stats (with media filter)
-nugs refresh enable                     # Enable auto-refresh
-nugs refresh disable                    # Disable auto-refresh
-nugs refresh set                        # Configure auto-refresh
+nugs update                              # Update catalog cache
+nugs cache                               # View cache status
+nugs stats                               # View statistics
+nugs latest [limit] [audio|video|both]   # View latest additions
+nugs gaps <id> [audio|video|both]        # List missing shows
+nugs gaps <id> [...]  --ids-only         # IDs only (for piping)
+nugs gaps <id> [audio|video|both] fill   # Auto-download missing shows (auth required)
+nugs coverage [ids...] [audio|video|both] # Coverage stats
+nugs refresh enable                      # Enable auto-refresh
+nugs refresh disable                     # Disable auto-refresh
+nugs refresh set                         # Configure auto-refresh (interactive)
+```
+
+> All short forms are equivalent to `nugs catalog <cmd>` (e.g. `nugs update` = `nugs catalog update`, `nugs refresh set` = `nugs catalog config set`).
+
+### Watch Commands
+
+```bash
+nugs watch add <artistID>          # Add artist to watch list
+nugs watch remove <artistID>       # Remove artist from watch list
+nugs watch list                    # Show watched artists with names
+nugs watch check [audio|video]     # Update catalog + fill gaps for all watched artists (auth required)
+nugs watch enable                  # Write systemd unit files and enable timer (Linux)
+nugs watch disable                 # Stop timer and remove unit files
+```
+
+### Session Commands
+
+```bash
+nugs status   # Show status of any active download (PID, progress, current item)
+nugs cancel   # Cancel the active download session
 ```
 
 ### Global Options
 
 ```bash
---format, -f         Audio format (1-5)
---videoformat, -F    Video format (1-5)
---outpath, -o        Output directory
---force-video        Force video over audio
---skip-videos        Skip videos in downloads
---skip-chapters      Skip chapter markers
---json               JSON output level
---help, -h           Show help
+-f, --format <1-5>      Audio format (1=ALAC 2=FLAC 3=MQA 4=360RA 5=AAC)
+-F <1-5>                Video format (1=480p 2=720p 3=1080p 4=1440p 5=4K)
+-o <path>               Output directory (overrides outPath in config)
+--skip-chapters         Skip chapter markers in video files
+--json <level>          JSON output: minimal | standard | extended | raw
+--help, -h              Show help
 ```
+
+> `--force-video` and `--skip-videos` are deprecated. Use `defaultOutputs: "video"` or `defaultOutputs: "audio"` in config instead.
 
 ### Shell Completions
 
@@ -867,9 +928,13 @@ nugs completion powershell >> $PROFILE
 ```
 
 **Completions include:**
-- Commands: `list`, `catalog`, `status`, `cancel`, `completion`, `help`
-- Catalog subcommands: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `config`
-- Flags: `-f`, `-F`, `-o`, `--json`, `--force-video`, etc.
+- Top-level commands: `list`, `catalog`, `watch`, `status`, `cancel`, `completion`, `help`
+- Short aliases: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `refresh`, `grab`
+- Catalog subcommands: `update`, `cache`, `stats`, `latest`, `gaps`, `coverage`, `config`, `list`
+- Watch subcommands: `add`, `remove`, `list`, `check`, `enable`, `disable`
+- Config subcommands: `enable`, `disable`, `set`
+- Media modifiers: `audio`, `video`, `both`
+- Flags: `-f`, `-F`, `-o`, `--json`, `--skip-chapters`
 - Format values: `1-5` for audio/video formats
 - JSON levels: `minimal`, `standard`, `extended`, `raw`
 - Shell types: `bash`, `zsh`, `fish`, `powershell`

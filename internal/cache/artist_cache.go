@@ -10,6 +10,44 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
+const artistListCacheFile = "artist-list.json"
+
+// ReadArtistListCache reads the cached catalog.artists response.
+// Returns the response, the time it was cached, and any error.
+// A missing cache file returns os.ErrNotExist.
+func ReadArtistListCache() (*model.ArtistListResp, time.Time, error) {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	data, err := os.ReadFile(filepath.Join(cacheDir, artistListCacheFile))
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	var cached model.ArtistListCache
+	if err := json.Unmarshal(data, &cached); err != nil {
+		return nil, time.Time{}, fmt.Errorf("failed to parse artist list cache: %w", err)
+	}
+	return cached.Resp, cached.CachedAt, nil
+}
+
+// WriteArtistListCache atomically writes the catalog.artists response to cache.
+func WriteArtistListCache(resp *model.ArtistListResp) error {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		return err
+	}
+	cached := model.ArtistListCache{
+		CachedAt: time.Now(),
+		Resp:     resp,
+	}
+	data, err := json.Marshal(cached)
+	if err != nil {
+		return fmt.Errorf("failed to marshal artist list cache: %w", err)
+	}
+	return atomicWriteFile(filepath.Join(cacheDir, artistListCacheFile), data)
+}
+
 // GetArtistMetaCachePath returns the path for an artist's cached metadata.
 // Validates artistID to prevent directory traversal attacks.
 func GetArtistMetaCachePath(artistID string) (string, error) {

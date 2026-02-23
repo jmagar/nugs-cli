@@ -6,7 +6,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"time"
 
 	"github.com/dustin/go-humanize"
@@ -23,16 +22,16 @@ const (
 func checkRcloneAvailable(quiet bool) error    { return rclone.CheckRcloneAvailable(quiet) }
 func checkRclonePathOnline(cfg *Config) string { return rclone.CheckRclonePathOnline(cfg) }
 
-func uploadToRclone(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
+func uploadToRclone(ctx context.Context, localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
 	if progressBox != nil {
-		return uploadWithProgressBox(localPath, artistFolder, cfg, progressBox, isVideo)
+		return uploadWithProgressBox(ctx, localPath, artistFolder, cfg, progressBox, isVideo)
 	}
-	return rclone.UploadToRclone(context.Background(), localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
+	return rclone.UploadToRclone(ctx, localPath, artistFolder, cfg, nil, isVideo, nil, nil, nil)
 }
 
 // uploadWithProgressBox handles upload with progress box updates and phase tracking.
 // Separated from uploadToRclone for better testability and maintainability.
-func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
+func uploadWithProgressBox(ctx context.Context, localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
 	// Set upload phase and start time
 	progressBox.Mu.Lock()
 	progressBox.SetPhaseLocked(model.PhaseUpload)
@@ -89,7 +88,7 @@ func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, p
 		renderProgressBox(progressBox)
 	}
 
-	err := rclone.UploadToRclone(context.Background(), localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
+	err := rclone.UploadToRclone(ctx, localPath, artistFolder, cfg, progressFn, isVideo, onPreUpload, nil, nil)
 
 	// Set upload duration and final state (success or error)
 	progressBox.Mu.Lock()
@@ -119,29 +118,7 @@ func uploadWithProgressBox(localPath string, artistFolder string, cfg *Config, p
 	return err
 }
 
-func buildRcloneUploadCommand(localPath, artistFolder string, cfg *Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
-	return rclone.BuildRcloneUploadCommand(localPath, artistFolder, cfg, transfers, isVideo)
-}
-
-func parseHumanizedBytes(s string) int64 {
-	return rclone.ParseHumanizedBytes(s)
-}
-
-func parseRcloneProgressLine(line string) (int, string, string, string, bool) {
-	return rclone.ParseRcloneProgressLine(line)
-}
-
-func computeProgressPercent(uploaded, total string) (int, bool) {
-	return rclone.ComputeProgressPercent(uploaded, total)
-}
-
-func runRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, uploaded, total string)) error {
-	return rclone.RunRcloneWithProgress(cmd, onProgress)
-}
-
-func buildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
-	return rclone.BuildRcloneVerifyCommand(localPath, remoteFullPath)
-}
+func parseHumanizedBytes(s string) int64 { return rclone.ParseHumanizedBytes(s) }
 
 func remotePathExists(ctx context.Context, remotePath string, cfg *Config, isVideo bool) (bool, error) {
 	return rclone.RemotePathExists(ctx, remotePath, cfg, isVideo)

@@ -58,6 +58,10 @@ func ShouldAutoRefresh(cfg *model.Config) (bool, error) {
 	todayRefreshTime := time.Date(now.Year(), now.Month(), now.Day(), hour, minute, 0, 0, loc)
 
 	switch cfg.CatalogRefreshInterval {
+	case "hourly":
+		if time.Since(meta.LastUpdated) >= time.Hour {
+			return true, nil
+		}
 	case "daily":
 		if now.After(todayRefreshTime) && meta.LastUpdated.Before(todayRefreshTime) {
 			return true, nil
@@ -167,15 +171,15 @@ func ConfigureAutoRefresh(cfg *model.Config) error {
 		return fmt.Errorf("invalid timezone: %s", timezoneInput)
 	}
 
-	fmt.Printf("Enter refresh interval (daily or weekly, default daily): ")
+	fmt.Printf("Enter refresh interval (hourly, daily, or weekly, default daily): ")
 	intervalInput, _ := reader.ReadString('\n')
 	intervalInput = strings.TrimSpace(intervalInput)
 	if intervalInput == "" {
 		intervalInput = "daily"
 	}
 
-	if intervalInput != "daily" && intervalInput != "weekly" {
-		return fmt.Errorf("invalid interval: %s (must be 'daily' or 'weekly')", intervalInput)
+	if intervalInput != "hourly" && intervalInput != "daily" && intervalInput != "weekly" {
+		return fmt.Errorf("invalid interval: %s (must be 'hourly', 'daily', or 'weekly')", intervalInput)
 	}
 
 	cfg.CatalogAutoRefresh = true

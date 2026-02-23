@@ -87,6 +87,26 @@ func resolveArtistName(allMeta []*model.ArtistMeta) string {
 	return "Unknown Artist"
 }
 
+func sortArtistsByNameCaseInsensitive(artists []model.Artist) {
+	type indexedArtist struct {
+		artist model.Artist
+		lower  string
+	}
+	indexed := make([]indexedArtist, len(artists))
+	for i, artist := range artists {
+		indexed[i] = indexedArtist{
+			artist: artist,
+			lower:  strings.ToLower(artist.ArtistName),
+		}
+	}
+	sort.Slice(indexed, func(i, j int) bool {
+		return indexed[i].lower < indexed[j].lower
+	})
+	for i := range indexed {
+		artists[i] = indexed[i].artist
+	}
+}
+
 // collectContainers gathers containers from metadata, applying optional media filtering.
 func collectContainers(allMeta []*model.ArtistMeta, deps *Deps, mf model.MediaType) []model.ContainerWithDate {
 	var containers []model.ContainerWithDate
@@ -215,11 +235,19 @@ func renderShowsJSON(containers []model.ContainerWithDate, artistId string, arti
 }
 
 // ListArtists fetches and displays a formatted list of all artists.
-func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error {
+// If deps.FetchArtistList is set it is used (supports caching); otherwise
+// falls back to a direct api.GetArtistList call.
+func ListArtists(ctx context.Context, jsonLevel string, showFilter string, deps ...*Deps) error {
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist catalog...")
 	}
-	artistList, err := api.GetArtistList(ctx)
+
+	fetch := api.GetArtistList
+	if len(deps) > 0 && deps[0] != nil && deps[0].FetchArtistList != nil {
+		fetch = deps[0].FetchArtistList
+	}
+
+	artistList, err := fetch(ctx)
 	if err != nil {
 		ui.PrintError("Failed to get artist list")
 		return err
@@ -266,9 +294,7 @@ func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error
 			return nil
 		}
 
-		sort.Slice(artists, func(i, j int) bool {
-			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
-		})
+		sortArtistsByNameCaseInsensitive(artists)
 
 		output := model.ArtistListOutput{
 			Artists: make([]model.ArtistOutput, len(artists)),
@@ -288,9 +314,7 @@ func ListArtists(ctx context.Context, jsonLevel string, showFilter string) error
 		}
 		fmt.Println(string(jsonData))
 	} else {
-		sort.Slice(artists, func(i, j int) bool {
-			return strings.ToLower(artists[i].ArtistName) < strings.ToLower(artists[j].ArtistName)
-		})
+		sortArtistsByNameCaseInsensitive(artists)
 
 		if showFilter != "" {
 			ui.PrintSection(fmt.Sprintf("Found %d artists with shows %s%d", len(artists), filterOperator, filterValue))

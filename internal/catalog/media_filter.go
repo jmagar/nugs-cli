@@ -5,10 +5,17 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
+	"sync"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
+)
+
+const (
+	perArtistExistenceCheckConcurrency = 8
+	coverageArtistConcurrency          = 6
 )
 
 // ShowExistsForMedia checks if a show exists locally or remotely for a specific media type.
@@ -58,16 +65,39 @@ func ShowExistsForMediaIndexed(ctx context.Context, show *model.AlbArtResp, cfg 
 		return false // Index is valid, not found
 	}
 
-	// Fallback: remote index errored or rclone disabled, use slow per-show check
+	// Fallback: the bulk remote folder listing failed (e.g., network timeout,
+	// invalid remote config, permission error), so the pre-built index is
+	// incomplete. We must check each show individually via rclone to avoid
+	// false negatives that would cause re-downloading already-uploaded shows.
 	if cfg.RcloneEnabled && idx.RemoteListErr != nil && deps.RemotePathExists != nil {
-		isVideo := mediaType.HasVideo()
 		remotePath := resolver.RemoteShowPath(show)
-		exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
-		if err != nil {
-			WarnRemoteCheckError(err)
-			return false
+
+		// Determine which remote locations to check based on media type.
+		// Audio and video may be stored in separate remote base paths
+		// (rclonePath vs rcloneVideoPath), so the isVideo flag selects
+		// which remote to query. For explicit types, check only the
+		// corresponding remote. For "both" or "unknown", check both
+		// audio (isVideo=false) then video (isVideo=true) to ensure we
+		// find the show regardless of which format was uploaded.
+		remoteTargets := []bool{mediaType == model.MediaTypeVideo}
+		if mediaType == model.MediaTypeBoth || mediaType == model.MediaTypeUnknown {
+			remoteTargets = []bool{false, true} // check audio first, then video
 		}
-		return exists
+
+		var lastErr error
+		for _, isVideo := range remoteTargets {
+			exists, err := deps.RemotePathExists(ctx, remotePath, cfg, isVideo)
+			if err != nil {
+				WarnRemoteCheckError(err)
+				lastErr = err
+				continue // try next target; one remote may work even if the other fails
+			}
+			if exists {
+				return true // found in at least one remote location
+			}
+		}
+		_ = lastErr
+		return false // not found in any checked remote location
 	}
 
 	return false
@@ -88,10 +118,41 @@ func MatchesMediaFilter(showMedia, filter model.MediaType) bool {
 	return false
 }
 
+// IsShowDownloadable returns true only when metadata indicates content is
+// currently downloadable/streamable (audio tracks or a video SKU).
+func IsShowDownloadable(show *model.AlbArtResp) bool {
+	if show == nil {
+		return false
+	}
+	if show.AvailabilityTypeStr != "" &&
+		!strings.EqualFold(show.AvailabilityTypeStr, model.AvailableAvailabilityType) {
+		return false
+	}
+	if len(show.Tracks) > 0 || len(show.Songs) > 0 {
+		return true
+	}
+	if len(show.Products) > 0 {
+		return true
+	}
+	if len(show.ProductFormatList) > 0 {
+		return true
+	}
+	return false
+}
+
 // classifyShows iterates all shows, applies media filtering, and populates the analysis
 // with show statuses and download counts.
 func classifyShows(ctx context.Context, allShows []*model.AlbArtResp, mediaFilter model.MediaType, presenceIdx *ArtistPresenceIndex, cfg *model.Config, deps *Deps, analysis *model.ArtistCatalogAnalysis) {
+	type candidate struct {
+		show      *model.AlbArtResp
+		showMedia model.MediaType
+	}
+
+	candidates := make([]candidate, 0, len(allShows))
 	for _, show := range allShows {
+		if !IsShowDownloadable(show) {
+			continue
+		}
 		var showMedia model.MediaType
 		if deps.GetShowMediaType != nil {
 			showMedia = deps.GetShowMediaType(show)
@@ -102,15 +163,49 @@ func classifyShows(ctx context.Context, allShows []*model.AlbArtResp, mediaFilte
 		if !MatchesMediaFilter(showMedia, mediaFilter) {
 			continue
 		}
+		candidates = append(candidates, candidate{show: show, showMedia: showMedia})
+	}
 
-		downloaded := ShowExistsForMediaIndexed(ctx, show, cfg, mediaFilter, presenceIdx, deps)
-		status := model.ShowStatus{
-			Show:       show,
-			Downloaded: downloaded,
-			MediaType:  showMedia,
+	if len(candidates) == 0 {
+		return
+	}
+
+	statuses := make([]model.ShowStatus, len(candidates))
+	workerCount := min(perArtistExistenceCheckConcurrency, len(candidates))
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+
+	for range workerCount {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				candidateItem := candidates[idx]
+				downloaded := ShowExistsForMediaIndexed(ctx, candidateItem.show, cfg, mediaFilter, presenceIdx, deps)
+				statuses[idx] = model.ShowStatus{
+					Show:       candidateItem.show,
+					Downloaded: downloaded,
+					MediaType:  candidateItem.showMedia,
+				}
+			}
+		}()
+	}
+
+	for i := range candidates {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		case jobs <- i:
 		}
+	}
+	close(jobs)
+	wg.Wait()
+
+	for _, status := range statuses {
 		analysis.Shows = append(analysis.Shows, status)
-		if downloaded {
+		if status.Downloaded {
 			analysis.Downloaded++
 		} else {
 			analysis.MissingShows = append(analysis.MissingShows, status)

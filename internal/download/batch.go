@@ -23,40 +23,47 @@ func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParam
 		return err
 	}
 	if len(meta) == 0 {
-		return errors.New(
-			"The API didn't return any artist metadata.")
+		return errors.New("The API didn't return any artist metadata.")
 	}
 	if len(meta[0].Response.Containers) == 0 {
 		return errors.New("The API didn't return any containers for this artist.")
 	}
 	fmt.Println(meta[0].Response.Containers[0].ArtistName)
-	albumTotal := GetAlbumTotal(meta)
 
-	// Create batch state for multi-album progress tracking (Tier 4 enhancement)
-	batchState := &model.BatchProgressState{
-		TotalAlbums: albumTotal,
-		StartTime:   time.Now(),
-	}
-
-	// Create ONE progress box for the entire batch (reused across all albums)
-	sharedProgressBox := &model.ProgressBoxState{
-		RcloneEnabled:  cfg.RcloneEnabled,
-		BatchState:     batchState,
-		StartTime:      time.Now(),
-		RenderInterval: model.DefaultProgressRenderInterval,
-	}
-	if deps.SetCurrentProgressBox != nil {
-		deps.SetCurrentProgressBox(sharedProgressBox)
-	}
+	batchState, progressBox := prepareBatchProgress(meta, cfg, deps)
 	defer func() {
 		if deps.SetCurrentProgressBox != nil {
 			deps.SetCurrentProgressBox(nil)
 		}
 	}()
 
+	return processArtistAlbums(ctx, meta, cfg, streamParams, batchState, progressBox, deps)
+}
+
+// prepareBatchProgress initialises the shared batch and progress state for an artist download.
+func prepareBatchProgress(meta []*model.ArtistMeta, cfg *model.Config, deps *Deps) (*model.BatchProgressState, *model.ProgressBoxState) {
+	albumTotal := GetAlbumTotal(meta)
+	batchState := &model.BatchProgressState{
+		TotalAlbums: albumTotal,
+		StartTime:   time.Now(),
+	}
+	progressBox := &model.ProgressBoxState{
+		RcloneEnabled:  cfg.RcloneEnabled,
+		BatchState:     batchState,
+		StartTime:      time.Now(),
+		RenderInterval: model.DefaultProgressRenderInterval,
+	}
+	if deps.SetCurrentProgressBox != nil {
+		deps.SetCurrentProgressBox(progressBox)
+	}
+	return batchState, progressBox
+}
+
+// processArtistAlbums iterates over all containers in the artist metadata, downloading each album.
+func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *model.Config, streamParams *model.StreamParams, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
 	albumCount := 0
-	for _, _meta := range meta {
-		for _, container := range _meta.Response.Containers {
+	for _, m := range meta {
+		for _, container := range m.Response.Containers {
 			if deps.WaitIfPausedOrCancelled != nil {
 				if err := deps.WaitIfPausedOrCancelled(); err != nil {
 					return err
@@ -64,24 +71,31 @@ func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParam
 			}
 
 			albumCount++
+			progressBox.Mu.Lock()
 			batchState.CurrentAlbum = albumCount
 			batchState.CurrentTitle = container.ContainerInfo
+			progressBox.Mu.Unlock()
 
-			// Pass the shared progress box to reuse it (no new boxes created!)
+			var err error
 			if cfg.SkipVideos {
-				err = Album(ctx, "", cfg, streamParams, container, batchState, sharedProgressBox, deps)
+				err = Album(ctx, "", cfg, streamParams, container, batchState, progressBox, deps)
 			} else {
 				// Can't re-use this metadata as it doesn't have any product info for videos.
-				err = Album(ctx, strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, sharedProgressBox, deps)
+				err = Album(ctx, strconv.Itoa(container.ContainerID), cfg, streamParams, nil, batchState, progressBox, deps)
 			}
 			if err != nil {
+				progressBox.Mu.Lock()
 				batchState.Failed++
+				progressBox.Mu.Unlock()
 				if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 					return err
 				}
-				helpers.HandleErr("Item failed.", err, false)
+				ui.PrintError(fmt.Sprintf("Album %d/%d failed (ID %d, %s): %v",
+					albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
 			} else {
+				progressBox.Mu.Lock()
 				batchState.Complete++
+				progressBox.Mu.Unlock()
 			}
 		}
 	}
@@ -143,7 +157,7 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 		// Playlists don't have artist folder structure
 		err = deps.UploadPath(ctx, plistPath, "", cfg, progressBox, false)
 		if err != nil {
-			helpers.HandleErr("Upload failed.", err, false)
+			ui.PrintError(fmt.Sprintf("Playlist upload failed (%s): %v", plistName, err))
 		}
 	}
 
@@ -164,7 +178,8 @@ func processPlaylistTracks(ctx context.Context, tracks []*model.Track, plistPath
 			if deps.IsCrawlCancelledErr != nil && deps.IsCrawlCancelledErr(err) {
 				return err
 			}
-			helpers.HandleErr("Track failed.", err, false)
+			ui.PrintError(fmt.Sprintf("Track %d/%d failed (%s): %v",
+				trackNum, trackTotal, track.SongTitle, err))
 		}
 	}
 	return nil

@@ -982,6 +982,6 @@ func Gaps(ctx context.Context, artistID int, cfg *model.Config, deps Deps) error
 
 ## See Also
 
-- [CLAUDE.md](./CLAUDE.md) - Development guide and quick start
+- [CLAUDE.md](../CLAUDE.md) - Development guide and quick start
 - [CONFIG.md](./CONFIG.md) - Configuration reference
-- [README.md](./README.md) - User documentation
+- [README.md](../README.md) - User documentation
