@@ -8,31 +8,222 @@ Built for Deadheads, jam band fans, and anyone who wants their live music collec
 [![Go Version](https://img.shields.io/badge/Go-1.16+-blue.svg)](https://golang.org)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-lightgrey)](https://github.com/jmagar/nugs-cli/releases)
 
-## Table of Contents
+## Contents
 
+- [Naming](#naming)
+- [Capabilities And Boundaries](#capabilities-and-boundaries)
+- [Install](#install)
+- [Quickstart](#quickstart)
+- [Client Configuration](#client-configuration)
+- [Runtime Surfaces](#runtime-surfaces)
+- [MCP Tool Reference](#mcp-tool-reference)
+- [CLI Reference](#cli-reference)
+- [Authentication](#authentication)
+- [Safety And Trust Model](#safety-and-trust-model)
+- [Architecture](#architecture)
+- [Distribution Contract](#distribution-contract)
+- [Development](#development)
+- [Verification](#verification)
+- [Deployment](#deployment)
+- [Troubleshooting](#troubleshooting)
+- [Documentation](#documentation)
 - [Features](#features)
 - [Installation](#installation)
-  - [Pre-built Binaries](#pre-built-binaries)
-  - [Building from Source](#building-from-source)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Supported Media Types](#supported-media-types)
 - [Usage](#usage)
-  - [Downloading Content](#downloading-content)
-  - [Browse & List](#browse--list)
-  - [Catalog Management](#catalog-management)
-  - [JSON Output](#json-output)
 - [Advanced Features](#advanced-features)
-  - [Auto-Refresh](#auto-refresh)
-  - [Gap Detection](#gap-detection)
-  - [Rclone Integration](#rclone-integration)
-  - [Watch Command](#watch-command)
 - [FFmpeg Setup](#ffmpeg-setup)
 - [Command Reference](#command-reference)
-  - [Shell Completions](#shell-completions)
 - [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-- [Disclaimer](#disclaimer)
+- [Related Servers](#related-servers)
+- [License](#license)
+
+## Naming
+
+The repository and release identity are still `nugs-cli`; the installed binary
+is `nugs`. This is a Go CLI for Nugs.net downloads and catalog management, not
+an RMCP server package. There is no `nugs-rmcp` npm package and no `npx -y`
+launcher path today.
+
+## Capabilities And Boundaries
+
+Nugs CLI downloads and organizes Nugs.net media you already have legal account
+access to. It caches the catalog locally, supports audio and video formats,
+tracks collection gaps, and can automate watch/update flows.
+
+**Not for:** bypassing Nugs.net access controls, sharing credentials with
+agents, redistributing downloaded media, or exposing a remote automation server.
+This is a local operator CLI.
+
+MCP callers never provide credentials, tokens, keys, or secrets as action
+arguments. Nugs credentials belong in the local config file only; this repo does
+not ship an MCP tool surface.
+
+## Install
+
+Download the latest release binary from
+[GitHub Releases](https://github.com/jmagar/nugs-cli/releases), or build from
+source:
+
+```bash
+git clone https://github.com/jmagar/nugs-cli.git
+cd nugs-cli
+make build
+```
+
+There is no npm launcher, so `npx -y nugs-cli` is intentionally not a supported
+install path.
+
+## Quickstart
+
+The first-screen 30-second path is:
+
+```bash
+nugs
+chmod 600 ~/.nugs/config.json
+nugs list
+nugs grab 23329
+```
+
+Running `nugs` with no arguments creates or checks config and shows recent
+catalog additions.
+
+## Client Configuration
+
+Configuration is local file based. Nugs CLI checks these paths in order and
+uses the first one found:
+
+1. `./config.json`
+2. `~/.nugs/config.json`
+3. `~/.config/nugs/config.json`
+
+Use file permissions to protect credentials:
+
+```bash
+chmod 600 ~/.nugs/config.json
+```
+
+## Runtime Surfaces
+
+| Surface | Status | Purpose |
+|---|---:|---|
+| CLI | Required | `nugs` local command for downloads, catalog browsing, watch automation, and config |
+| Config file | Required | Local credentials and output preferences |
+| MCP | Not shipped | No `tools/call` endpoint or MCP server is included |
+| REST/Web | Not shipped | The project does not expose a daemon or browser UI |
+
+## MCP Tool Reference
+
+No MCP tool is shipped. Do not configure an MCP client with `nugs` today.
+
+For comparison, a future MCP wrapper would use a normal `tools/call` shape and
+would still keep credentials out of call arguments:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "nugs",
+    "arguments": {
+      "action": "list",
+      "artist": "Billy Strings"
+    }
+  }
+}
+```
+
+That example is illustrative only; the supported surface is the CLI below.
+
+## CLI Reference
+
+Common commands:
+
+```bash
+nugs
+nugs list
+nugs list 1125
+nugs grab 23329
+nugs update
+nugs gaps
+nugs watch
+```
+
+The detailed command catalog remains in [Command Reference](#command-reference)
+and `docs/COMMANDS.md`.
+
+## Authentication
+
+Authentication is handled by Nugs.net credentials in the local config file.
+Config values include `email`, `password`, and optional `token` for Apple/Google
+account flows. Credentials are never passed on the command line or through MCP
+arguments.
+
+## Safety And Trust Model
+
+Keep `config.json` private, keep downloads local unless you explicitly configure
+rclone, and only download media your subscription grants you access to. The CLI
+does not run a network listener; automation should be local systemd/watch
+automation unless you wrap it yourself.
+
+## Architecture
+
+The Go CLI loads config, authenticates to Nugs.net, maintains a local catalog
+cache, resolves shows/artists/media formats, downloads media, and optionally
+hands completed files to rclone or notification hooks. The catalog cache is
+rebuildable from upstream data.
+
+## Distribution Contract
+
+The source of truth for release identity is the GitHub Release tag plus the Go
+module and release artifacts built from that tag. Distribution/version
+invariants:
+
+- Release binaries must be built from the tagged source.
+- The installed binary name remains `nugs`.
+- There is no npm package or MCP registry entry to version.
+- Generated catalog/cache files are runtime data and should not be committed.
+- Curated docs should point at source-of-truth implementation and command docs
+  instead of duplicating every flag in multiple places.
+
+## Development
+
+```bash
+make build
+go test ./...
+```
+
+For development setup, architecture details, and coding guidelines, see
+[CLAUDE.md](CLAUDE.md).
+
+## Verification
+
+Before landing README changes:
+
+```bash
+python3 /home/jmagar/workspace/soma/scripts/check-readme-guide.py README.md
+go test ./...
+```
+
+## Deployment
+
+Nugs CLI is deployed by installing the `nugs` binary on the machine that owns the
+download directory. Watch automation can run via systemd timers; rclone upload is
+optional and controlled by local config.
+
+## Documentation
+
+This README is curated for first-run orientation. Source-of-truth docs and code
+are split as follows:
+
+- `docs/COMMANDS.md` for command behavior and live API-backed command notes.
+- `docs/QUICK_REFERENCE.md` for compact operator examples.
+- `docs/nugs-api-endpoints.md` for upstream endpoint research.
+- `docs/nugs-client-README.md` for client/library context.
+- `cmd/` and `internal/` for implementation source of truth.
 
 ---
 
@@ -1160,3 +1351,27 @@ For development setup, architecture details, and coding guidelines, see [CLAUDE.
 Originally forked from [Sorrow446/Nugs-Downloader](https://github.com/Sorrow446/Nugs-Downloader)
 
 Catalog caching, auto-refresh, gap detection, and modern improvements by [jmagar](https://github.com/jmagar)
+
+## License
+
+No standalone license file is present in this checkout. See the repository
+history and upstream fork lineage before redistributing binaries or modified
+source.
+
+## Related Servers
+
+- `unifi-rmcp / rustifi` - UniFi controller REST API bridge.
+- `tailscale-rmcp / rustscale` - Tailscale API bridge for devices, users, and tailnet operations.
+- `unraid-rmcp / unrust` - Unraid GraphQL bridge for NAS and server management.
+- `apprise-rmcp` - Apprise notification fan-out bridge for many delivery backends.
+- `gotify-rmcp` - Gotify push notification bridge for sends, messages, apps, and clients.
+- `arcane-rmcp` - Arcane Docker management bridge for containers and related resources.
+- `yarr-rmcp` - Media-stack bridge for Sonarr, Radarr, Prowlarr, Plex, and related services.
+- `ytdl-mcp` - Media download and metadata workflow server.
+- `synapse` - Local Synapse workflow server for scout and flux actions.
+- `cortex` - Syslog and homelab log aggregation MCP server.
+- `axon` - RAG, crawl, scrape, extract, and semantic search project.
+- `lab` - Homelab control plane and Labby gateway project.
+- `lumen` - Local semantic code search MCP server.
+- `agentcast` - Agent transcript and activity publishing project.
+- `soma` - RMCP scaffold/runtime template for new provider-backed servers.
