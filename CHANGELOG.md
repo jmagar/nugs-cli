@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.2](https://github.com/jmagar/nugs-cli/compare/v0.0.1...v0.0.2) (2026-07-11)
+
+
+### Fixed
+
+* **ci:** switch OpenWiki to local openai-compatible proxy ([6774b71](https://github.com/jmagar/nugs-cli/commit/6774b71a281c493f5caca1364c3f6487453be4e0))
+
 ## [v1.0.0] - 2026-02-24
 
 The first release of **nugs-cli** — a complete rewrite and fork of [Sorrow446/Nugs-Downloader](https://github.com/Sorrow446/Nugs-Downloader). This release transforms a single-file Go script into a production-grade CLI with 14 internal packages, a catalog system, watch automation, and cloud upload integration.
