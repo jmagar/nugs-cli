@@ -1,0 +1,3 @@
+[tools]
+# Exact Go follows go.mod's go directive. Do not change mise alone.
+go = "1.24.12"
