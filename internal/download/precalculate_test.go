@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -10,6 +11,20 @@ import (
 	"github.com/jmagar/nugs-cli/internal/api"
 	"github.com/jmagar/nugs-cli/internal/model"
 )
+
+type contextCheckingBody struct {
+	ctx                 context.Context
+	canceledBeforeClose atomic.Bool
+}
+
+func (b *contextCheckingBody) Read(_ []byte) (int, error) { return 0, io.EOF }
+
+func (b *contextCheckingBody) Close() error {
+	if b.ctx.Err() != nil {
+		b.canceledBeforeClose.Store(true)
+	}
+	return nil
+}
 
 func TestPreCalculateShowSizeReusesTrackURL(t *testing.T) {
 	var requests atomic.Int32
@@ -33,5 +48,27 @@ func TestPreCalculateShowSizeReusesTrackURL(t *testing.T) {
 	}
 	if requests.Load() != 1 {
 		t.Fatalf("requests = %d, want one metadata URL HEAD", requests.Load())
+	}
+}
+
+func TestPreCalculateShowSizeClosesResponseBeforeCancel(t *testing.T) {
+	body := &contextCheckingBody{}
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		body.ctx = req.Context()
+		return &http.Response{
+			StatusCode:    http.StatusOK,
+			Body:          body,
+			ContentLength: 123,
+			Header:        make(http.Header),
+			Request:       req,
+		}, nil
+	})}
+	ctx := api.WithHTTPClient(context.Background(), client)
+
+	if _, err := PreCalculateShowSize(ctx, []model.Track{{TrackID: 42, TrackURL: "https://example.test/track"}}, &model.StreamParams{}, &model.Config{}); err != nil {
+		t.Fatal(err)
+	}
+	if body.canceledBeforeClose.Load() {
+		t.Fatal("request context was canceled before response body close")
 	}
 }

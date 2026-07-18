@@ -701,8 +701,8 @@ func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParam
 						continue
 					}
 					resp, err := api.Do(req)
-					reqCancel()
 					if err != nil {
+						reqCancel()
 						continue
 					}
 					if resp.ContentLength > 0 {
@@ -712,6 +712,7 @@ func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParam
 					}
 					_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 					_ = resp.Body.Close()
+					reqCancel()
 				}
 			}
 		}()

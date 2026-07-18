@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -86,5 +88,14 @@ func TestCommandValidationReturnsErrors(t *testing.T) {
 				t.Fatalf("command = handled %v error %v, want handled error", handled, err)
 			}
 		})
+	}
+}
+
+func TestRuntimeFinalStateRecognizesWrappedCancellation(t *testing.T) {
+	if got := runtimeFinalState(false, fmt.Errorf("watch check: %w", ErrCrawlCancelled)); got != "cancelled" {
+		t.Fatalf("runtimeFinalState() = %q, want cancelled", got)
+	}
+	if got := runtimeFinalState(false, errors.New("ordinary failure")); got != "failed" {
+		t.Fatalf("runtimeFinalState() = %q, want failed", got)
 	}
 }

@@ -170,15 +170,7 @@ func run(cfg *Config, jsonLevel string) (runErr error) {
 		if !trackRuntime {
 			return
 		}
-		if runCancelled {
-			finalizeRuntimeStatus("cancelled")
-			return
-		}
-		if runErr != nil {
-			finalizeRuntimeStatus("failed")
-			return
-		}
-		finalizeRuntimeStatus("completed")
+		finalizeRuntimeStatus(runtimeFinalState(runCancelled, runErr))
 	}()
 	stopHotkeys := startCrawlHotkeysIfNeeded(cfg.Urls)
 	defer stopHotkeys()
@@ -245,6 +237,16 @@ func run(cfg *Config, jsonLevel string) (runErr error) {
 
 	runCancelled, runErr = dispatch(ctx, cfg, streamParams, legacyToken, uguID)
 	return runErr
+}
+
+func runtimeFinalState(cancelled bool, err error) string {
+	if cancelled || isCrawlCancelledErr(err) {
+		return "cancelled"
+	}
+	if err != nil {
+		return "failed"
+	}
+	return "completed"
 }
 
 func authenticateForDownloads(ctx context.Context, cfg *Config) (*StreamParams, string, string, error) {
