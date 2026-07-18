@@ -27,11 +27,11 @@ jobs:
             binary: nugs
             smoke: true
           - target: linux-arm64
-            runner: ubuntu-latest
+            runner: ubuntu-24.04-arm
             goos: linux
             goarch: arm64
             binary: nugs
-            smoke: false
+            smoke: true
           - target: darwin-amd64
             runner: macos-15-intel
             goos: darwin

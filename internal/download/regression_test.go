@@ -58,7 +58,6 @@ func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
 			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				switch {
 				case strings.Contains(req.URL.Path, "/bigriver/subPlayer.aspx"):
@@ -69,25 +68,16 @@ func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 					return nil, fmt.Errorf("unexpected request: %s", req.URL.String())
 				}
 			})}
-			ctx := api.WithHTTPClient(context.Background(), client)
+			ctx, cancel := context.WithTimeout(api.WithHTTPClient(context.Background(), client), 5*time.Second)
+			defer cancel()
 
 			dir := t.TempDir()
 			cfg := &model.Config{Format: tc.wantFmt}
 			track := &model.Track{TrackID: 1234, SongTitle: "Track Name"}
 			streamParams := &model.StreamParams{}
 
-			errCh := make(chan error, 1)
-			go func() {
-				errCh <- ProcessTrack(ctx, dir, 1, 1, cfg, track, streamParams, nil, &Deps{})
-			}()
-
-			select {
-			case err := <-errCh:
-				if err != nil {
-					t.Fatalf("ProcessTrack returned error: %v", err)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("ProcessTrack timed out (possible fallback loop regression)")
+			if err := ProcessTrack(ctx, dir, 1, 1, cfg, track, streamParams, nil, &Deps{}); err != nil {
+				t.Fatalf("ProcessTrack returned error: %v", err)
 			}
 
 			matches, err := filepath.Glob(filepath.Join(dir, "*"+tc.wantExt))

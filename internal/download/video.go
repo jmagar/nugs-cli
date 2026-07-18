@@ -222,11 +222,6 @@ func GetManifestBase(manifestUrl string) (string, string, error) {
 	return base, "?" + u.RawQuery, nil
 }
 
-// GetSegUrls retrieves segment URLs from an HLS media playlist.
-func GetSegUrls(manifestUrl, query string) ([]string, error) {
-	return GetSegUrlsContext(context.Background(), manifestUrl, query)
-}
-
 // GetSegUrlsContext retrieves media segments with cancellation.
 func GetSegUrlsContext(ctx context.Context, manifestUrl, query string) ([]string, error) {
 	var segUrls []string
@@ -400,11 +395,6 @@ func ParseDuration(dur string) (int, error) {
 	return int(rounded), nil
 }
 
-// GetDuration gets the duration of a TS file using ffmpeg.
-func GetDuration(tsPath, ffmpegNameStr string) (int, error) {
-	return GetDurationContext(context.Background(), tsPath, ffmpegNameStr)
-}
-
 // GetDurationContext reads duration while allowing ffmpeg cancellation.
 func GetDurationContext(ctx context.Context, tsPath, ffmpegNameStr string) (int, error) {
 	var errBuffer bytes.Buffer
@@ -510,12 +500,6 @@ func WriteChapsFile(chapters []any, dur int) (string, error) {
 		}
 	}
 	return chapsPath, nil
-}
-
-// TsToMp4 converts a TS file to MP4 using ffmpeg, optionally including chapters.
-// chapsFilePath is the path to the chapters metadata file (empty if no chapters).
-func TsToMp4(vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
-	return TsToMp4Context(context.Background(), vidPathTs, vidPath, ffmpegNameStr, chapsFilePath)
 }
 
 // TsToMp4Context converts a TS file and cancels ffmpeg with ctx.

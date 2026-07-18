@@ -1,8 +1,10 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -47,5 +49,39 @@ func TestAPILoggerRotates(t *testing.T) {
 	LogRequest("second", 200, 0, 0, "closed", nil)
 	if _, err := os.Stat(logPath + ".1"); err != nil {
 		t.Fatalf("rotated log missing: %v", err)
+	}
+}
+
+func TestAPILoggerContinuesAfterRotationRenameFailure(t *testing.T) {
+	defer CloseAPILogger()
+	oldMax := apiLogMaxBytes
+	apiLogMaxBytes = 1
+	defer func() { apiLogMaxBytes = oldMax }()
+
+	logPath := filepath.Join(t.TempDir(), "api.log")
+	if err := InitAPILogger(logPath); err != nil {
+		t.Fatal(err)
+	}
+	LogRequest("first", 200, 0, 0, "closed", nil)
+
+	errRotate := errors.New("injected rotation rename failure")
+	oldRename := apiLogRename
+	apiLogRename = func(oldPath, newPath string) error {
+		if oldPath == logPath && newPath == logPath+".1" {
+			return errRotate
+		}
+		return oldRename(oldPath, newPath)
+	}
+	defer func() { apiLogRename = oldRename }()
+
+	LogRequest("second", 200, 0, 0, "closed", nil)
+	contents, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, label := range []string{`"label":"first"`, `"label":"second"`} {
+		if !strings.Contains(string(contents), label) {
+			t.Fatalf("active log after failed rotation does not contain %s: %s", label, contents)
+		}
 	}
 }

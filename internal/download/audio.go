@@ -148,11 +148,6 @@ func ExtractBitrate(manUrl string) string {
 	return ""
 }
 
-// ParseHlsMaster parses an HLS master playlist and selects the best variant.
-func ParseHlsMaster(qual *model.Quality) error {
-	return ParseHlsMasterContext(context.Background(), qual)
-}
-
 // ParseHlsMasterContext fetches and parses a master playlist with cancellation.
 func ParseHlsMasterContext(ctx context.Context, qual *model.Quality) error {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, qual.URL, nil)
@@ -194,11 +189,6 @@ func ParseHlsMasterContext(ctx context.Context, qual *model.Quality) error {
 	}
 	qual.URL = manBase + variantUri + q
 	return nil
-}
-
-// GetKey retrieves an AES encryption key from the given URL.
-func GetKey(keyUrl string) ([]byte, error) {
-	return GetKeyContext(context.Background(), keyUrl)
 }
 
 // GetKeyContext retrieves an AES key with cancellation.
@@ -254,11 +244,6 @@ func DecryptTrack(tempPath string, key, iv []byte) ([]byte, error) {
 	ui.PrintInfo("Decrypting...")
 	ecb.CryptBlocks(decrypted, encData)
 	return decrypted, nil
-}
-
-// TsToAac converts a decrypted TS stream to AAC using ffmpeg.
-func TsToAac(decData []byte, outPath, ffmpegNameStr string) error {
-	return TsToAacContext(context.Background(), decData, outPath, ffmpegNameStr)
 }
 
 // TsToAacContext converts a decrypted TS stream and cancels ffmpeg with ctx.
@@ -346,11 +331,6 @@ func DecryptTrackToFile(tempPath, decryptedPath string, key, iv []byte) error {
 	}
 
 	return errors.New("no encrypted data to decrypt")
-}
-
-// TsFileToAac converts a decrypted TS file to AAC using ffmpeg.
-func TsFileToAac(decPath, outPath, ffmpegNameStr string) error {
-	return TsFileToAacContext(context.Background(), decPath, outPath, ffmpegNameStr)
 }
 
 // TsFileToAacContext converts a file and cancels ffmpeg with ctx.
@@ -917,7 +897,7 @@ func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, ar
 		progressBox.TotalDuration = time.Since(progressBox.StartTime)
 		progressBox.Mu.Unlock()
 	}
-	if cfg.RcloneEnabled {
+	if cfg.RcloneEnabled && len(failures) == 0 {
 		if err := deps.UploadPath(ctx, albumPath, artistFolder, cfg, progressBox, false); err != nil {
 			helpers.ReportErr("Upload failed.", err)
 			failures = append(failures, fmt.Errorf("upload album: %w", err))

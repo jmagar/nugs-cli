@@ -18,7 +18,7 @@ This is the main development guide for contributors. For specialized topics, see
 - [Download Flow](#download-flow-critical-path)
 - [Testing](#testing)
 - [Common Gotchas](#common-gotchas)
-- [Recent Improvements](#recent-improvements)
+- [Current Features](#current-features)
 - [Troubleshooting](#troubleshooting)
 
 ---

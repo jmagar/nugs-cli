@@ -49,7 +49,10 @@ jobs:
           OPENAI_COMPATIBLE_BASE_URL: http://100.120.242.29:8317/v1
         run: |
           set -euo pipefail
-          test -n "${OPENAI_COMPATIBLE_API_KEY:-}"
+          if [[ -z "${OPENAI_COMPATIBLE_API_KEY:-}" ]]; then
+            echo "::error title=Missing OpenWiki API key::Configure the OPENAI_COMPATIBLE_API_KEY repository secret"
+            exit 1
+          fi
           response="$(mktemp)"
           trap 'rm -f "$response"' EXIT
           status="$(curl --silent --show-error --location --max-time 30 --connect-timeout 10 \
@@ -97,6 +100,9 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Clear previously generated documentation
+        run: rm -rf -- openwiki
+
       - name: Download generated documentation
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -112,7 +118,7 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git fetch origin '+refs/heads/openwiki/update:refs/remotes/origin/openwiki/update' || true
           git switch -C openwiki/update
-          git add -- openwiki
+          git add -A -- openwiki
           if git diff --cached --quiet; then
             echo "No OpenWiki changes"
             exit 0

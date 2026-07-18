@@ -194,12 +194,12 @@ func run(cfg *Config, jsonLevel string) (runErr error) {
 
 	// Check if rclone is available when enabled
 	if cfg.RcloneEnabled {
-		err = checkRcloneAvailable(jsonLevel != "")
+		err = checkRcloneAvailable(ctx, jsonLevel != "")
 		if err != nil {
 			return fmt.Errorf("rclone check failed: %w", err)
 		}
 	}
-	printStartupEnvironment(cfg, jsonLevel)
+	printStartupEnvironment(ctx, cfg, jsonLevel)
 
 	// Show welcome screen if no arguments provided
 	if len(cfg.Urls) == 0 {
@@ -330,10 +330,7 @@ func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) (bool
 	// Check for venue filter: list <artist_id> shows "venue"
 	if len(remainingArgs) > 0 && remainingArgs[0] == "shows" {
 		if len(remainingArgs) < 2 {
-			printInfo("Usage: nugs list <artist_id> shows \"<venue_name>\"")
-			fmt.Println("Or:    list <artist_id> shows \"<venue_name>\"")
-			fmt.Println("Example: list 461 \"Red Rocks\"")
-			return true, nil
+			return true, errors.New("list shows requires a venue name: nugs list <artist_id> shows \"<venue_name>\"")
 		}
 		venueFilter := strings.Join(remainingArgs[1:], " ")
 		err := listArtistShowsByVenue(ctx, artistId, venueFilter, jsonLevel)
@@ -344,13 +341,11 @@ func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) (bool
 	if len(remainingArgs) > 0 && remainingArgs[0] == "latest" {
 		limit := 10
 		if len(remainingArgs) > 1 {
-			if parsedLimit, parseErr := strconv.Atoi(remainingArgs[1]); parseErr == nil {
-				if parsedLimit < 1 {
-					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
-					return true, nil
-				}
-				limit = parsedLimit
+			parsedLimit, parseErr := strconv.Atoi(remainingArgs[1])
+			if parseErr != nil || parsedLimit < 1 {
+				return true, fmt.Errorf("list latest limit must be a positive integer: %q", remainingArgs[1])
 			}
+			limit = parsedLimit
 		}
 		err := listArtistLatestShows(ctx, artistId, limit, jsonLevel)
 		return true, wrapCommandError("list latest shows", err)
@@ -433,13 +428,11 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) (b
 
 		// Parse limit from remaining args
 		if len(remainingArgs) > 0 {
-			if parsedLimit, err := strconv.Atoi(remainingArgs[0]); err == nil {
-				if parsedLimit < 1 {
-					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
-					return true, nil
-				}
-				limit = parsedLimit
+			parsedLimit, parseErr := strconv.Atoi(remainingArgs[0])
+			if parseErr != nil || parsedLimit < 1 {
+				return true, fmt.Errorf("catalog latest limit must be a positive integer: %q", remainingArgs[0])
 			}
+			limit = parsedLimit
 		}
 		return true, wrapCommandError("catalog latest", catalogLatest(ctx, limit, jsonLevel))
 	case "gaps":
@@ -465,8 +458,7 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) (b
 		}
 
 		if len(artistIds) == 0 {
-			fmt.Println("Error: No artist IDs provided")
-			return true, nil
+			return true, errors.New("catalog gaps requires at least one artist ID")
 		}
 		return true, wrapCommandError("catalog gaps", catalogGaps(ctx, artistIds, cfg, jsonLevel, idsOnly, mediaFilter))
 	case "list":
@@ -504,12 +496,11 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) (b
 		case "set":
 			return true, wrapCommandError("configure auto-refresh", configureAutoRefresh(cfg))
 		default:
-			fmt.Printf("Unknown config action: %s\n", action)
+			return true, fmt.Errorf("unknown catalog config action: %s", action)
 		}
 	default:
-		fmt.Printf("Unknown catalog command: %s\n", subCmd)
+		return true, fmt.Errorf("unknown catalog command: %s", subCmd)
 	}
-	return true, nil
 }
 
 // handleArtistShorthand handles "<artistID> latest/full [media]" shortcuts.

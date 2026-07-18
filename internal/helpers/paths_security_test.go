@@ -16,10 +16,33 @@ func TestSanitiseReservedPathComponents(t *testing.T) {
 	}
 }
 
+func TestSanitiseWindowsSeparators(t *testing.T) {
+	got := Sanitise(`..\..\outside`)
+	if strings.ContainsAny(got, `/\`) {
+		t.Fatalf("Sanitise retained Windows traversal components: %q", got)
+	}
+}
+
 func TestLocalShowPathConfinedToConfiguredRoot(t *testing.T) {
 	root := t.TempDir()
 	resolver := NewConfigPathResolver(&model.Config{OutPath: root})
 	got := resolver.LocalShowPath(&model.AlbArtResp{ArtistName: "..", ContainerInfo: "../escape"}, model.MediaTypeAudio)
+	rel, err := filepath.Rel(root, got)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		t.Fatalf("path escaped root: %q (rel %q, err %v)", got, rel, err)
+	}
+}
+
+func TestLocalShowPathConfinesWindowsStyleMetadata(t *testing.T) {
+	root := t.TempDir()
+	resolver := NewConfigPathResolver(&model.Config{OutPath: root})
+	got := resolver.LocalShowPath(&model.AlbArtResp{
+		ArtistName:    `..\..\outside`,
+		ContainerInfo: `..\..\show`,
+	}, model.MediaTypeAudio)
+	if strings.Contains(got, `\`) {
+		t.Fatalf("path retained Windows separators: %q", got)
+	}
 	rel, err := filepath.Rel(root, got)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		t.Fatalf("path escaped root: %q (rel %q, err %v)", got, rel, err)

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -19,6 +18,7 @@ const (
 
 type catalogManifest struct {
 	Generation string `json:"generation"`
+	Previous   string `json:"previous,omitempty"`
 }
 
 func catalogArtifactPath(cacheDir, name string) (string, error) {
@@ -34,6 +34,38 @@ func catalogArtifactPath(cacheDir, name string) (string, error) {
 		return "", fmt.Errorf("invalid catalog manifest")
 	}
 	return filepath.Join(cacheDir, catalogGenerationDir, manifest.Generation, name), nil
+}
+
+func readCatalogArtifact(cacheDir, name string) ([]byte, error) {
+	var data []byte
+	err := WithCacheLock(func() error {
+		path, err := catalogArtifactPath(cacheDir, name)
+		if err != nil {
+			return err
+		}
+		data, err = os.ReadFile(path)
+		return err
+	})
+	return data, err
+}
+
+// StatCatalogData returns metadata for catalog.json in the manifest-selected
+// generation while holding the cache lock across resolution and stat.
+func StatCatalogData() (os.FileInfo, error) {
+	cacheDir, err := GetCacheDir()
+	if err != nil {
+		return nil, err
+	}
+	var info os.FileInfo
+	err = WithCacheLock(func() error {
+		path, err := catalogArtifactPath(cacheDir, "catalog.json")
+		if err != nil {
+			return err
+		}
+		info, err = os.Stat(path)
+		return err
+	})
+	return info, err
 }
 
 // GetCacheDir returns the cache directory path, creating it if needed.
@@ -59,12 +91,7 @@ func ReadCacheMeta() (*model.CacheMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	metaPath, err := catalogArtifactPath(cacheDir, "catalog-meta.json")
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(metaPath)
+	data, err := readCatalogArtifact(cacheDir, "catalog-meta.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil // No cache yet
@@ -86,12 +113,7 @@ func ReadCatalogCache() (*model.LatestCatalogResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	catalogPath, err := catalogArtifactPath(cacheDir, "catalog.json")
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := os.ReadFile(catalogPath)
+	data, err := readCatalogArtifact(cacheDir, "catalog.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("no cache found - run 'nugs catalog update' first")
@@ -221,7 +243,19 @@ func writePreparedCatalogCacheWithFailpoint(cacheDir string, prepared *preparedC
 			return err
 		}
 	}
-	manifestData, err := json.Marshal(catalogManifest{Generation: filepath.Base(generation)})
+	// Persist the generation directory entry before publishing a manifest that
+	// points at it. Individual artifact writes already sync the generation itself.
+	if err := syncParentDirectory(root); err != nil {
+		return fmt.Errorf("failed to sync catalog generation directory: %w", err)
+	}
+	previous := ""
+	if manifestData, readErr := os.ReadFile(filepath.Join(cacheDir, catalogManifestFile)); readErr == nil {
+		var old catalogManifest
+		if json.Unmarshal(manifestData, &old) == nil && filepath.Base(old.Generation) == old.Generation {
+			previous = old.Generation
+		}
+	}
+	manifestData, err := json.Marshal(catalogManifest{Generation: filepath.Base(generation), Previous: previous})
 	if err != nil {
 		return err
 	}
@@ -229,22 +263,24 @@ func writePreparedCatalogCacheWithFailpoint(cacheDir string, prepared *preparedC
 		return err
 	}
 	committed = true
-	pruneCatalogGenerations(root, filepath.Base(generation))
+	pruneCatalogGenerations(root, filepath.Base(generation), previous)
 	return nil
 }
 
-func pruneCatalogGenerations(root, current string) {
+func pruneCatalogGenerations(root, current, previous string) {
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		return
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() > entries[j].Name() })
-	kept := 0
+	keep := map[string]struct{}{current: {}}
+	if previous != "" {
+		keep[previous] = struct{}{}
+	}
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == current || kept < 1 {
-			if entry.IsDir() && entry.Name() != current {
-				kept++
-			}
+		if !entry.IsDir() {
+			continue
+		}
+		if _, ok := keep[entry.Name()]; ok {
 			continue
 		}
 		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
@@ -258,11 +294,7 @@ func ReadContainersIndex() (*model.ContainersIndex, error) {
 	if err != nil {
 		return nil, err
 	}
-	indexPath, err := catalogArtifactPath(cacheDir, "containers_index.json")
-	if err != nil {
-		return nil, err
-	}
-	data, err := os.ReadFile(indexPath)
+	data, err := readCatalogArtifact(cacheDir, "containers_index.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &model.ContainersIndex{Containers: map[int]model.ContainerIndexEntry{}}, nil

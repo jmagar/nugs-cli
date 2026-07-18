@@ -13,7 +13,7 @@ import (
 	"github.com/jmagar/nugs-cli/internal/model"
 )
 
-var sanRegex = regexp.MustCompile(`[\/:*?"><|]`)
+var sanRegex = regexp.MustCompile(`[\\/:*?"><|]`)
 
 var (
 	// ErrInvalidPathCharacters indicates control characters were found in a path.
@@ -224,7 +224,12 @@ func (r *ConfigPathResolver) LocalShowPath(show *model.AlbArtResp, mediaType mod
 		return ""
 	}
 	albumFolder := BuildAlbumFolderName(show.ArtistName, show.ContainerInfo)
-	return filepath.Join(r.LocalBaseForMedia(mediaType), Sanitise(show.ArtistName), albumFolder)
+	root := r.LocalBaseForMedia(mediaType)
+	showPath, err := JoinWithinRoot(root, Sanitise(show.ArtistName), albumFolder)
+	if err != nil {
+		return ""
+	}
+	return showPath
 }
 
 // RemoteShowPath returns the artist/show remote-relative path.

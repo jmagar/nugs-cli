@@ -4,10 +4,12 @@ package catalog
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"text/template"
 	"time"
 
@@ -83,24 +85,32 @@ func WatchEnable(cfg *model.Config) error {
 
 	servicePath := filepath.Join(unitDir, "nugs-watch.service")
 	timerPath := filepath.Join(unitDir, "nugs-watch.timer")
-	backup := snapshotUnitFiles(servicePath, timerPath)
-	rollback := func() {
-		_ = systemctlUser("disable", "--now", "nugs-watch.timer")
-		restoreUnitFiles(backup)
-		_ = systemctlUser("daemon-reload")
+	backup, err := snapshotUnitFiles(servicePath, timerPath)
+	if err != nil {
+		return fmt.Errorf("snapshot existing watch units: %w", err)
+	}
+	activation, err := snapshotUnitActivation("nugs-watch.timer")
+	if err != nil {
+		return fmt.Errorf("snapshot watch timer state: %w", err)
+	}
+	rollback := func(cause error) error {
+		if rollbackErr := restoreWatchInstallation(backup, activation); rollbackErr != nil {
+			return fmt.Errorf("%w; rollback failed: %w", cause, rollbackErr)
+		}
+		return cause
 	}
 	if err := writeWatchUnitFiles(cfg, unitDir, binPath); err != nil {
-		restoreUnitFiles(backup)
+		if restoreErr := restoreUnitFiles(backup); restoreErr != nil {
+			return fmt.Errorf("%w; restore unit files: %w", err, restoreErr)
+		}
 		return err
 	}
 
 	if err := systemctlUser("daemon-reload"); err != nil {
-		rollback()
-		return fmt.Errorf("daemon-reload failed: %w", err)
+		return rollback(fmt.Errorf("daemon-reload failed: %w", err))
 	}
 	if err := systemctlUser("enable", "--now", "nugs-watch.timer"); err != nil {
-		rollback()
-		return fmt.Errorf("failed to enable timer: %w", err)
+		return rollback(fmt.Errorf("failed to enable timer: %w", err))
 	}
 
 	systemdInterval, _ := toSystemdDuration(watchIntervalOrDefault(cfg))
@@ -181,13 +191,6 @@ func toSystemdDuration(s string) (string, error) {
 
 // WatchDisable stops and disables the nugs-watch systemd timer and removes unit files.
 func WatchDisable() error {
-	// A failed disable leaves the unit files intact so the operation can be
-	// retried without losing the installed configuration.
-	if err := systemctlUser("disable", "--now", "nugs-watch.timer"); err != nil {
-		return fmt.Errorf("failed to disable timer: %w", err)
-	}
-	_ = systemctlUser("stop", "nugs-watch.service")
-
 	unitDir, err := systemdUserDir()
 	if err != nil {
 		return err
@@ -195,22 +198,44 @@ func WatchDisable() error {
 
 	servicePath := filepath.Join(unitDir, "nugs-watch.service")
 	timerPath := filepath.Join(unitDir, "nugs-watch.timer")
-	backup := snapshotUnitFiles(servicePath, timerPath)
+	backup, err := snapshotUnitFiles(servicePath, timerPath)
+	if err != nil {
+		return fmt.Errorf("snapshot watch units: %w", err)
+	}
+	activation, err := snapshotUnitActivation("nugs-watch.timer")
+	if err != nil {
+		return fmt.Errorf("snapshot watch timer state: %w", err)
+	}
+	if err := systemctlUser("disable", "--now", "nugs-watch.timer"); err != nil && !isUnitAbsentError(err) {
+		return fmt.Errorf("failed to disable timer: %w", err)
+	}
+	if err := systemctlUser("stop", "nugs-watch.service"); err != nil && !isUnitAbsentError(err) {
+		cause := fmt.Errorf("failed to stop watch service: %w", err)
+		if rollbackErr := restoreWatchInstallation(backup, activation); rollbackErr != nil {
+			return fmt.Errorf("%w; rollback failed: %w", cause, rollbackErr)
+		}
+		return cause
+	}
 
 	removed := 0
 	for _, p := range []string{servicePath, timerPath} {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
-			restoreUnitFiles(backup)
-			return fmt.Errorf("failed to remove %s: %w", p, err)
+			cause := fmt.Errorf("failed to remove %s: %w", p, err)
+			if rollbackErr := restoreWatchInstallation(backup, activation); rollbackErr != nil {
+				return fmt.Errorf("%w; rollback failed: %w", cause, rollbackErr)
+			}
+			return cause
 		} else if err == nil {
 			removed++
 		}
 	}
 
 	if err := systemctlUser("daemon-reload"); err != nil {
-		restoreUnitFiles(backup)
-		_ = systemctlUser("daemon-reload")
-		return fmt.Errorf("daemon-reload failed after removing unit files: %w", err)
+		cause := fmt.Errorf("daemon-reload failed after removing unit files: %w", err)
+		if rollbackErr := restoreWatchInstallation(backup, activation); rollbackErr != nil {
+			return fmt.Errorf("%w; rollback failed: %w", cause, rollbackErr)
+		}
+		return cause
 	}
 
 	if removed == 0 {
@@ -221,29 +246,111 @@ func WatchDisable() error {
 	return nil
 }
 
-type unitSnapshot map[string][]byte
+type unitFileSnapshot struct {
+	exists bool
+	data   []byte
+}
 
-func snapshotUnitFiles(paths ...string) unitSnapshot {
+type unitSnapshot map[string]unitFileSnapshot
+
+func snapshotUnitFiles(paths ...string) (unitSnapshot, error) {
 	snapshot := make(unitSnapshot, len(paths))
 	for _, path := range paths {
 		data, err := os.ReadFile(path)
-		if err == nil {
-			snapshot[path] = data
-		} else {
-			snapshot[path] = nil
+		if err != nil {
+			if os.IsNotExist(err) {
+				snapshot[path] = unitFileSnapshot{}
+				continue
+			}
+			return nil, fmt.Errorf("read %s: %w", path, err)
 		}
+		snapshot[path] = unitFileSnapshot{exists: true, data: data}
 	}
-	return snapshot
+	return snapshot, nil
 }
 
-func restoreUnitFiles(snapshot unitSnapshot) {
-	for path, data := range snapshot {
-		if data == nil {
-			_ = os.Remove(path)
+func restoreUnitFiles(snapshot unitSnapshot) error {
+	var restoreErrs []error
+	for path, file := range snapshot {
+		if !file.exists {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				restoreErrs = append(restoreErrs, fmt.Errorf("remove %s: %w", path, err))
+			}
 			continue
 		}
-		_ = cache.WriteFileAtomic(path, data, 0644)
+		if err := cache.WriteFileAtomic(path, file.data, 0644); err != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("write %s: %w", path, err))
+		}
 	}
+	return errors.Join(restoreErrs...)
+}
+
+type unitActivation struct {
+	enabled bool
+	active  bool
+}
+
+func snapshotUnitActivation(unit string) (unitActivation, error) {
+	enabled, err := systemctlUnitState("is-enabled", unit)
+	if err != nil {
+		return unitActivation{}, err
+	}
+	active, err := systemctlUnitState("is-active", unit)
+	if err != nil {
+		return unitActivation{}, err
+	}
+	return unitActivation{enabled: enabled, active: active}, nil
+}
+
+func systemctlUnitState(action, unit string) (bool, error) {
+	output, err := runSystemctlUser(action, unit)
+	state := strings.ToLower(strings.TrimSpace(output))
+	if err == nil {
+		return true, nil
+	}
+	for _, benign := range []string{"disabled", "inactive", "failed", "unknown", "not-found", "static", "masked", "no such file or directory", "does not exist", "not loaded"} {
+		if strings.Contains(state, benign) {
+			return false, nil
+		}
+	}
+	return false, fmt.Errorf("systemctl --user %s %s: %w: %s", action, unit, err, strings.TrimSpace(output))
+}
+
+func restoreWatchInstallation(files unitSnapshot, activation unitActivation) error {
+	var rollbackErrs []error
+	if err := systemctlUser("disable", "--now", "nugs-watch.timer"); err != nil && !isUnitAbsentError(err) {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	if err := restoreUnitFiles(files); err != nil {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	if err := systemctlUser("daemon-reload"); err != nil {
+		rollbackErrs = append(rollbackErrs, err)
+	}
+	if activation.enabled {
+		if err := systemctlUser("enable", "nugs-watch.timer"); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+	}
+	if activation.active {
+		if err := systemctlUser("start", "nugs-watch.timer"); err != nil {
+			rollbackErrs = append(rollbackErrs, err)
+		}
+	}
+	return errors.Join(rollbackErrs...)
+}
+
+func isUnitAbsentError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	for _, marker := range []string{"not found", "not-found", "not loaded", "does not exist", "no such file or directory"} {
+		if strings.Contains(message, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // systemdUserDir returns ~/.config/systemd/user, creating it if needed.
@@ -280,9 +387,16 @@ func writeUnitFile(path, tmplStr string, data any) error {
 
 // systemctlUser runs systemctl --user with the given arguments.
 func systemctlUser(args ...string) error {
+	output, err := runSystemctlUser(args...)
+	if err != nil {
+		return fmt.Errorf("systemctl --user %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(output))
+	}
+	return nil
+}
+
+var runSystemctlUser = func(args ...string) (string, error) {
 	cmdArgs := append([]string{"--user"}, args...)
 	cmd := exec.Command("systemctl", cmdArgs...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }

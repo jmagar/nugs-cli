@@ -36,7 +36,7 @@ jobs:
       - name: Race tests
         run: go test -race -count=1 ./...
       - name: Documentation contracts
-        run: python3 scripts/check-docs.py
+        run: make docs-check
       - name: Static analysis
         run: go run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
       - name: Vulnerability analysis

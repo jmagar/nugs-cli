@@ -30,6 +30,9 @@ func validateServerURL(raw string) (*url.URL, error) {
 	if u.User != nil {
 		return nil, fmt.Errorf("gotify: server URL must not contain userinfo")
 	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("gotify: server URL must not contain query parameters or fragments")
+	}
 	if u.Scheme == "https" {
 		return u, nil
 	}
@@ -51,7 +54,9 @@ func Send(ctx context.Context, serverURL, token, title, message string, priority
 	if err != nil {
 		return err
 	}
-	requestURL := strings.TrimRight(base.String(), "/") + "/message"
+	base.Path = strings.TrimRight(base.Path, "/") + "/message"
+	base.RawPath = ""
+	requestURL := base.String()
 
 	body, err := json.Marshal(map[string]any{
 		"title":    title,

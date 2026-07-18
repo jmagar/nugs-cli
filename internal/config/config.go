@@ -270,13 +270,7 @@ func atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
 		return fmt.Errorf("rename temp file: %w", err)
 	}
 	committed = true
-	dirFile, err := os.Open(dir)
-	if err != nil {
-		return fmt.Errorf("open config directory for sync: %w", err)
-	}
-	syncErr := dirFile.Sync()
-	closeErr := dirFile.Close()
-	if err := errors.Join(syncErr, closeErr); err != nil {
+	if err := syncDirectory(dir); err != nil {
 		return fmt.Errorf("sync config directory: %w", err)
 	}
 	return nil

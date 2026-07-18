@@ -35,10 +35,13 @@ var (
 var defaultStorageProvider model.StorageProvider = NewStorageAdapter()
 
 // CheckRcloneAvailable verifies rclone is installed and available in PATH.
-func CheckRcloneAvailable(quiet bool) error {
-	cmd := exec.Command("rclone", "version")
+func CheckRcloneAvailable(ctx context.Context, quiet bool) error {
+	if ctx == nil {
+		return fmt.Errorf("rclone availability context is required")
+	}
+	cmd := exec.CommandContext(ctx, "rclone", "version")
 	var output []byte
-	err := WithProcessSlot(context.Background(), func() error {
+	err := WithProcessSlot(ctx, func() error {
 		var runErr error
 		output, runErr = cmd.Output()
 		return runErr
@@ -59,7 +62,10 @@ func CheckRcloneAvailable(quiet bool) error {
 }
 
 // CheckRclonePathOnline checks if the configured rclone remote is reachable.
-func CheckRclonePathOnline(cfg *model.Config) string {
+func CheckRclonePathOnline(ctx context.Context, cfg *model.Config) string {
+	if ctx == nil {
+		return "Offline (context required)"
+	}
 	if !cfg.RcloneEnabled {
 		return "Disabled"
 	}
@@ -67,7 +73,7 @@ func CheckRclonePathOnline(cfg *model.Config) string {
 		return "Offline (remote not configured)"
 	}
 	target := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, false)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "rclone", "lsf", target)
 	err := WithProcessSlot(ctx, cmd.Run)
@@ -106,11 +112,6 @@ func UploadToRclone(ctx context.Context, localPath string, artistFolder string, 
 		OnComplete:          onComplete,
 		OnDeleteAfterUpload: onDeleteAfterUpload,
 	})
-}
-
-// BuildRcloneUploadCommand constructs the rclone copy/copyto command.
-func BuildRcloneUploadCommand(localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
-	return BuildRcloneUploadCommandContext(context.Background(), localPath, artistFolder, cfg, transfers, isVideo)
 }
 
 // BuildRcloneUploadCommandContext constructs the rclone copy/copyto command with context support.
@@ -331,11 +332,6 @@ func RunRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, up
 		return fmt.Errorf("%w\n%s", waitErr, strings.TrimSpace(diagnostics.String()))
 	}
 	return waitErr
-}
-
-// BuildRcloneVerifyCommand constructs the rclone check command for upload verification.
-func BuildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
-	return BuildRcloneVerifyCommandContext(context.Background(), localPath, remoteFullPath)
 }
 
 // BuildRcloneVerifyCommandContext constructs a cancellable rclone check command.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jmagar/nugs-cli/internal/catalog"
@@ -67,16 +68,14 @@ func handleWatchCommand(ctx context.Context, cfg *Config, jsonLevel string) (boo
 	switch subCmd {
 	case "add":
 		if len(cfg.Urls) < 3 {
-			printInfo("Usage: nugs watch add <artistID>")
-			return true, nil
+			return true, errors.New("watch add requires an artist ID")
 		}
 		if err := watchAdd(cfg, cfg.Urls[2]); err != nil {
 			return true, fmt.Errorf("watch add failed: %w", err)
 		}
 	case "remove":
 		if len(cfg.Urls) < 3 {
-			printInfo("Usage: nugs watch remove <artistID>")
-			return true, nil
+			return true, errors.New("watch remove requires an artist ID")
 		}
 		if err := watchRemove(cfg, cfg.Urls[2]); err != nil {
 			return true, fmt.Errorf("watch remove failed: %w", err)

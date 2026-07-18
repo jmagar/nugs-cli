@@ -8,15 +8,25 @@ import (
 
 func TestIsVersionRequest(t *testing.T) {
 	t.Parallel()
-	for _, arg := range []string{"version", "--version", "-v"} {
-		if !isVersionRequest([]string{arg}) {
-			t.Fatalf("expected %q to be a version request", arg)
-		}
+	tests := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "command", args: []string{"version"}, want: true},
+		{name: "long flag", args: []string{"--version"}, want: true},
+		{name: "short flag", args: []string{"-v"}, want: true},
+		{name: "empty", args: nil, want: false},
+		{name: "extra argument", args: []string{"version", "extra"}, want: false},
+		{name: "help", args: []string{"--help"}, want: false},
 	}
-	for _, args := range [][]string{nil, {"version", "extra"}, {"--help"}} {
-		if isVersionRequest(args) {
-			t.Fatalf("did not expect %q to be a version request", args)
-		}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isVersionRequest(tc.args); got != tc.want {
+				t.Fatalf("isVersionRequest(%q) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 

@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
+
+var cacheProcessMu sync.Mutex
 
 // WriteFileAtomic durably writes data to a unique temporary file in the target
 // directory and then atomically replaces targetPath.
@@ -40,6 +43,9 @@ func WriteFileAtomic(targetPath string, data []byte, mode os.FileMode) error {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 	ok = true
+	if err := syncParentDirectory(filepath.Dir(targetPath)); err != nil {
+		return fmt.Errorf("failed to sync target directory: %w", err)
+	}
 	return nil
 }
 

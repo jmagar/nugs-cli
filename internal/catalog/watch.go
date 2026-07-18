@@ -203,11 +203,11 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 		}
 	}
 
-	sendWatchSummary(ctx, deps.Notify, totalDownloaded, totalFailed, artistErrors)
+	sendWatchSummary(ctx, deps.Notify, totalDownloaded, totalFailed, artistErrors, catalogUpdateErr)
 	if catalogUpdateErr != nil || totalFailed > 0 || len(artistErrors) > 0 {
 		outcome := &WatchOutcomeError{Downloaded: totalDownloaded, Failed: totalFailed, ArtistErrors: artistErrors, CatalogUpdate: catalogUpdateErr}
 		if catalogUpdateErr != nil {
-			return fmt.Errorf("%w: catalog update: %v", outcome, catalogUpdateErr)
+			return fmt.Errorf("%w: catalog update: %w", outcome, catalogUpdateErr)
 		}
 		return outcome
 	}
@@ -231,12 +231,23 @@ func sendArtistUpdate(ctx context.Context, notify func(ctx context.Context, titl
 
 // sendWatchSummary fires a single Gotify notification summarising the watch check outcome.
 // Sends nothing if notify is nil or there is nothing to report (all up-to-date, no errors).
-func sendWatchSummary(ctx context.Context, notify func(ctx context.Context, title, message string, priority int) error, downloaded, failed int, errs []string) {
+func sendWatchSummary(ctx context.Context, notify func(ctx context.Context, title, message string, priority int) error, downloaded, failed int, errs []string, catalogUpdateErr error) {
 	if notify == nil {
 		return
 	}
 
 	switch {
+	case catalogUpdateErr != nil:
+		parts := []string{fmt.Sprintf("Catalog update failed: %v", catalogUpdateErr)}
+		if downloaded > 0 {
+			parts = append(parts, fmt.Sprintf("%d new show(s) downloaded from cached catalog", downloaded))
+		}
+		if failed > 0 {
+			parts = append(parts, fmt.Sprintf("%d download failure(s)", failed))
+		}
+		parts = append(parts, errs...)
+		_ = notify(ctx, "Nugs Watch Error", strings.Join(parts, "\n"), 7)
+
 	case downloaded > 0:
 		msg := fmt.Sprintf("%d new show(s) downloaded", downloaded)
 		if failed > 0 {

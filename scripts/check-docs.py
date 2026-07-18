@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import sys
 from pathlib import Path
@@ -16,16 +17,37 @@ PUBLIC_DOCS.append(ROOT / "INCREMENTAL_CATALOG_UPDATE.md")
 
 LINK_RE = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 JSON_TAG_RE = re.compile(r"json:\"([^\",]+)")
+HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$")
+
+
+def heading_anchors(text: str) -> set[str]:
+    anchors: set[str] = set()
+    occurrences: dict[str, int] = {}
+    for line in text.splitlines():
+        match = HEADING_RE.match(line)
+        if not match:
+            continue
+        heading = html.unescape(match.group(1))
+        heading = re.sub(r"<[^>]+>", "", heading)
+        heading = re.sub(r"[`*_~]", "", heading).strip().lower()
+        slug = re.sub(r"[^\w\- ]", "", heading, flags=re.UNICODE)
+        slug = re.sub(r"\s+", "-", slug)
+        duplicate = occurrences.get(slug, 0)
+        occurrences[slug] = duplicate + 1
+        anchors.add(slug if duplicate == 0 else f"{slug}-{duplicate}")
+    return anchors
 
 
 def local_link_errors(path: Path, text: str) -> list[str]:
     errors: list[str] = []
     for raw_target in LINK_RE.findall(text):
         target = raw_target.strip().split(maxsplit=1)[0].strip("<>")
-        if not target or target.startswith(("#", "http://", "https://", "mailto:")):
+        if not target or target.startswith(("http://", "https://", "mailto:")):
             continue
-        file_part = unquote(target.split("#", 1)[0])
-        resolved = (path.parent / file_part).resolve()
+        file_part, _, fragment = target.partition("#")
+        file_part = unquote(file_part)
+        fragment = unquote(fragment)
+        resolved = path.resolve() if not file_part else (path.parent / file_part).resolve()
         try:
             resolved.relative_to(ROOT)
         except ValueError:
@@ -33,6 +55,13 @@ def local_link_errors(path: Path, text: str) -> list[str]:
             continue
         if not resolved.exists():
             errors.append(f"{path.relative_to(ROOT)}: missing local link target: {target}")
+            continue
+        if fragment and resolved.suffix.lower() == ".md":
+            anchors = heading_anchors(resolved.read_text(encoding="utf-8"))
+            if fragment not in anchors:
+                errors.append(
+                    f"{path.relative_to(ROOT)}: missing Markdown anchor: {target}"
+                )
     return errors
 
 

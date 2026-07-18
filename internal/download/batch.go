@@ -63,6 +63,7 @@ func prepareBatchProgress(meta []*model.ArtistMeta, cfg *model.Config, deps *Dep
 // processArtistAlbums iterates over all containers in the artist metadata, downloading each album.
 func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *model.Config, streamParams *model.StreamParams, batchState *model.BatchProgressState, progressBox *model.ProgressBoxState, deps *Deps) error {
 	albumCount := 0
+	var failures []error
 	for _, m := range meta {
 		for _, container := range m.Response.Containers {
 			if deps.WaitIfPausedOrCancelled != nil {
@@ -93,6 +94,8 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 				}
 				ui.PrintError(fmt.Sprintf("Album %d/%d failed (ID %d, %s): %v",
 					albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
+				failures = append(failures, fmt.Errorf("album %d/%d (ID %d, %s): %w",
+					albumCount, batchState.TotalAlbums, container.ContainerID, container.ContainerInfo, err))
 			} else {
 				progressBox.Mu.Lock()
 				batchState.Complete++
@@ -100,7 +103,7 @@ func processArtistAlbums(ctx context.Context, meta []*model.ArtistMeta, cfg *mod
 			}
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // Playlist downloads all tracks in a playlist.

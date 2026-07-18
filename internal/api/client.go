@@ -99,6 +99,14 @@ func breakerFor(label string) *circuitBreaker {
 	return cb
 }
 
+func failHalfOpenProbe(breaker *circuitBreaker, label string, state circuitState) {
+	if state != circuitHalfOpen {
+		return
+	}
+	newState := breaker.RecordFailure()
+	LogCircuitStateChange("circuit_opened", label, state.String(), newState.String())
+}
+
 func drainAndClose(body io.ReadCloser) error {
 	if body == nil {
 		return nil
@@ -153,6 +161,7 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		// 3. Build and execute the request.
 		req, err := makeReq()
 		if err != nil {
+			failHalfOpenProbe(breaker, label, cbState)
 			return nil, err
 		}
 		start := time.Now()
@@ -160,8 +169,9 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		duration := time.Since(start)
 
 		if err != nil {
-			// Network-level error: log but do NOT trip the circuit breaker.
-			// Network hiccups are distinct from the API being overloaded.
+			// Network-level errors do not trip a closed circuit, but a failed
+			// half-open recovery probe must reopen it so the probe slot cannot wedge.
+			failHalfOpenProbe(breaker, label, cbState)
 			LogRequest(label, 0, duration, attempt, cbState.String(), err)
 			return nil, err
 		}

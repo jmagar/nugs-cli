@@ -25,6 +25,12 @@ var (
 )
 
 func acquireRcloneSlot(ctx context.Context) (func(), error) {
+	if ctx == nil {
+		return nil, fmt.Errorf("rclone process context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	select {
 	case rcloneProcessSlots <- struct{}{}:
 		return func() { <-rcloneProcessSlots }, nil
@@ -37,7 +43,7 @@ func acquireRcloneSlot(ctx context.Context) (func(), error) {
 // slot. Catalog bulk scans use this too, so every rclone spawn shares one cap.
 func WithProcessSlot(ctx context.Context, fn func() error) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return fmt.Errorf("rclone process context is required")
 	}
 	release, err := acquireRcloneSlot(ctx)
 	if err != nil {
@@ -113,7 +119,7 @@ func (a *StorageAdapter) Upload(ctx context.Context, cfg *model.Config, req mode
 	}
 
 	if ctx == nil {
-		ctx = context.Background()
+		return fmt.Errorf("upload context is required")
 	}
 	release, err := acquireRcloneSlot(ctx)
 	if err != nil {
@@ -209,7 +215,7 @@ func (a *StorageAdapter) PathExists(ctx context.Context, cfg *model.Config, remo
 	fullPath := remoteDest + "/" + remotePath
 
 	if ctx == nil {
-		ctx = context.Background()
+		return false, fmt.Errorf("path check context is required")
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -246,7 +252,7 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 	remoteDest := cfg.RcloneRemote + ":" + a.getRcloneBasePath(cfg, isVideo)
 	fullPath := remoteDest + "/" + artistFolder
 	if ctx == nil {
-		ctx = context.Background()
+		return nil, fmt.Errorf("folder listing context is required")
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -265,7 +271,7 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 		stale, ok := folderCache[fullPath]
 		folderCacheMu.RUnlock()
 		if ok {
-			return cloneFolderSet(stale), nil
+			return cloneFolderSet(stale), &StaleFolderListingError{Path: fullPath, Cause: err}
 		}
 		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)
 	}
@@ -282,6 +288,20 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 	folderCacheMu.Unlock()
 	return folders, nil
 }
+
+// StaleFolderListingError indicates that Folders contains the last successful
+// listing, but callers must treat absent entries as unknown and fall back to
+// individual path checks.
+type StaleFolderListingError struct {
+	Path  string
+	Cause error
+}
+
+func (e *StaleFolderListingError) Error() string {
+	return fmt.Sprintf("using stale folder listing for %s after refresh failed: %v", e.Path, e.Cause)
+}
+
+func (e *StaleFolderListingError) Unwrap() error { return e.Cause }
 
 func cloneFolderSet(source map[string]struct{}) map[string]struct{} {
 	clone := make(map[string]struct{}, len(source))

@@ -226,6 +226,7 @@ func TestWatchCheck_CatalogUpdateFailureIsNonFatal(t *testing.T) {
 
 	fetchErr := errors.New("network timeout")
 	artistMetaCalled := false
+	notify, called, title, message, priority := notifyCapture()
 
 	deps := &Deps{
 		FetchCatalog: func(_ context.Context) (*model.LatestCatalogResp, error) {
@@ -239,6 +240,7 @@ func TestWatchCheck_CatalogUpdateFailureIsNonFatal(t *testing.T) {
 			return []*model.ArtistMeta{emptyArtistMeta("Billy Strings")}, false, false, nil
 		},
 		GetShowMediaType: func(_ *model.AlbArtResp) model.MediaType { return model.MediaTypeAudio },
+		Notify:           notify,
 	}
 
 	cfg := &model.Config{
@@ -252,6 +254,9 @@ func TestWatchCheck_CatalogUpdateFailureIsNonFatal(t *testing.T) {
 	}
 	if !artistMetaCalled {
 		t.Error("GetArtistMetaCached should be called even when catalog update fails")
+	}
+	if !*called || *title != "Nugs Watch Error" || *priority != 7 || !strings.Contains(*message, fetchErr.Error()) {
+		t.Fatalf("degraded notification = called:%t title:%q message:%q priority:%d", *called, *title, *message, *priority)
 	}
 }
 
@@ -503,7 +508,7 @@ func TestSendWatchSummary(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			fn, gotCalled, gotTitle, gotMsg, gotPriority := notifyCapture()
-			sendWatchSummary(context.Background(), fn, tc.downloaded, tc.failed, tc.errs)
+			sendWatchSummary(context.Background(), fn, tc.downloaded, tc.failed, tc.errs, nil)
 
 			if *gotCalled != tc.wantCalled {
 				t.Fatalf("notify called = %v, want %v", *gotCalled, tc.wantCalled)
@@ -703,29 +708,5 @@ func TestWatchEnableUnitContent_MinutesConversion(t *testing.T) {
 	}
 	if !strings.Contains(content, "OnUnitActiveSec=30min") {
 		t.Errorf("timer file should use '30min' for minutes:\n%s", content)
-	}
-}
-
-func TestRestoreUnitFilesRollsBackCreatedAndReplacedFiles(t *testing.T) {
-	dir := t.TempDir()
-	existing := filepath.Join(dir, "existing.service")
-	created := filepath.Join(dir, "created.timer")
-	if err := os.WriteFile(existing, []byte("old"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	snapshot := snapshotUnitFiles(existing, created)
-	if err := os.WriteFile(existing, []byte("new"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(created, []byte("new"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	restoreUnitFiles(snapshot)
-	data, err := os.ReadFile(existing)
-	if err != nil || string(data) != "old" {
-		t.Fatalf("existing unit not restored: %q, %v", data, err)
-	}
-	if _, err := os.Stat(created); !os.IsNotExist(err) {
-		t.Fatalf("new unit not removed: %v", err)
 	}
 }

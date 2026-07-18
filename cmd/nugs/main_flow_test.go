@@ -66,3 +66,25 @@ func TestArtistShorthandReturnsErrorInsteadOfExiting(t *testing.T) {
 		t.Fatalf("handleArtistShorthand() = (%v, %v), want handled error", handled, err)
 	}
 }
+
+func TestCommandValidationReturnsErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		urls []string
+		call func(*Config) (bool, error)
+	}{
+		{name: "invalid list limit", urls: []string{"list", "1125", "latest", "0"}, call: func(cfg *Config) (bool, error) { return handleListCommand(context.Background(), cfg, "") }},
+		{name: "invalid catalog limit", urls: []string{"catalog", "latest", "0"}, call: func(cfg *Config) (bool, error) { return handleCatalogCommand(context.Background(), cfg, "") }},
+		{name: "missing gaps artist", urls: []string{"catalog", "gaps", "--ids-only"}, call: func(cfg *Config) (bool, error) { return handleCatalogCommand(context.Background(), cfg, "") }},
+		{name: "unknown catalog command", urls: []string{"catalog", "bogus"}, call: func(cfg *Config) (bool, error) { return handleCatalogCommand(context.Background(), cfg, "") }},
+		{name: "missing watch add artist", urls: []string{"watch", "add"}, call: func(cfg *Config) (bool, error) { return handleWatchCommand(context.Background(), cfg, "") }},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			handled, err := tc.call(&Config{Urls: tc.urls})
+			if !handled || err == nil {
+				t.Fatalf("command = handled %v error %v, want handled error", handled, err)
+			}
+		})
+	}
+}

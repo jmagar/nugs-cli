@@ -27,6 +27,7 @@ test:
 	@go test -race -count=1 ./...
 
 docs-check:
+	@python3 -m unittest discover -s scripts -p 'test_*.py'
 	@python3 scripts/check-docs.py
 
 fmt-check:

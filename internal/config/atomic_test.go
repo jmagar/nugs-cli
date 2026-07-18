@@ -50,3 +50,9 @@ func TestAtomicWriteFileConcurrentWriters(t *testing.T) {
 		t.Fatalf("orphan temp files: %v", matches)
 	}
 }
+
+func TestSyncDirectoryPlatformHook(t *testing.T) {
+	if err := syncDirectory(t.TempDir()); err != nil {
+		t.Fatalf("syncDirectory() error = %v", err)
+	}
+}

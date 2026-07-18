@@ -39,3 +39,29 @@ func TestSendDoesNotForwardTokenAcrossRedirect(t *testing.T) {
 		t.Fatal("redirect target was contacted")
 	}
 }
+
+func TestSendBuildsMessageURLStructurally(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/gotify/message" {
+			t.Errorf("request path = %q, want /gotify/message", r.URL.Path)
+		}
+		if r.URL.RawQuery != "" || r.URL.Fragment != "" {
+			t.Errorf("request URL retained query or fragment: %s", r.URL.String())
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	if err := Send(context.Background(), server.URL+"/gotify/", "secret", "title", "body", 1); err != nil {
+		t.Fatalf("Send() error = %v", err)
+	}
+}
+
+func TestSendRejectsServerURLQueryAndFragment(t *testing.T) {
+	for _, suffix := range []string{"?redirect=evil", "#fragment"} {
+		err := Send(context.Background(), "http://localhost/"+suffix, "secret", "title", "body", 1)
+		if err == nil {
+			t.Fatalf("Send accepted server URL suffix %q", suffix)
+		}
+	}
+}

@@ -278,8 +278,7 @@ func CatalogCacheStatus(jsonLevel string, deps *Deps) error {
 	}
 
 	cacheDir, _ := cache.GetCacheDir()
-	catalogPath := filepath.Join(cacheDir, "catalog.json")
-	fileInfo, err := os.Stat(catalogPath)
+	fileInfo, err := cache.StatCatalogData()
 	if err != nil {
 		return fmt.Errorf("failed to stat cache file: %w", err)
 	}

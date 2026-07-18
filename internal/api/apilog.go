@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -38,6 +39,7 @@ var Logger *apiLogger
 var loggerMu sync.RWMutex
 
 var apiLogMaxBytes int64 = 5 << 20
+var apiLogRename = os.Rename
 
 const apiLogBackups = 3
 
@@ -105,17 +107,33 @@ func (l *apiLogger) rotateIfNeeded() error {
 	if err := l.f.Close(); err != nil {
 		return err
 	}
+	l.f = nil
+	l.enc = nil
 	for i := apiLogBackups - 1; i >= 1; i-- {
-		_ = os.Rename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
+		_ = apiLogRename(fmt.Sprintf("%s.%d", l.path, i), fmt.Sprintf("%s.%d", l.path, i+1))
 	}
-	if err := os.Rename(l.path, l.path+".1"); err != nil && !os.IsNotExist(err) {
+	if err := apiLogRename(l.path, l.path+".1"); err != nil && !os.IsNotExist(err) {
+		return errors.Join(err, l.openActive())
+	}
+	if err := l.openActive(); err != nil {
+		rollbackErr := apiLogRename(l.path+".1", l.path)
+		return errors.Join(err, rollbackErr, l.openActive())
+	}
+	return nil
+}
+
+func (l *apiLogger) openActive() error {
+	f, err := os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
 		return err
 	}
-	l.f, err = os.OpenFile(l.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if err == nil {
-		l.enc = json.NewEncoder(l.f)
+	if err := f.Chmod(0600); err != nil {
+		_ = f.Close()
+		return err
 	}
-	return err
+	l.f = f
+	l.enc = json.NewEncoder(f)
+	return nil
 }
 
 // write is the internal append function. Failures are silently ignored —
@@ -124,7 +142,13 @@ func (l *apiLogger) write(e APILogEntry) {
 	e.Timestamp = time.Now().UTC().Format(time.RFC3339Nano)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.f == nil || l.rotateIfNeeded() != nil {
+	if l.f == nil {
+		return
+	}
+	// A failed rotation is non-fatal when rotateIfNeeded recovered the active
+	// file; append the entry so transient filesystem errors do not disable logs.
+	_ = l.rotateIfNeeded()
+	if l.f == nil || l.enc == nil {
 		return
 	}
 	_ = l.enc.Encode(e)
