@@ -15,6 +15,7 @@ import (
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
+	"github.com/jmagar/nugs-cli/internal/rclone"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
@@ -61,7 +62,12 @@ func ListAllRemoteArtistFolders(ctx context.Context, cfg *model.Config) (map[str
 
 	remoteDest := cfg.RcloneRemote + ":" + cfg.RclonePath
 	cmd := exec.CommandContext(ctx, "rclone", "lsf", remoteDest, "--dirs-only")
-	output, err := cmd.Output()
+	var output []byte
+	err := rclone.WithProcessSlot(ctx, func() error {
+		var runErr error
+		output, runErr = cmd.Output()
+		return runErr
+	})
 	if err != nil {
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {
@@ -241,7 +247,12 @@ func CountRemoteShowsPerArtist(ctx context.Context, cfg *model.Config) (map[stri
 
 	for _, dest := range remoteDests {
 		cmd := exec.CommandContext(ctx, "rclone", "lsf", dest, "--dirs-only", "--recursive")
-		output, err := cmd.Output()
+		var output []byte
+		err := rclone.WithProcessSlot(ctx, func() error {
+			var runErr error
+			output, runErr = cmd.Output()
+			return runErr
+		})
 		if err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) && exitErr.ExitCode() == 3 {

@@ -320,8 +320,8 @@ func TestCatalogUpdate_OldIndexReadError(t *testing.T) {
 		t.Fatalf("WriteCatalogCache() error = %v", err)
 	}
 
-	// Now corrupt the containers_index so ReadContainersIndex fails.
-	indexPath := filepath.Join(cacheDir, "containers_index.json")
+	// Now corrupt the generation manifest so ReadContainersIndex fails.
+	indexPath := filepath.Join(cacheDir, "catalog-current.json")
 	if err := os.WriteFile(indexPath, []byte("{bad json"), 0644); err != nil {
 		t.Fatalf("failed to corrupt index: %v", err)
 	}
@@ -341,4 +341,3 @@ func TestCatalogUpdate_OldIndexReadError(t *testing.T) {
 		t.Errorf("expected first-update fallback message, got:\n%s", stdout)
 	}
 }
-

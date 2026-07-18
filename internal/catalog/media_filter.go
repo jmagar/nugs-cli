@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jmagar/nugs-cli/internal/cache"
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
@@ -219,9 +220,17 @@ func AnalyzeArtistCatalogMediaAware(ctx context.Context, artistID string, cfg *m
 		return nil, fmt.Errorf("GetArtistMetaCached callback not configured")
 	}
 
-	artistMetas, cacheUsed, cacheStaleUse, err := deps.GetArtistMetaCached(ctx, artistID, ArtistMetaCacheTTL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get artist metadata: %w", err)
+	// The complete local index is authoritative for warm catalog analysis. It
+	// deliberately has no TTL: catalog update/crawl refreshes it, while normal
+	// coverage and gap commands have a zero-network request budget.
+	artistMetas, _, localErr := cache.ReadFullCatalogArtist(artistID)
+	cacheUsed, cacheStaleUse := localErr == nil, false
+	if localErr != nil {
+		var err error
+		artistMetas, cacheUsed, cacheStaleUse, err = deps.GetArtistMetaCached(ctx, artistID, ArtistMetaCacheTTL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get artist metadata: %w", err)
+		}
 	}
 
 	if len(artistMetas) == 0 {

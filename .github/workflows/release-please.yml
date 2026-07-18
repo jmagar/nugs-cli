@@ -15,17 +15,19 @@ concurrency:
 
 jobs:
   release-please:
+    name: Prepare or publish release
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
-      contents: write
-      pull-requests: write
-      issues: write
+      contents: write # Update release branches and publish tags/releases.
+      pull-requests: write # Create and maintain the release PR.
+      issues: write # Label issues linked to a release.
     steps:
       - name: Require release-please token
         env:
           RELEASE_PLEASE_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN }}
         run: test -n "$RELEASE_PLEASE_TOKEN"
-      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN }}

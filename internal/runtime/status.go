@@ -230,12 +230,28 @@ func WriteRuntimeControl(control model.RuntimeControl) error {
 
 // WriteFileAtomic writes data to a file atomically using a temp file and rename.
 func WriteFileAtomic(path string, data []byte, mode os.FileMode) error {
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, data, mode); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".nugs-runtime-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(mode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
 		return err
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
 		return err
 	}
 	return nil

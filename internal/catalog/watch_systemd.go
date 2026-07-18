@@ -11,6 +11,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/jmagar/nugs-cli/internal/cache"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
@@ -23,7 +24,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 Environment=NUGS_DETACHED=1
-ExecStart={{.BinaryPath}} watch check
+Environment="PATH={{.Path}}"
+ExecStart="{{.BinaryPath}}" watch check
 StandardOutput=journal
 StandardError=journal
 
@@ -54,26 +56,54 @@ func WatchEnable(cfg *model.Config) error {
 	if err != nil {
 		return fmt.Errorf("failed to resolve binary path: %w", err)
 	}
+	binPath, err = filepath.Abs(binPath)
+	if err != nil {
+		return fmt.Errorf("failed to make binary path absolute: %w", err)
+	}
+	if info, statErr := os.Stat(binPath); statErr != nil || info.IsDir() || info.Mode()&0111 == 0 {
+		return fmt.Errorf("nugs binary is not an executable regular file: %s", binPath)
+	}
+	ffmpegName := cfg.FfmpegNameStr
+	if ffmpegName == "" {
+		ffmpegName = "ffmpeg"
+	}
+	if _, err := exec.LookPath(ffmpegName); err != nil {
+		return fmt.Errorf("watch requires ffmpeg in the service PATH: %w", err)
+	}
+	if cfg.RcloneEnabled {
+		if _, err := exec.LookPath("rclone"); err != nil {
+			return fmt.Errorf("watch has rclone enabled but rclone is not in the service PATH: %w", err)
+		}
+	}
 
 	unitDir, err := systemdUserDir()
 	if err != nil {
 		return err
 	}
 
+	servicePath := filepath.Join(unitDir, "nugs-watch.service")
+	timerPath := filepath.Join(unitDir, "nugs-watch.timer")
+	backup := snapshotUnitFiles(servicePath, timerPath)
+	rollback := func() {
+		_ = systemctlUser("disable", "--now", "nugs-watch.timer")
+		restoreUnitFiles(backup)
+		_ = systemctlUser("daemon-reload")
+	}
 	if err := writeWatchUnitFiles(cfg, unitDir, binPath); err != nil {
+		restoreUnitFiles(backup)
 		return err
 	}
 
 	if err := systemctlUser("daemon-reload"); err != nil {
+		rollback()
 		return fmt.Errorf("daemon-reload failed: %w", err)
 	}
 	if err := systemctlUser("enable", "--now", "nugs-watch.timer"); err != nil {
+		rollback()
 		return fmt.Errorf("failed to enable timer: %w", err)
 	}
 
 	systemdInterval, _ := toSystemdDuration(watchIntervalOrDefault(cfg))
-	servicePath := filepath.Join(unitDir, "nugs-watch.service")
-	timerPath := filepath.Join(unitDir, "nugs-watch.timer")
 
 	ui.PrintSuccess("Nugs watch timer enabled")
 	ui.PrintKeyValue("Binary", binPath, ui.ColorCyan)
@@ -97,7 +127,14 @@ func writeWatchUnitFiles(cfg *model.Config, unitDir, binPath string) error {
 	}
 
 	servicePath := filepath.Join(unitDir, "nugs-watch.service")
-	if err := writeUnitFile(servicePath, serviceTemplate, struct{ BinaryPath string }{BinaryPath: binPath}); err != nil {
+	if !filepath.IsAbs(binPath) {
+		return fmt.Errorf("binary path must be absolute: %s", binPath)
+	}
+	templateData := struct {
+		BinaryPath string
+		Path       string
+	}{BinaryPath: binPath, Path: os.Getenv("PATH")}
+	if err := writeUnitFile(servicePath, serviceTemplate, templateData); err != nil {
 		return fmt.Errorf("failed to write service unit: %w", err)
 	}
 
@@ -144,8 +181,11 @@ func toSystemdDuration(s string) (string, error) {
 
 // WatchDisable stops and disables the nugs-watch systemd timer and removes unit files.
 func WatchDisable() error {
-	// Stop and disable — ignore errors if units aren't loaded (they may not exist yet).
-	_ = systemctlUser("disable", "--now", "nugs-watch.timer")
+	// A failed disable leaves the unit files intact so the operation can be
+	// retried without losing the installed configuration.
+	if err := systemctlUser("disable", "--now", "nugs-watch.timer"); err != nil {
+		return fmt.Errorf("failed to disable timer: %w", err)
+	}
 	_ = systemctlUser("stop", "nugs-watch.service")
 
 	unitDir, err := systemdUserDir()
@@ -155,10 +195,12 @@ func WatchDisable() error {
 
 	servicePath := filepath.Join(unitDir, "nugs-watch.service")
 	timerPath := filepath.Join(unitDir, "nugs-watch.timer")
+	backup := snapshotUnitFiles(servicePath, timerPath)
 
 	removed := 0
 	for _, p := range []string{servicePath, timerPath} {
 		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			restoreUnitFiles(backup)
 			return fmt.Errorf("failed to remove %s: %w", p, err)
 		} else if err == nil {
 			removed++
@@ -166,7 +208,9 @@ func WatchDisable() error {
 	}
 
 	if err := systemctlUser("daemon-reload"); err != nil {
-		ui.PrintWarning(fmt.Sprintf("daemon-reload failed after removing unit files: %v", err))
+		restoreUnitFiles(backup)
+		_ = systemctlUser("daemon-reload")
+		return fmt.Errorf("daemon-reload failed after removing unit files: %w", err)
 	}
 
 	if removed == 0 {
@@ -175,6 +219,31 @@ func WatchDisable() error {
 		ui.PrintSuccess("Nugs watch timer disabled and unit files removed")
 	}
 	return nil
+}
+
+type unitSnapshot map[string][]byte
+
+func snapshotUnitFiles(paths ...string) unitSnapshot {
+	snapshot := make(unitSnapshot, len(paths))
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err == nil {
+			snapshot[path] = data
+		} else {
+			snapshot[path] = nil
+		}
+	}
+	return snapshot
+}
+
+func restoreUnitFiles(snapshot unitSnapshot) {
+	for path, data := range snapshot {
+		if data == nil {
+			_ = os.Remove(path)
+			continue
+		}
+		_ = cache.WriteFileAtomic(path, data, 0644)
+	}
 }
 
 // systemdUserDir returns ~/.config/systemd/user, creating it if needed.
@@ -203,13 +272,8 @@ func writeUnitFile(path, tmplStr string, data any) error {
 		return fmt.Errorf("failed to render template for %s: %w", path, err)
 	}
 
-	tmpPath := path + ".tmp"
-	if err := os.WriteFile(tmpPath, buf.Bytes(), 0644); err != nil {
-		return fmt.Errorf("failed to write temp unit file %s: %w", tmpPath, err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		_ = os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename unit file to %s: %w", path, err)
+	if err := cache.WriteFileAtomic(path, buf.Bytes(), 0644); err != nil {
+		return fmt.Errorf("failed to atomically write unit file %s: %w", path, err)
 	}
 	return nil
 }

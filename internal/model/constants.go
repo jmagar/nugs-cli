@@ -55,6 +55,8 @@ const (
 	LiveHDVideoFormatLabel    = "LIVE HD VIDEO"
 	AvailableAvailabilityType = "AVAILABLE"
 	ShowContainerType         = "Show"
+	AvailableCatalogView      = 1
+	PreorderCatalogView       = 2
 
 	Res2160 = "2160"
 	Res4K   = "4K"

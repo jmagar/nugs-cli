@@ -36,12 +36,13 @@ func (s circuitState) String() string {
 // stays open for `resetTimeout`, then enters half-open to probe recovery.
 // All methods are safe for concurrent use.
 type circuitBreaker struct {
-	mu           sync.Mutex
-	state        circuitState
-	consecutive  int           // consecutive failure count
-	threshold    int           // failures required to open the circuit
-	resetTimeout time.Duration // how long to stay open before probing
-	openedAt     time.Time
+	mu            sync.Mutex
+	state         circuitState
+	consecutive   int           // consecutive failure count
+	threshold     int           // failures required to open the circuit
+	resetTimeout  time.Duration // how long to stay open before probing
+	openedAt      time.Time
+	probeInFlight bool
 }
 
 func newCircuitBreaker(threshold int, resetTimeout time.Duration) *circuitBreaker {
@@ -65,10 +66,15 @@ func (cb *circuitBreaker) Allow() (circuitState, bool) {
 	case circuitOpen:
 		if time.Since(cb.openedAt) >= cb.resetTimeout {
 			cb.state = circuitHalfOpen
+			cb.probeInFlight = true
 			return circuitHalfOpen, true
 		}
 		return circuitOpen, false
 	case circuitHalfOpen:
+		if cb.probeInFlight {
+			return circuitHalfOpen, false
+		}
+		cb.probeInFlight = true
 		return circuitHalfOpen, true
 	}
 	return cb.state, false
@@ -83,6 +89,7 @@ func (cb *circuitBreaker) RecordSuccess() (prev circuitState) {
 	prev = cb.state
 	cb.consecutive = 0
 	cb.state = circuitClosed
+	cb.probeInFlight = false
 	return prev
 }
 
@@ -96,6 +103,7 @@ func (cb *circuitBreaker) RecordFailure() (newState circuitState) {
 	if cb.state == circuitHalfOpen || cb.consecutive >= cb.threshold {
 		cb.state = circuitOpen
 		cb.openedAt = time.Now()
+		cb.probeInFlight = false
 	}
 	return cb.state
 }

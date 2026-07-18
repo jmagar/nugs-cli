@@ -1,7 +1,6 @@
 package main
 
-// Rclone wrappers delegating to internal/rclone during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for remote storage operations.
 
 import (
 	"context"

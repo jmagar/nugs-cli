@@ -1,4 +1,9 @@
- Plan: Full Catalog Crawl + Incremental Updates
+# Historical proposal: Full Catalog Crawl + Incremental Updates
+
+> Status: design proposal, not a current command or implementation reference.
+> In particular, do not assume `nugs catalog update full` or the proposed
+> `full-catalog-*.json` files exist until the feature lands and this document is
+> promoted into the user documentation.
 
  Context
 

@@ -5,7 +5,7 @@ This is the main development guide for contributors. For specialized topics, see
 ## 📚 Documentation Index
 
 - **[ARCHITECTURE.md](./docs/ARCHITECTURE.md)** - Package structure, dependencies, design patterns
-- **[CONFIG.md](./docs/CONFIG.md)** - Complete configuration reference (all 23 fields)
+- **[CONFIG.md](./docs/CONFIG.md)** - Complete configuration reference
 - **[README.md](./README.md)** - User documentation and command reference
 - **[COMMANDS.md](./docs/COMMANDS.md)** - Comprehensive command examples
 
@@ -26,7 +26,7 @@ This is the main development guide for contributors. For specialized topics, see
 ## Quick Start
 
 **Prerequisites:**
-- Go 1.24+ (required — `go.mod` specifies `go 1.24`)
+- Go 1.25.12+ (required — `go.mod` specifies the patched minimum toolchain)
 - FFmpeg (for video downloads)
 - Make (required for building)
 
@@ -98,7 +98,7 @@ Root: Command Orchestration (cmd/nugs/main.go)
 - File locking for concurrent safety
 
 **Auto-Refresh**
-- Configurable schedule (daily/weekly)
+- Configurable schedule (hourly/daily/weekly)
 - Timezone-aware refresh times
 - Automatic updates at startup if needed
 
@@ -277,7 +277,7 @@ ffmpeg -hide_banner \
 **Sequential track downloads** (NOT parallel):
 - Prevents API rate limits
 - Single progress box per album
-- **Exception:** Size pre-calculation uses 8 concurrent HEAD requests (60s timeout)
+- **Exception:** Size pre-calculation uses 8 concurrent HEAD requests (5s per request/track, 60s overall maximum)
 
 ### Error Handling
 
@@ -317,7 +317,7 @@ Run `go test ./... -cover` to get the latest coverage report.
 
 **Key areas needing coverage:**
 - `internal/api` - Authentication, rate limiting, circuit breaker
-- `internal/config` - Config loading, all 23 fields
+- `internal/config` - Config loading and all JSON-tagged fields
 - `internal/download` - Download logic, FFmpeg integration
 - `internal/notify` - Gotify client (new)
 
@@ -367,7 +367,7 @@ func TestParseMediaModifier(t *testing.T) {
 
 1. **API client tests** with `httptest.Server` (mock responses)
 2. **Cache concurrency tests** (file locking, corruption recovery)
-3. **Config validation tests** (all 23 fields)
+3. **Config validation tests** (all JSON-tagged fields)
 4. **Download flow tests** with small test files (<1MB)
 
 ### Manual Testing
@@ -532,13 +532,13 @@ make build
 Key capabilities implemented as of the current branch (see `git log` for full history):
 
 **Watch / Catalog Monitoring**
-- `nugs watch [artistID]` — Poll for new shows and auto-download or notify
-- Systemd integration: `nugs watch install` generates a `.service` + `.timer` unit
+- `nugs watch add/remove/list` manages watched artists; `nugs watch check` downloads new shows
+- `nugs watch enable/disable` manages the systemd service and timer
 - Files: `internal/catalog/watch.go`, `watch_systemd.go`, `watch_systemd_other.go`
 
 **Gotify Push Notifications**
 - Download completions, catalog updates, and errors trigger Gotify push alerts
-- Config fields: `gotifyURL`, `gotifyToken`, `gotifyPriority`
+- Config fields: `gotifyUrl`, `gotifyToken`; priorities are application-selected
 - File: `internal/notify/gotify.go`
 
 **API Resilience**
@@ -547,7 +547,8 @@ Key capabilities implemented as of the current branch (see `git log` for full hi
 - File: `internal/api/`
 
 **Media Type Filtering**
-- All catalog commands accept `audio`, `video`, or `both` modifiers
+- Artist list, gaps, coverage, watch-check, and download commands accept media modifiers where documented
+- `nugs latest` cannot filter by media because its source omits product details
 - Emoji indicators in output: 🎵 audio, 🎬 video, 📹 both
 - `nugs gaps 1125 video` — video-only gap detection and fill
 

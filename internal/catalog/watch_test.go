@@ -246,8 +246,9 @@ func TestWatchCheck_CatalogUpdateFailureIsNonFatal(t *testing.T) {
 		OutPath:        t.TempDir(),
 	}
 	err := WatchCheck(context.Background(), cfg, &model.StreamParams{}, "", model.MediaTypeUnknown, deps)
-	if err != nil {
-		t.Fatalf("WatchCheck() returned error on catalog failure: %v", err)
+	var outcome *WatchOutcomeError
+	if !errors.As(err, &outcome) || !errors.Is(err, fetchErr) {
+		t.Fatalf("WatchCheck() error = %v, want degraded outcome wrapping fetch error", err)
 	}
 	if !artistMetaCalled {
 		t.Error("GetArtistMetaCached should be called even when catalog update fails")
@@ -281,8 +282,9 @@ func TestWatchCheck_PerArtistFailureContinues(t *testing.T) {
 		OutPath:        t.TempDir(),
 	}
 	err := WatchCheck(context.Background(), cfg, &model.StreamParams{}, "", model.MediaTypeUnknown, deps)
-	if err != nil {
-		t.Fatalf("WatchCheck() returned error when per-artist failure should be non-fatal: %v", err)
+	var outcome *WatchOutcomeError
+	if !errors.As(err, &outcome) || len(outcome.ArtistErrors) != 2 {
+		t.Fatalf("WatchCheck() error = %v, want outcome with two artist errors", err)
 	}
 
 	// Both artists must have been attempted.
@@ -348,16 +350,16 @@ func TestToSystemdDuration(t *testing.T) {
 	}{
 		{"1h", "1h", false},
 		{"6h", "6h", false},
-		{"30m", "30min", false},    // critical: Go 'm' → systemd 'min', not months
-		{"90m", "1h30min", false},  // mixed hours + minutes
+		{"30m", "30min", false},   // critical: Go 'm' → systemd 'min', not months
+		{"90m", "1h30min", false}, // mixed hours + minutes
 		{"45m", "45min", false},
 		{"3600s", "1h", false},
 		{"1h30m", "1h30min", false},
 		{"30s", "30s", false},
-		{"0s", "", true},           // zero duration rejected
-		{"-1h", "", true},          // negative rejected
-		{"2x", "", true},           // invalid format
-		{"every day", "", true},    // completely invalid
+		{"0s", "", true},        // zero duration rejected
+		{"-1h", "", true},       // negative rejected
+		{"2x", "", true},        // invalid format
+		{"every day", "", true}, // completely invalid
 	}
 
 	for _, tc := range tests {
@@ -407,9 +409,12 @@ func TestWatchEnableUnitContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to read service file: %v", err)
 	}
-	wantExecStart := "ExecStart=" + fakeBin + " watch check"
+	wantExecStart := "ExecStart=\"" + fakeBin + "\" watch check"
 	if !strings.Contains(string(serviceContent), wantExecStart) {
 		t.Errorf("service file missing %q:\n%s", wantExecStart, serviceContent)
+	}
+	if !strings.Contains(string(serviceContent), `Environment="PATH=`) {
+		t.Errorf("service file missing explicit PATH environment:\n%s", serviceContent)
 	}
 
 	// Verify timer file uses the configured interval (6h stays "6h" after conversion).
@@ -443,8 +448,8 @@ func TestSendWatchSummary(t *testing.T) {
 			wantCalled: false,
 		},
 		{
-			name:         "downloads only",
-			downloaded:   3, failed: 0, errs: nil,
+			name:       "downloads only",
+			downloaded: 3, failed: 0, errs: nil,
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch",
 			wantPriority: 5,
@@ -452,32 +457,32 @@ func TestSendWatchSummary(t *testing.T) {
 			wantAbsent:   []string{"failed", "error"},
 		},
 		{
-			name:         "downloads with some failures",
-			downloaded:   2, failed: 1, errs: nil,
+			name:       "downloads with some failures",
+			downloaded: 2, failed: 1, errs: nil,
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch",
 			wantPriority: 5,
 			wantContains: []string{"2 new show(s)", "1 failed"},
 		},
 		{
-			name:         "downloads with artist errors",
-			downloaded:   4, failed: 0, errs: []string{"1125: timeout"},
+			name:       "downloads with artist errors",
+			downloaded: 4, failed: 0, errs: []string{"1125: timeout"},
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch",
 			wantPriority: 5,
 			wantContains: []string{"4 new show(s)", "1 artist error(s)"},
 		},
 		{
-			name:         "download failures only — no artist errors",
-			downloaded:   0, failed: 2, errs: nil,
+			name:       "download failures only — no artist errors",
+			downloaded: 0, failed: 2, errs: nil,
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch Error",
 			wantPriority: 7,
 			wantContains: []string{"2 download failure(s)"},
 		},
 		{
-			name:         "artist errors only — no download failures",
-			downloaded:   0, failed: 0, errs: []string{"461: network error"},
+			name:       "artist errors only — no download failures",
+			downloaded: 0, failed: 0, errs: []string{"461: network error"},
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch Error",
 			wantPriority: 7,
@@ -486,8 +491,8 @@ func TestSendWatchSummary(t *testing.T) {
 			wantAbsent: []string{"0 download failure(s)"},
 		},
 		{
-			name:         "artist errors and download failures combined",
-			downloaded:   0, failed: 1, errs: []string{"461: timeout"},
+			name:       "artist errors and download failures combined",
+			downloaded: 0, failed: 1, errs: []string{"461: timeout"},
 			wantCalled:   true,
 			wantTitle:    "Nugs Watch Error",
 			wantPriority: 7,
@@ -590,8 +595,8 @@ func TestSendArtistUpdate(t *testing.T) {
 // single-artist runs (to avoid double-notifying alongside the final summary).
 func TestWatchCheck_PerArtistNotification(t *testing.T) {
 	tests := []struct {
-		name             string
-		watchedArtists   []string
+		name           string
+		watchedArtists []string
 		// downloadsByArtist controls how many downloads each artist "completes".
 		// Uses album dep call count per artistID to drive successCount.
 		artistDownloads  map[string]int
@@ -651,8 +656,9 @@ func TestWatchCheck_PerArtistNotification(t *testing.T) {
 				OutPath:        t.TempDir(),
 			}
 
-			if err := WatchCheck(context.Background(), cfg, &model.StreamParams{}, "", model.MediaTypeUnknown, deps); err != nil {
-				t.Fatalf("WatchCheck() error = %v", err)
+			var outcome *WatchOutcomeError
+			if err := WatchCheck(context.Background(), cfg, &model.StreamParams{}, "", model.MediaTypeUnknown, deps); !errors.As(err, &outcome) {
+				t.Fatalf("WatchCheck() error = %v, want empty-catalog outcome", err)
 			}
 
 			// With emptyArtistMeta (no shows), no artist has downloads — no per-artist
@@ -697,5 +703,29 @@ func TestWatchEnableUnitContent_MinutesConversion(t *testing.T) {
 	}
 	if !strings.Contains(content, "OnUnitActiveSec=30min") {
 		t.Errorf("timer file should use '30min' for minutes:\n%s", content)
+	}
+}
+
+func TestRestoreUnitFilesRollsBackCreatedAndReplacedFiles(t *testing.T) {
+	dir := t.TempDir()
+	existing := filepath.Join(dir, "existing.service")
+	created := filepath.Join(dir, "created.timer")
+	if err := os.WriteFile(existing, []byte("old"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := snapshotUnitFiles(existing, created)
+	if err := os.WriteFile(existing, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(created, []byte("new"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	restoreUnitFiles(snapshot)
+	data, err := os.ReadFile(existing)
+	if err != nil || string(data) != "old" {
+		t.Fatalf("existing unit not restored: %q, %v", data, err)
+	}
+	if _, err := os.Stat(created); !os.IsNotExist(err) {
+		t.Fatalf("new unit not removed: %v", err)
 	}
 }

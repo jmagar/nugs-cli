@@ -29,7 +29,8 @@ Downloads require authentication (email/password or token in config).
 nugs <url> [url2 url3 ...]
 ```
 
-Accepts any nugs.net URL:
+Accepts the following URL forms (other Nugs.net pages are not guaranteed to
+parse):
 
 | URL Pattern | Type |
 |-------------|------|
@@ -43,7 +44,7 @@ Accepts any nugs.net URL:
 | `https://play.nugs.net/artist/<id>/albums` | Artist albums |
 | `https://play.nugs.net/livestream/<id>/exclusive` | Livestream |
 | `https://play.nugs.net/watch/livestreams/exclusive/<id>` | Livestream |
-| `https://play.nugs.net/#/my-webcasts/<id>` | Webcast |
+| `https://play.nugs.net/#/my-webcasts/<prefix>-<id>-<date>` | Webcast |
 | `https://play.nugs.net/library/webcast/<id>` | Webcast |
 | `https://www.nugs.net/.../Stash-QueueVideo?...` | Paid livestream |
 | `<numeric_id>` | Album by ID |
@@ -190,7 +191,8 @@ nugs catalog latest [limit]
 nugs latest [limit]
 ```
 
-Shows the most recently added shows (default: 15).
+Shows the most recently added shows (default: 15). Media modifiers are not
+supported because this catalog response does not contain product details.
 
 ```bash
 nugs latest                  # Latest 15 additions
@@ -256,12 +258,14 @@ nugs catalog coverage [artist_ids...] [audio|video|both]
 nugs coverage [artist_ids...] [audio|video|both]
 ```
 
-Shows download coverage statistics (total vs downloaded vs missing).
+Shows download coverage statistics (total vs downloaded vs missing). With no
+IDs, it discovers artists from configured local and remote download folders; it
+does not query account subscriptions.
 
 ```bash
 nugs coverage 1125           # Coverage for Billy Strings
 nugs coverage 1125 video     # Video coverage
-nugs coverage                # Coverage for all subscribed artists
+nugs coverage                # Coverage for discovered downloaded artists
 ```
 
 ---
@@ -367,8 +371,8 @@ These top-level shortcuts expand to their full catalog equivalents:
 
 | Key | Action |
 |-----|--------|
-| `p` | Pause/resume download |
-| `c` | Cancel download |
+| `Shift+P` | Pause/resume download |
+| `Shift+C` | Cancel download |
 
 ---
 

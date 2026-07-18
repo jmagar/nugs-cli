@@ -1,8 +1,7 @@
 # Known nugs API endpoints (from current codebase)
 
-This document enumerates endpoints we can **prove** exist based on references in:
-- `nugs-client` (Python)
-- `nugs` (Go reference)
+This document enumerates endpoints we can **prove** exist based on the Go CLI in
+this repository and captured upstream response contracts.
 
 It intentionally avoids undocumented speculation.
 
@@ -116,8 +115,9 @@ This is a method-driven endpoint; behavior changes based on query parameters.
 - **Headers**
   - `User-Agent: <App UA>`
 
-This is implemented in the Python client as:
-- `CatalogAPI.get_artist_metadata(artist_id, offset=1, limit=100)`
+The Go client implements this in `internal/api/client.go`. Callers must preserve
+the availability contract: `availType=1` means currently downloadable content;
+`availType=2` is PREORDER content.
 
 #### `method=catalog.latest`
 - **Purpose**
@@ -224,10 +224,8 @@ This endpoint is used both for audio and subscription-gated video manifests.
 - If you want broader coverage, we should do method discovery from web traffic and/or systematic probing.
 
 ## Where this is implemented
-- Python:
-  - `src/nugs_client/auth.py`
-  - `src/nugs_client/endpoints.py`
-  - `src/nugs_client/downloader.py`
-- Go:
-  - `nugs/main.go`
-  - `nugs/structs.go`
+
+- API requests and authentication: `internal/api/`
+- API response models: `internal/model/api_types.go`
+- URL parsing: `internal/api/url_parser.go`
+- CLI routing: `cmd/nugs/main.go`

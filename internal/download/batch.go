@@ -16,17 +16,18 @@ import (
 
 // Artist downloads all albums for an artist.
 func Artist(ctx context.Context, artistId string, cfg *model.Config, streamParams *model.StreamParams, deps *Deps) error {
-	// Use availType=2 to get complete catalog (both audio and video shows)
-	meta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
+	// AVAILABLE is the complete downloadable catalog. PREORDER is upcoming
+	// content and must never drive a download batch.
+	meta, err := api.GetArtistMetaWithAvailType(ctx, artistId, model.AvailableCatalogView)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
 	}
 	if len(meta) == 0 {
-		return errors.New("The API didn't return any artist metadata.")
+		return errors.New("the API did not return any artist metadata")
 	}
 	if len(meta[0].Response.Containers) == 0 {
-		return errors.New("The API didn't return any containers for this artist.")
+		return errors.New("the API did not return any containers for this artist")
 	}
 	fmt.Println(meta[0].Response.Containers[0].ArtistName)
 
@@ -158,6 +159,7 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 		err = deps.UploadPath(ctx, plistPath, "", cfg, progressBox, false)
 		if err != nil {
 			ui.PrintError(fmt.Sprintf("Playlist upload failed (%s): %v", plistName, err))
+			return fmt.Errorf("playlist upload failed (%s): %w", plistName, err)
 		}
 	}
 
@@ -167,6 +169,7 @@ func Playlist(ctx context.Context, plistId, legacyToken string, cfg *model.Confi
 // processPlaylistTracks iterates over playlist tracks, downloading each with pause/cancel support.
 func processPlaylistTracks(ctx context.Context, tracks []*model.Track, plistPath string, cfg *model.Config, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, deps *Deps) error {
 	trackTotal := len(tracks)
+	var failures []error
 	for trackNum, track := range tracks {
 		if deps.WaitIfPausedOrCancelled != nil {
 			if err := deps.WaitIfPausedOrCancelled(); err != nil {
@@ -180,9 +183,10 @@ func processPlaylistTracks(ctx context.Context, tracks []*model.Track, plistPath
 			}
 			ui.PrintError(fmt.Sprintf("Track %d/%d failed (%s): %v",
 				trackNum, trackTotal, track.SongTitle, err))
+			failures = append(failures, fmt.Errorf("track %d/%d (%s): %w", trackNum, trackTotal, track.SongTitle, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // PaidLstream downloads a paid livestream video.

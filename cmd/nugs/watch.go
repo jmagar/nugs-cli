@@ -42,9 +42,9 @@ func watchDisable() error {
 
 // handleWatchCommand routes pre-auth "watch" subcommands (add/remove/list/enable/disable).
 // Returns true if the command was handled. Returns false for "watch check" (post-auth).
-func handleWatchCommand(ctx context.Context, cfg *Config, jsonLevel string) bool {
+func handleWatchCommand(ctx context.Context, cfg *Config, jsonLevel string) (bool, error) {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "watch" {
-		return false
+		return false, nil
 	}
 
 	if len(cfg.Urls) < 2 {
@@ -54,60 +54,60 @@ func handleWatchCommand(ctx context.Context, cfg *Config, jsonLevel string) bool
 		fmt.Println("       nugs watch check")
 		fmt.Println("       nugs watch enable")
 		fmt.Println("       nugs watch disable")
-		return true
+		return true, nil
 	}
 
 	subCmd := cfg.Urls[1]
 
 	// "watch check" requires auth — defer to handleWatchCheckCommand.
 	if subCmd == "check" {
-		return false
+		return false, nil
 	}
 
 	switch subCmd {
 	case "add":
 		if len(cfg.Urls) < 3 {
 			printInfo("Usage: nugs watch add <artistID>")
-			return true
+			return true, nil
 		}
 		if err := watchAdd(cfg, cfg.Urls[2]); err != nil {
-			handleErr("Watch add failed.", err, true)
+			return true, fmt.Errorf("watch add failed: %w", err)
 		}
 	case "remove":
 		if len(cfg.Urls) < 3 {
 			printInfo("Usage: nugs watch remove <artistID>")
-			return true
+			return true, nil
 		}
 		if err := watchRemove(cfg, cfg.Urls[2]); err != nil {
-			handleErr("Watch remove failed.", err, true)
+			return true, fmt.Errorf("watch remove failed: %w", err)
 		}
 	case "list":
 		if err := watchList(cfg, jsonLevel); err != nil {
-			handleErr("Watch list failed.", err, true)
+			return true, fmt.Errorf("watch list failed: %w", err)
 		}
 	case "enable":
 		if err := watchEnable(cfg); err != nil {
-			handleErr("Watch enable failed.", err, true)
+			return true, fmt.Errorf("watch enable failed: %w", err)
 		}
 	case "disable":
 		if err := watchDisable(); err != nil {
-			handleErr("Watch disable failed.", err, true)
+			return true, fmt.Errorf("watch disable failed: %w", err)
 		}
 	default:
 		// Bare numeric ID shorthand: "nugs watch 1125" → "nugs watch add 1125"
 		if err := watchAdd(cfg, subCmd); err != nil {
-			handleErr("Watch add failed.", err, true)
+			return true, fmt.Errorf("watch add failed: %w", err)
 		}
 	}
 
 	_ = ctx // ctx unused for pre-auth commands but kept for signature consistency
-	return true
+	return true, nil
 }
 
 // handleWatchCheckCommand routes post-auth "watch check". Returns true if handled.
-func handleWatchCheckCommand(ctx context.Context, cfg *Config, streamParams *StreamParams, jsonLevel string) bool {
+func handleWatchCheckCommand(ctx context.Context, cfg *Config, streamParams *StreamParams, jsonLevel string) (bool, error) {
 	if len(cfg.Urls) < 2 || cfg.Urls[0] != "watch" || cfg.Urls[1] != "check" {
-		return false
+		return false, nil
 	}
 
 	// Extract optional media modifier from remaining args.
@@ -117,7 +117,7 @@ func handleWatchCheckCommand(ctx context.Context, cfg *Config, streamParams *Str
 	}
 
 	if err := watchCheck(ctx, cfg, streamParams, jsonLevel, mediaFilter); err != nil {
-		handleErr("Watch check failed.", err, true)
+		return true, fmt.Errorf("watch check failed: %w", err)
 	}
-	return true
+	return true, nil
 }

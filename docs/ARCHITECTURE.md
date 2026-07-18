@@ -48,9 +48,10 @@ Root: Command Orchestration (cmd/nugs/main.go)
 nugs/
 ├── cmd/
 │   └── nugs/
-│       └── main.go           # Entry point (648 lines)
-├── internal/                 # Private packages (13 total)
+│       └── main.go           # Entry point and command orchestration
+├── internal/                 # Private packages (14 total)
 │   ├── model/                # Core data types (no dependencies)
+│   ├── notify/               # Gotify notification adapter
 │   ├── testutil/             # Test utilities (no dependencies)
 │   ├── helpers/              # Path manipulation utilities
 │   ├── ui/                   # Display and formatting
@@ -87,7 +88,10 @@ nugs/
 - `ChdirTemp(t)` - Change to temp directory
 - `WriteExecutable(t, path)` - Create executable script
 
-**Key Pattern:** Dependency inversion - defines types used by higher layers without importing them.
+**Key Pattern:** Dependency inversion - defines types used by higher layers
+without importing them. CLI argument parsing and help are owned by
+`internal/config`, so the foundation layer has no package-main initializer or
+root-owned behavior.
 
 ---
 
@@ -815,17 +819,18 @@ func AcquireLock(path string, retries int) (*FileLock, error) {
 
 ### Runtime Package Platform Variants
 
-**9 platform-specific files:**
-- `detach_unix.go`, `detach_windows.go` - Background process creation
+**Platform-specific files include:**
+- detach/process helpers where operating systems require different behavior
 - `cancel_unix.go`, `cancel_windows.go` - Crawl cancellation
 - `hotkey_input_unix.go`, `hotkey_input_windows.go`, `hotkey_input_other.go` - Interactive pause/cancel
 - `process_alive_unix.go`, `process_alive_windows.go` - PID checking
 - `signal_persistence_unix.go`, `signal_persistence_windows.go` - Signal handling
 
-**Why so many variants?**
-- Unix uses fork/exec, Windows uses CreateProcess
-- Signal handling differs (SIGTERM vs WM_CLOSE)
-- Terminal control differs (termios vs Windows Console API)
+**Why variants?**
+- Cancellation uses SIGTERM on Unix and `os.Process.Kill` on Windows.
+- Terminal control differs between Unix termios and Windows console handling.
+- Auto-detach is selected by shared runtime policy: interactive terminals remain
+  attached; non-interactive mutating commands may detach.
 
 ---
 

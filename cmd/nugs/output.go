@@ -1,7 +1,6 @@
 package main
 
-// Output wrappers delegating to internal/ui during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for terminal output.
 
 import (
 	"fmt"

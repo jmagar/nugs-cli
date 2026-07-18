@@ -8,12 +8,44 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
+
+const maxRcloneProcesses = 8
+
+var (
+	rcloneProcessSlots = make(chan struct{}, maxRcloneProcesses)
+	folderCacheMu      sync.RWMutex
+	folderCache        = make(map[string]map[string]struct{})
+)
+
+func acquireRcloneSlot(ctx context.Context) (func(), error) {
+	select {
+	case rcloneProcessSlots <- struct{}{}:
+		return func() { <-rcloneProcessSlots }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// WithProcessSlot runs fn while holding a package-global rclone subprocess
+// slot. Catalog bulk scans use this too, so every rclone spawn shares one cap.
+func WithProcessSlot(ctx context.Context, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	release, err := acquireRcloneSlot(ctx)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return fn()
+}
 
 // StorageAdapter is a storage provider backed by the rclone CLI.
 // Function fields are injected to keep the adapter unit-testable.
@@ -24,7 +56,7 @@ type StorageAdapter struct {
 	removeAll         func(path string) error
 
 	buildUploadCommand func(ctx context.Context, localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error)
-	buildVerifyCommand func(localPath, remoteFullPath string) (*exec.Cmd, error)
+	buildVerifyCommand func(ctx context.Context, localPath, remoteFullPath string) (*exec.Cmd, error)
 	runWithProgress    func(cmd *exec.Cmd, onProgress UploadProgressFunc) error
 	runCommand         func(cmd *exec.Cmd) error
 	outputCommand      func(cmd *exec.Cmd) ([]byte, error)
@@ -41,7 +73,7 @@ func NewStorageAdapter() *StorageAdapter {
 		calculateLocal:     helpers.CalculateLocalSize,
 		removeAll:          os.RemoveAll,
 		buildUploadCommand: BuildRcloneUploadCommandContext,
-		buildVerifyCommand: BuildRcloneVerifyCommand,
+		buildVerifyCommand: BuildRcloneVerifyCommandContext,
 		runWithProgress: func(cmd *exec.Cmd, onProgress UploadProgressFunc) error {
 			return RunRcloneWithProgress(cmd, onProgress)
 		},
@@ -83,6 +115,11 @@ func (a *StorageAdapter) Upload(ctx context.Context, cfg *model.Config, req mode
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	release, err := acquireRcloneSlot(ctx)
+	if err != nil {
+		return fmt.Errorf("waiting for rclone process slot: %w", err)
+	}
+	defer release()
 	cmd, remoteFullPath, err := a.buildUploadCommand(ctx, req.LocalPath, req.ArtistFolder, cfg, transfers, req.IsVideo)
 	if err != nil {
 		return err
@@ -131,7 +168,7 @@ func (a *StorageAdapter) Upload(ctx context.Context, cfg *model.Config, req mode
 		ui.PrintInfo("Verifying upload integrity...")
 	}
 
-	verifyCmd, err := a.buildVerifyCommand(req.LocalPath, remoteFullPath)
+	verifyCmd, err := a.buildVerifyCommand(ctx, req.LocalPath, remoteFullPath)
 	if err != nil {
 		return fmt.Errorf("failed to build upload verification command: %w", err)
 	}
@@ -176,9 +213,14 @@ func (a *StorageAdapter) PathExists(ctx context.Context, cfg *model.Config, remo
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	release, err := acquireRcloneSlot(timeoutCtx)
+	if err != nil {
+		return false, fmt.Errorf("waiting for rclone process slot: %w", err)
+	}
+	defer release()
 
 	cmd := a.commandContext(timeoutCtx, "rclone", "lsf", fullPath)
-	err := a.runCommand(cmd)
+	err = a.runCommand(cmd)
 	if err == nil {
 		return true, nil
 	}
@@ -208,11 +250,22 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 	}
 	timeoutCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
+	release, err := acquireRcloneSlot(timeoutCtx)
+	if err != nil {
+		return nil, fmt.Errorf("waiting for rclone process slot: %w", err)
+	}
+	defer release()
 	cmd := a.commandContext(timeoutCtx, "rclone", "lsf", fullPath, "--dirs-only")
 	output, err := a.outputCommand(cmd)
 	if err != nil {
 		if code, ok := a.exitCode(err); ok && code == 3 {
 			return folders, nil
+		}
+		folderCacheMu.RLock()
+		stale, ok := folderCache[fullPath]
+		folderCacheMu.RUnlock()
+		if ok {
+			return cloneFolderSet(stale), nil
 		}
 		return nil, fmt.Errorf("failed to list remote artist folders: %w", err)
 	}
@@ -224,5 +277,16 @@ func (a *StorageAdapter) ListArtistFolders(ctx context.Context, cfg *model.Confi
 		}
 		folders[trimmed] = struct{}{}
 	}
+	folderCacheMu.Lock()
+	folderCache[fullPath] = cloneFolderSet(folders)
+	folderCacheMu.Unlock()
 	return folders, nil
+}
+
+func cloneFolderSet(source map[string]struct{}) map[string]struct{} {
+	clone := make(map[string]struct{}, len(source))
+	for value := range source {
+		clone[value] = struct{}{}
+	}
+	return clone
 }

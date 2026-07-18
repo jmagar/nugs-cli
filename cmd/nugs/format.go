@@ -1,10 +1,6 @@
 package main
 
-// Format wrappers delegating to internal/ui during migration.
-// Migration plan: Phase 12 will move renderProgressBox and renderCompletionSummary
-// into internal/ui, eliminating the aliases below. These functions remain here
-// because they depend on root-level runtime callbacks (updateRuntimeProgress)
-// and package-level color variables from structs.go.
+// Command-specific progress rendering with runtime status callbacks.
 
 import (
 	"fmt"
@@ -16,49 +12,24 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-const defaultProgressRenderInterval = model.DefaultProgressRenderInterval
-
-// Box drawing character wrappers
 var (
-	boxTopLeft     = ui.BoxTopLeft
-	boxTopRight    = ui.BoxTopRight
-	boxBottomLeft  = ui.BoxBottomLeft
-	boxBottomRight = ui.BoxBottomRight
-	boxVertical    = ui.BoxVertical
-	boxHorizontal  = ui.BoxHorizontal
-	boxTeeLeft     = ui.BoxTeeLeft
-	boxTeeRight    = ui.BoxTeeRight
-	boxTeeTop      = ui.BoxTeeTop
-	boxTeeBottom   = ui.BoxTeeBottom
-	boxCross       = ui.BoxCross
+	boxVertical   = ui.BoxVertical
+	boxHorizontal = ui.BoxHorizontal
+	boxTeeLeft    = ui.BoxTeeLeft
+	boxTeeRight   = ui.BoxTeeRight
 
 	boxDoubleHorizontal  = ui.BoxDoubleHorizontal
 	boxDoubleTopLeft     = ui.BoxDoubleTopLeft
 	boxDoubleTopRight    = ui.BoxDoubleTopRight
 	boxDoubleBottomLeft  = ui.BoxDoubleBottomLeft
 	boxDoubleBottomRight = ui.BoxDoubleBottomRight
-
-	bulletSquare  = ui.BulletSquare
-	bulletCircle  = ui.BulletCircle
-	bulletArrow   = ui.BulletArrow
-	bulletDiamond = ui.BulletDiamond
 )
 
-// ansiRegex delegates to ui.AnsiRegex
-var ansiRegex = ui.AnsiRegex
-
 func getTermWidth() int                                { return ui.GetTermWidth() }
-func stripAnsiCodes(s string) string                   { return ui.StripAnsiCodes(s) }
-func visibleLength(s string) int                       { return ui.VisibleLength(s) }
 func truncateWithEllipsis(s string, maxLen int) string { return ui.TruncateWithEllipsis(s, maxLen) }
 func padRight(s string, width int) string              { return ui.PadRight(s, width) }
-func padCenter(s string, width int) string             { return ui.PadCenter(s, width) }
-func printHeader(title string)                         { ui.PrintHeader(title) }
 func printSection(title string)                        { ui.PrintSection(title) }
-func printList(items []string, color string)           { ui.PrintList(items, color) }
 func printKeyValue(key, value, valueColor string)      { ui.PrintKeyValue(key, value, valueColor) }
-func printDivider()                                    { ui.PrintDivider() }
-func printBox(text string, borderColor string)         { ui.PrintBox(text, borderColor) }
 
 // Table type aliases
 type TableColumn = ui.TableColumn

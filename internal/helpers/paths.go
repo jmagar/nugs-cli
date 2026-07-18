@@ -3,6 +3,7 @@ package helpers
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -42,7 +43,37 @@ func NewConfigPathResolver(cfg *model.Config) PathResolver {
 // Sanitise cleans a filename by replacing invalid characters.
 func Sanitise(filename string) string {
 	san := sanRegex.ReplaceAllString(filename, "_")
-	return strings.TrimSpace(san)
+	san = strings.TrimSpace(san)
+	if san == "" || san == "." || san == ".." {
+		return "_"
+	}
+	return san
+}
+
+// JoinWithinRoot joins path elements while proving the result remains beneath root.
+func JoinWithinRoot(root string, elems ...string) (string, error) {
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return "", err
+	}
+	candidate := filepath.Join(append([]string{rootAbs}, elems...)...)
+	rel, err := filepath.Rel(rootAbs, candidate)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: %q", ErrPathTraversalDetected, candidate)
+	}
+	return candidate, nil
+}
+
+// RedactURL removes credentials, query parameters, and fragments before logging.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "<invalid-url>"
+	}
+	u.User = nil
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String()
 }
 
 // BuildAlbumFolderName constructs a sanitized folder name for an album

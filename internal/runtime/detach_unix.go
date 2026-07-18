@@ -25,7 +25,7 @@ func SpawnDetached(args []string) (int, string, error) {
 		return 0, "", err
 	}
 	logPath := filepath.Join(cacheDir, "runtime.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return 0, "", err
 	}

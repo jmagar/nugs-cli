@@ -89,3 +89,16 @@ func TestProgressBoxState_ShouldRender_ConcurrentAccess_NoDeadlock(t *testing.T)
 		t.Fatal("progress box concurrent render operations timed out")
 	}
 }
+
+func TestProgressBoxState_VideoConversionCanTransitionToUpload(t *testing.T) {
+	state := &ProgressBoxState{CurrentPhase: PhaseDownload}
+	if err := state.SetPhase(PhaseVerify); err != nil {
+		t.Fatalf("download -> verify: %v", err)
+	}
+	if err := state.SetPhase(PhaseUpload); err != nil {
+		t.Fatalf("verify -> upload: %v", err)
+	}
+	if err := state.SetPhase(PhaseComplete); err != nil {
+		t.Fatalf("upload -> complete: %v", err)
+	}
+}

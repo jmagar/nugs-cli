@@ -301,12 +301,7 @@ func ListArtists(ctx context.Context, jsonLevel string, showFilter string, deps 
 			Total:   len(artists),
 		}
 		for i, artist := range artists {
-			output.Artists[i] = model.ArtistOutput{
-				ArtistID:   artist.ArtistID,
-				ArtistName: artist.ArtistName,
-				NumShows:   artist.NumShows,
-				NumAlbums:  artist.NumAlbums,
-			}
+			output.Artists[i] = model.ArtistOutput(artist)
 		}
 		jsonData, err := json.MarshalIndent(output, "", "  ")
 		if err != nil {
@@ -433,11 +428,7 @@ func ListArtistShows(ctx context.Context, artistId string, jsonLevel string, dep
 	if jsonLevel == "" {
 		ui.PrintInfo("Fetching artist shows...")
 	}
-	availType := 1
-	if mf == model.MediaTypeVideo || mf == model.MediaTypeBoth {
-		availType = 2
-	}
-	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, availType)
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, model.AvailableCatalogView)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -525,7 +516,7 @@ func ListArtistShowsByVenue(ctx context.Context, artistId string, venueFilter st
 		fmt.Printf("Fetching shows at venues matching \"%s\"...\n", venueFilter)
 	}
 
-	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, model.AvailableCatalogView)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -609,7 +600,7 @@ func ListArtistLatestShows(ctx context.Context, artistId string, limit int, json
 		fmt.Printf("Fetching latest %d shows...\n", limit)
 	}
 
-	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, 2)
+	allMeta, err := api.GetArtistMetaWithAvailType(ctx, artistId, model.AvailableCatalogView)
 	if err != nil {
 		ui.PrintError("Failed to get artist metadata")
 		return err
@@ -673,7 +664,7 @@ func ResolveCatPlistID(ctx context.Context, plistUrl string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := api.Client.Do(httpReq)
+	resp, err := api.Do(httpReq)
 	if err != nil {
 		return "", err
 	}

@@ -35,7 +35,7 @@ func TestStorageAdapterUploadWithHooksAndDelete(t *testing.T) {
 		onProgress(55, "8 MiB/s", "440 MiB", "800 MiB")
 		return nil
 	}
-	adapter.buildVerifyCommand = func(localPath, remoteFullPath string) (*exec.Cmd, error) {
+	adapter.buildVerifyCommand = func(_ context.Context, localPath, remoteFullPath string) (*exec.Cmd, error) {
 		if remoteFullPath != "remote:path/artist/local" {
 			t.Fatalf("verify remote path = %q", remoteFullPath)
 		}

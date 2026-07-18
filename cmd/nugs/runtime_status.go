@@ -1,19 +1,18 @@
 package main
 
-// Runtime status wrappers delegating to internal/runtime during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for runtime status publication.
 
 import (
 	"github.com/jmagar/nugs-cli/internal/runtime"
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
-func initRuntimeStatus()                               { runtime.InitRuntimeStatus() }
-func printRuntimeStatus()                              { runtime.PrintRuntimeStatus() }
-func readRuntimeStatus() (RuntimeStatus, error)        { return runtime.ReadRuntimeStatus() }
+func initRuntimeStatus()                          { runtime.InitRuntimeStatus() }
+func printRuntimeStatus()                         { runtime.PrintRuntimeStatus() }
+func readRuntimeStatus() (RuntimeStatus, error)   { return runtime.ReadRuntimeStatus() }
 func readRuntimeControl() (RuntimeControl, error) { return runtime.ReadRuntimeControl() }
-func requestRuntimeCancel() error                      { return runtime.RequestRuntimeCancel() }
-func requestRuntimePause(paused bool) error            { return runtime.RequestRuntimePause(paused) }
+func requestRuntimeCancel() error                 { return runtime.RequestRuntimeCancel() }
+func requestRuntimePause(paused bool) error       { return runtime.RequestRuntimePause(paused) }
 func printActiveRuntimeHint(currentPID int, currentCommand []string) {
 	runtime.PrintActiveRuntimeHint(currentPID, currentCommand)
 }

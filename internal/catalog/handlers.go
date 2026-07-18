@@ -205,12 +205,12 @@ func CatalogUpdate(ctx context.Context, jsonLevel string, deps *Deps) error {
 			}
 		}
 		output := map[string]any{
-			"success":     true,
-			"firstUpdate": isFirstUpdate,
-			"totalShows":  len(catalog.Response.RecentItems),
-			"newShows":    len(newShows),
-			"updateTime":  deps.FormatDuration(updateDuration),
-			"cacheDir":    cacheDir,
+			"success":      true,
+			"firstUpdate":  isFirstUpdate,
+			"totalShows":   len(catalog.Response.RecentItems),
+			"newShows":     len(newShows),
+			"updateTime":   deps.FormatDuration(updateDuration),
+			"cacheDir":     cacheDir,
 			"newShowsList": newShowsData,
 		}
 		if err := PrintJSON(output); err != nil {
@@ -856,6 +856,7 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 
 	var allStats []coverageStats
 	var remoteScanErr error
+	var failures []string
 
 	if len(artistIds) == 0 {
 		if jsonLevel == "" {
@@ -894,15 +895,23 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		if len(discoveredArtistDirs) == 0 {
 			if jsonLevel != "" {
 				output := map[string]any{
-					"artists": []map[string]any{},
-					"total":   0,
-					"message": "No downloaded artists found",
+					"artists":         []map[string]any{},
+					"total":           0,
+					"message":         "No downloaded artists found",
+					"partial":         remoteScanErr != nil,
+					"remoteScanError": nil,
+				}
+				if remoteScanErr != nil {
+					output["remoteScanError"] = remoteScanErr.Error()
 				}
 				if err := PrintJSON(output); err != nil {
 					return err
 				}
 			} else {
 				fmt.Println("No downloaded artists found in local output or remote storage")
+			}
+			if remoteScanErr != nil {
+				return &CoveragePartialError{RemoteScanErr: remoteScanErr}
 			}
 			return nil
 		}
@@ -1009,6 +1018,7 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 
 	for result := range results {
 		if result.err != nil {
+			failures = append(failures, result.err.Error())
 			if jsonLevel == "" {
 				ui.PrintWarning(fmt.Sprintf("Failed to get metadata for %v", result.err))
 			}
@@ -1054,6 +1064,8 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 				"coverage":   totalCoveragePct,
 			},
 			"remoteScanError": nil,
+			"partial":         remoteScanErr != nil || len(failures) > 0,
+			"failures":        failures,
 		}
 		if remoteScanErr != nil {
 			output["remoteScanError"] = remoteScanErr.Error()
@@ -1097,8 +1109,27 @@ func CatalogCoverage(ctx context.Context, artistIds []string, cfg *model.Config,
 		fmt.Println()
 	}
 
+	if remoteScanErr != nil || len(failures) > 0 {
+		return &CoveragePartialError{RemoteScanErr: remoteScanErr, Failures: failures, Completed: len(allStats), Requested: len(artistIds)}
+	}
 	return nil
 }
+
+// CoveragePartialError makes best-effort coverage explicit to callers instead
+// of silently turning failed artists or a failed remote scan into success.
+type CoveragePartialError struct {
+	RemoteScanErr error
+	Failures      []string
+	Completed     int
+	Requested     int
+}
+
+func (e *CoveragePartialError) Error() string {
+	return fmt.Sprintf("coverage partial: completed=%d requested=%d artist_failures=%d remote_scan_failed=%t",
+		e.Completed, e.Requested, len(e.Failures), e.RemoteScanErr != nil)
+}
+
+func (e *CoveragePartialError) Unwrap() error { return e.RemoteScanErr }
 
 // CatalogList displays all shows for an artist with status indicators.
 func CatalogList(ctx context.Context, artistIds []string, cfg *model.Config, jsonLevel string, mediaFilter model.MediaType, deps *Deps) error {

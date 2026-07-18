@@ -96,7 +96,10 @@ func TestWriteCatalogCache_ConcurrentWriters_Consistency(t *testing.T) {
 	}
 
 	for _, name := range files {
-		path := filepath.Join(cacheDir, name)
+		path, pathErr := catalogArtifactPath(cacheDir, name)
+		if pathErr != nil {
+			t.Fatalf("resolve %s: %v", name, pathErr)
+		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			t.Fatalf("failed reading %s: %v", name, readErr)

@@ -1,7 +1,6 @@
 package main
 
-// List command wrappers delegating to internal/list during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for listing operations.
 
 import (
 	"context"

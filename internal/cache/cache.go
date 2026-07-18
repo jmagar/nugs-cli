@@ -5,11 +5,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/model"
 )
+
+const (
+	catalogManifestFile  = "catalog-current.json"
+	catalogGenerationDir = "catalog-generations"
+)
+
+type catalogManifest struct {
+	Generation string `json:"generation"`
+}
+
+func catalogArtifactPath(cacheDir, name string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(cacheDir, catalogManifestFile))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return filepath.Join(cacheDir, name), nil
+		}
+		return "", fmt.Errorf("failed to read catalog manifest: %w", err)
+	}
+	var manifest catalogManifest
+	if err := json.Unmarshal(data, &manifest); err != nil || filepath.Base(manifest.Generation) != manifest.Generation || manifest.Generation == "" {
+		return "", fmt.Errorf("invalid catalog manifest")
+	}
+	return filepath.Join(cacheDir, catalogGenerationDir, manifest.Generation, name), nil
+}
 
 // GetCacheDir returns the cache directory path, creating it if needed.
 func GetCacheDir() (string, error) {
@@ -18,9 +43,12 @@ func GetCacheDir() (string, error) {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
 	cacheDir := filepath.Join(homeDir, ".cache", "nugs")
-	err = os.MkdirAll(cacheDir, 0755)
+	err = os.MkdirAll(cacheDir, 0700)
 	if err != nil {
 		return "", fmt.Errorf("failed to create cache directory: %w", err)
+	}
+	if err := os.Chmod(cacheDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to secure cache directory: %w", err)
 	}
 	return cacheDir, nil
 }
@@ -31,7 +59,10 @@ func ReadCacheMeta() (*model.CacheMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	metaPath := filepath.Join(cacheDir, "catalog-meta.json")
+	metaPath, err := catalogArtifactPath(cacheDir, "catalog-meta.json")
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := os.ReadFile(metaPath)
 	if err != nil {
@@ -55,7 +86,10 @@ func ReadCatalogCache() (*model.LatestCatalogResp, error) {
 	if err != nil {
 		return nil, err
 	}
-	catalogPath := filepath.Join(cacheDir, "catalog.json")
+	catalogPath, err := catalogArtifactPath(cacheDir, "catalog.json")
+	if err != nil {
+		return nil, err
+	}
 
 	data, err := os.ReadFile(catalogPath)
 	if err != nil {
@@ -150,49 +184,71 @@ func prepareCatalogCacheData(catalog *model.LatestCatalogResp, updateDuration ti
 }
 
 func writePreparedCatalogCache(cacheDir string, prepared *preparedCatalogCacheData) error {
-	if err := atomicWriteFile(filepath.Join(cacheDir, "catalog.json"), prepared.catalogData); err != nil {
-		return err
-	}
-	if err := atomicWriteFile(filepath.Join(cacheDir, "catalog-meta.json"), prepared.metaData); err != nil {
-		return err
-	}
-	if err := atomicWriteFile(filepath.Join(cacheDir, "artists_index.json"), prepared.artistIdxData); err != nil {
-		return err
-	}
-	return atomicWriteFile(filepath.Join(cacheDir, "containers_index.json"), prepared.containerData)
+	return writePreparedCatalogCacheWithFailpoint(cacheDir, prepared, -1)
 }
 
-// writeCatalogJSON writes catalog.json atomically using a temp file.
-func writeCatalogJSON(cacheDir string, catalog *model.LatestCatalogResp) error {
-	catalogPath := filepath.Join(cacheDir, "catalog.json")
-	catalogData, err := json.Marshal(catalog)
-	if err != nil {
-		return fmt.Errorf("failed to marshal catalog: %w", err)
+// writePreparedCatalogCacheWithFailpoint exists so tests can prove that a
+// failure before the manifest swap never exposes a mixed generation.
+func writePreparedCatalogCacheWithFailpoint(cacheDir string, prepared *preparedCatalogCacheData, failAfter int) error {
+	root := filepath.Join(cacheDir, catalogGenerationDir)
+	if err := os.MkdirAll(root, 0755); err != nil {
+		return err
 	}
-	return atomicWriteFile(catalogPath, catalogData)
+	generation, err := os.MkdirTemp(root, "generation-")
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.RemoveAll(generation)
+		}
+	}()
+	artifacts := []struct {
+		name string
+		data []byte
+	}{
+		{"catalog.json", prepared.catalogData},
+		{"catalog-meta.json", prepared.metaData},
+		{"artists_index.json", prepared.artistIdxData},
+		{"containers_index.json", prepared.containerData},
+	}
+	for i, artifact := range artifacts {
+		if failAfter == i {
+			return fmt.Errorf("injected catalog generation failure after %d artifacts", i)
+		}
+		if err := WriteFileAtomic(filepath.Join(generation, artifact.name), artifact.data, 0644); err != nil {
+			return err
+		}
+	}
+	manifestData, err := json.Marshal(catalogManifest{Generation: filepath.Base(generation)})
+	if err != nil {
+		return err
+	}
+	if err := WriteFileAtomic(filepath.Join(cacheDir, catalogManifestFile), manifestData, 0644); err != nil {
+		return err
+	}
+	committed = true
+	pruneCatalogGenerations(root, filepath.Base(generation))
+	return nil
 }
 
-// writeCatalogMeta writes catalog-meta.json atomically.
-func writeCatalogMeta(cacheDir string, catalog *model.LatestCatalogResp, updateDuration time.Duration, formatDurationFn func(time.Duration) string) error {
-	artistSet := make(map[int]bool)
-	for _, item := range catalog.Response.RecentItems {
-		artistSet[item.ArtistID] = true
-	}
-
-	meta := model.CacheMeta{
-		LastUpdated:    time.Now(),
-		CacheVersion:   "v1.0.0",
-		TotalShows:     len(catalog.Response.RecentItems),
-		TotalArtists:   len(artistSet),
-		APIMethod:      "catalog.latest",
-		UpdateDuration: formatDurationFn(updateDuration),
-	}
-	metaPath := filepath.Join(cacheDir, "catalog-meta.json")
-	metaData, err := json.Marshal(meta)
+func pruneCatalogGenerations(root, current string) {
+	entries, err := os.ReadDir(root)
 	if err != nil {
-		return fmt.Errorf("failed to marshal metadata: %w", err)
+		return
 	}
-	return atomicWriteFile(metaPath, metaData)
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() > entries[j].Name() })
+	kept := 0
+	for _, entry := range entries {
+		if !entry.IsDir() || entry.Name() == current || kept < 1 {
+			if entry.IsDir() && entry.Name() != current {
+				kept++
+			}
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(root, entry.Name()))
+	}
 }
 
 // ReadContainersIndex reads the containers index file.
@@ -202,7 +258,10 @@ func ReadContainersIndex() (*model.ContainersIndex, error) {
 	if err != nil {
 		return nil, err
 	}
-	indexPath := filepath.Join(cacheDir, "containers_index.json")
+	indexPath, err := catalogArtifactPath(cacheDir, "containers_index.json")
+	if err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(indexPath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -218,69 +277,4 @@ func ReadContainersIndex() (*model.ContainersIndex, error) {
 		idx.Containers = map[int]model.ContainerIndexEntry{}
 	}
 	return &idx, nil
-}
-
-// atomicWriteFile writes data to a temp file then atomically renames it.
-func atomicWriteFile(targetPath string, data []byte) error {
-	tmpFile, err := os.CreateTemp(filepath.Dir(targetPath), "nugs_cache_*.tmp")
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-
-	if _, err := tmpFile.Write(data); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to write temp file: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, targetPath); err != nil {
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename temp file: %w", err)
-	}
-	return nil
-}
-
-// buildArtistIndex creates artist name -> ID lookup index (artists_index.json).
-// Must be called within WithCacheLock.
-func buildArtistIndex(cacheDir string, catalog *model.LatestCatalogResp) error {
-	index := make(map[string]int)
-	for _, item := range catalog.Response.RecentItems {
-		normalizedName := strings.ToLower(strings.TrimSpace(item.ArtistName))
-		index[normalizedName] = item.ArtistID
-	}
-
-	artistIndex := model.ArtistsIndex{Index: index}
-	indexPath := filepath.Join(cacheDir, "artists_index.json")
-	indexData, err := json.Marshal(artistIndex)
-	if err != nil {
-		return fmt.Errorf("failed to marshal artist index: %w", err)
-	}
-	return atomicWriteFile(indexPath, indexData)
-}
-
-// buildContainerIndex creates containerID -> artist mapping (containers_index.json).
-// Must be called within WithCacheLock.
-func buildContainerIndex(cacheDir string, catalog *model.LatestCatalogResp) error {
-	containers := make(map[int]model.ContainerIndexEntry)
-	for _, item := range catalog.Response.RecentItems {
-		containers[item.ContainerID] = model.ContainerIndexEntry{
-			ArtistID:        item.ArtistID,
-			ArtistName:      item.ArtistName,
-			ContainerInfo:   item.ContainerInfo,
-			PerformanceDate: item.PerformanceDateStr,
-		}
-	}
-
-	containerIndex := model.ContainersIndex{Containers: containers}
-	indexPath := filepath.Join(cacheDir, "containers_index.json")
-	indexData, err := json.Marshal(containerIndex)
-	if err != nil {
-		return fmt.Errorf("failed to marshal container index: %w", err)
-	}
-	return atomicWriteFile(indexPath, indexData)
 }

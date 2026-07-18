@@ -19,20 +19,14 @@ var (
 	ErrScanTextFile = errors.New("failed to scan text file")
 )
 
-// HandleErr prints an error to stderr and optionally exits. When fatal is true,
-// the process exits with code 1 after printing. When false, execution continues
-// and callers are responsible for checking err themselves before calling.
-//
-// Deprecated: Prefer returning errors to callers instead of printing directly.
-func HandleErr(errText string, err error, fatal bool) {
+// ReportErr prints a non-fatal error to stderr. Prefer returning errors when the
+// caller can make a meaningful decision about the failure.
+func ReportErr(errText string, err error) {
 	if err == nil {
 		return
 	}
 	errString := errText + "\n" + err.Error()
 	fmt.Fprintln(os.Stderr, errString)
-	if fatal {
-		os.Exit(1)
-	}
 }
 
 // WasRunFromSrc checks if the binary was run from a Go build temp directory.

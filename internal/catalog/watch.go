@@ -13,6 +13,23 @@ import (
 	"github.com/jmagar/nugs-cli/internal/ui"
 )
 
+// WatchOutcomeError reports a completed but degraded watch run. Returning it
+// makes systemd mark the one-shot unit failed while preserving all counts in
+// the journal and notifications.
+type WatchOutcomeError struct {
+	Downloaded    int
+	Failed        int
+	ArtistErrors  []string
+	CatalogUpdate error
+}
+
+func (e *WatchOutcomeError) Error() string {
+	return fmt.Sprintf("watch outcome: downloaded=%d failed=%d artist_errors=%d catalog_degraded=%t",
+		e.Downloaded, e.Failed, len(e.ArtistErrors), e.CatalogUpdate != nil)
+}
+
+func (e *WatchOutcomeError) Unwrap() error { return e.CatalogUpdate }
+
 // WatchAdd adds an artist ID to the watch list in config.
 // The ID must be a valid integer. Duplicates are silently ignored.
 func WatchAdd(cfg *model.Config, artistID string) error {
@@ -137,7 +154,9 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 
 	// Silently update the catalog first. Pass jsonLevel so CatalogUpdate suppresses
 	// its human-readable table output when the caller expects JSON on stdout.
+	var catalogUpdateErr error
 	if err := CatalogUpdate(ctx, jsonLevel, deps); err != nil {
+		catalogUpdateErr = err
 		// Non-fatal: proceed with potentially stale catalog.
 		if jsonLevel == "" {
 			ui.PrintWarning(fmt.Sprintf("Catalog update failed (continuing with cached data): %v", err))
@@ -147,6 +166,7 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 	totalDownloaded := 0
 	totalFailed := 0
 	var artistErrors []string
+	nameByID := buildArtistNameMap()
 
 	for _, artistID := range cfg.WatchedArtists {
 		select {
@@ -156,7 +176,7 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 		}
 
 		if jsonLevel == "" {
-			name := resolveArtistName(artistID)
+			name := resolveArtistNameFromMap(artistID, nameByID)
 			if name != "" {
 				ui.PrintHeader(fmt.Sprintf("Checking %s (%s)", artistID, name))
 			} else {
@@ -184,6 +204,13 @@ func WatchCheck(ctx context.Context, cfg *model.Config, streamParams *model.Stre
 	}
 
 	sendWatchSummary(ctx, deps.Notify, totalDownloaded, totalFailed, artistErrors)
+	if catalogUpdateErr != nil || totalFailed > 0 || len(artistErrors) > 0 {
+		outcome := &WatchOutcomeError{Downloaded: totalDownloaded, Failed: totalFailed, ArtistErrors: artistErrors, CatalogUpdate: catalogUpdateErr}
+		if catalogUpdateErr != nil {
+			return fmt.Errorf("%w: catalog update: %v", outcome, catalogUpdateErr)
+		}
+		return outcome
+	}
 	return nil
 }
 
@@ -228,7 +255,7 @@ func sendWatchSummary(ctx context.Context, notify func(ctx context.Context, titl
 		parts = append(parts, errs...)
 		_ = notify(ctx, "Nugs Watch Error", strings.Join(parts, "\n"), 7)
 
-	// Nothing to report: all artists up-to-date, no errors. Stay silent.
+		// Nothing to report: all artists up-to-date, no errors. Stay silent.
 	}
 }
 
@@ -251,11 +278,14 @@ func buildArtistNameMap() map[int]string {
 // resolveArtistName looks up an artist name from the containers index cache.
 // Returns an empty string if the cache is unavailable or the artist is not found.
 func resolveArtistName(artistID string) string {
+	return resolveArtistNameFromMap(artistID, buildArtistNameMap())
+}
+
+func resolveArtistNameFromMap(artistID string, names map[int]string) string {
 	idInt, err := strconv.Atoi(artistID)
 	if err != nil {
 		return ""
 	}
-	names := buildArtistNameMap()
 	return names[idInt]
 }
 

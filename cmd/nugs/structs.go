@@ -1,15 +1,10 @@
 package main
 
-// Theme wrappers delegating to internal/ui during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
-// The ui package init() runs first (Go import ordering), setting colors before
-// these vars are initialized.
+// Command rendering aliases are synchronized from the selected UI theme.
 
 import "github.com/jmagar/nugs-cli/internal/ui"
 
-// Color variable wrappers - package-level copies from ui, snapshotted in init().
-// This avoids qualifying every reference as ui.ColorRed etc. in the root package
-// and will be removed in Phase 12 when rendering moves fully into internal/ui.
+// Color values are snapshotted from ui after theme selection.
 var (
 	colorReset  string
 	colorRed    string
@@ -19,25 +14,16 @@ var (
 	colorPurple string
 	colorCyan   string
 	colorBold   string
-	activeTheme string
 )
 
 // Symbol variable wrappers
 var (
 	symbolCheck    string
 	symbolCross    string
-	symbolArrow    string
-	symbolMusic    string
-	symbolUpload   string
 	symbolDownload string
 	symbolInfo     string
 	symbolWarning  string
-	symbolGear     string
 	symbolPackage  string
-	symbolRocket   string
-	symbolAudio    string
-	symbolVideo    string
-	symbolBoth     string
 )
 
 func init() {
@@ -53,20 +39,11 @@ func syncFromUI() {
 	colorPurple = ui.ColorPurple
 	colorCyan = ui.ColorCyan
 	colorBold = ui.ColorBold
-	activeTheme = ui.ActiveTheme
 
 	symbolCheck = ui.SymbolCheck
 	symbolCross = ui.SymbolCross
-	symbolArrow = ui.SymbolArrow
-	symbolMusic = ui.SymbolMusic
-	symbolUpload = ui.SymbolUpload
 	symbolDownload = ui.SymbolDownload
 	symbolInfo = ui.SymbolInfo
 	symbolWarning = ui.SymbolWarning
-	symbolGear = ui.SymbolGear
 	symbolPackage = ui.SymbolPackage
-	symbolRocket = ui.SymbolRocket
-	symbolAudio = ui.SymbolAudio
-	symbolVideo = ui.SymbolVideo
-	symbolBoth = ui.SymbolBoth
 }
