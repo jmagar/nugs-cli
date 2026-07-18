@@ -126,10 +126,20 @@ func FormatRes(res string) string {
 }
 
 // ChooseVariant selects the best video variant from a manifest URL.
-func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
+func ChooseVariant(ctx context.Context, manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
+	return ChooseVariantContext(ctx, manifestUrl, wantRes)
+}
+
+// ChooseVariantContext selects a variant with cancellation.
+func ChooseVariantContext(ctx context.Context, manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	origWantRes := wantRes
 	var wantVariant *m3u8.Variant
-	req, err := api.Client.Get(manifestUrl)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestUrl, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	httpReq = httpReq.WithContext(ctx)
+	req, err := api.Do(httpReq)
 	if err != nil {
 		return nil, "", err
 	}
@@ -144,6 +154,9 @@ func ChooseVariant(manifestUrl, wantRes string) (*m3u8.Variant, string, error) {
 	master, ok := playlist.(*m3u8.MasterPlaylist)
 	if !ok {
 		return nil, "", errors.New("expected HLS master playlist but got media playlist")
+	}
+	if len(master.Variants) == 0 {
+		return nil, "", ErrEmptyHLSMaster
 	}
 	sort.Slice(master.Variants, func(x, y int) bool {
 		return master.Variants[x].Bandwidth > master.Variants[y].Bandwidth
@@ -209,10 +222,14 @@ func GetManifestBase(manifestUrl string) (string, string, error) {
 	return base, "?" + u.RawQuery, nil
 }
 
-// GetSegUrls retrieves segment URLs from an HLS media playlist.
-func GetSegUrls(manifestUrl, query string) ([]string, error) {
+// GetSegUrlsContext retrieves media segments with cancellation.
+func GetSegUrlsContext(ctx context.Context, manifestUrl, query string) ([]string, error) {
 	var segUrls []string
-	req, err := api.Client.Get(manifestUrl)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, manifestUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req, err := api.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +273,7 @@ func DownloadVideoFile(ctx context.Context, videoPath, _url string, onProgress f
 		return err
 	}
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-", startByte))
-	do, err := api.Client.Do(req)
+	do, err := api.Do(req)
 	if err != nil {
 		return err
 	}
@@ -295,6 +312,7 @@ func DownloadVideoFile(ctx context.Context, videoPath, _url string, onProgress f
 
 	// Use a simple writer that doesn't need deps (video has its own progress callbacks)
 	_, err = io.Copy(f, io.TeeReader(do.Body, &simpleWriteCounter{wc: counter}))
+	err = errors.Join(err, f.Close())
 	if onProgress == nil {
 		fmt.Println("")
 	}
@@ -334,7 +352,7 @@ func DownloadLstream(ctx context.Context, videoPath, baseUrl string, segUrls []s
 		if err != nil {
 			return err
 		}
-		do, err := api.Client.Do(req)
+		do, err := api.Do(req)
 		if err != nil {
 			return err
 		}
@@ -351,7 +369,7 @@ func DownloadLstream(ctx context.Context, videoPath, baseUrl string, segUrls []s
 	if onProgress == nil {
 		fmt.Println("")
 	}
-	return nil
+	return f.Close()
 }
 
 // ExtractDuration extracts the duration string from ffmpeg output.
@@ -377,11 +395,11 @@ func ParseDuration(dur string) (int, error) {
 	return int(rounded), nil
 }
 
-// GetDuration gets the duration of a TS file using ffmpeg.
-func GetDuration(tsPath, ffmpegNameStr string) (int, error) {
+// GetDurationContext reads duration while allowing ffmpeg cancellation.
+func GetDurationContext(ctx context.Context, tsPath, ffmpegNameStr string) (int, error) {
 	var errBuffer bytes.Buffer
 	args := []string{"-hide_banner", "-i", tsPath}
-	cmd := exec.Command(ffmpegNameStr, args...)
+	cmd := exec.CommandContext(ctx, ffmpegNameStr, args...)
 	cmd.Stderr = &errBuffer
 	// Return code's always 1 as we're not providing any output files.
 	err := cmd.Run()
@@ -400,7 +418,7 @@ func GetDuration(tsPath, ffmpegNameStr string) (int, error) {
 	}
 	dur := ExtractDuration(errStr)
 	if dur == "" {
-		return 0, errors.New("No regex match.")
+		return 0, errors.New("no duration found in ffmpeg output")
 	}
 	durSecs, err := ParseDuration(dur)
 	if err != nil {
@@ -484,9 +502,8 @@ func WriteChapsFile(chapters []any, dur int) (string, error) {
 	return chapsPath, nil
 }
 
-// TsToMp4 converts a TS file to MP4 using ffmpeg, optionally including chapters.
-// chapsFilePath is the path to the chapters metadata file (empty if no chapters).
-func TsToMp4(vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
+// TsToMp4Context converts a TS file and cancels ffmpeg with ctx.
+func TsToMp4Context(ctx context.Context, vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
 	var (
 		errBuffer bytes.Buffer
 		args      []string
@@ -499,12 +516,11 @@ func TsToMp4(vidPathTs, vidPath, ffmpegNameStr, chapsFilePath string) error {
 	} else {
 		args = []string{"-hide_banner", "-i", vidPathTs, "-c", "copy", vidPath}
 	}
-	cmd := exec.Command(ffmpegNameStr, args...)
+	cmd := exec.CommandContext(ctx, ffmpegNameStr, args...)
 	cmd.Stderr = &errBuffer
 	err := cmd.Run()
 	if err != nil {
-		errString := fmt.Sprintf("%s\n%s", err, errBuffer.String())
-		return errors.New(errString)
+		return fmt.Errorf("ffmpeg MP4 conversion: %w: %s", err, errBuffer.String())
 	}
 	return nil
 }
@@ -561,9 +577,9 @@ func PrepareVideoProgressBox(meta *model.AlbArtResp, cfg *model.Config, progress
 		RcloneEnabled:  cfg.RcloneEnabled,
 		StartTime:      time.Now(),
 		RenderInterval: model.DefaultProgressRenderInterval,
+		CurrentPhase:   model.PhaseDownload,
 	}
 
-	box.SetPhase(model.PhaseVerify)
 	if deps.SetCurrentProgressBox != nil {
 		deps.SetCurrentProgressBox(box)
 	}
@@ -617,7 +633,7 @@ func resolveManifestAndVariant(ctx context.Context, meta *model.AlbArtResp, vide
 	if manifestUrl == "" {
 		return "", nil, "", errors.New("the api didn't return a video manifest url")
 	}
-	variant, retRes, err := ChooseVariant(manifestUrl, cfg.WantRes)
+	variant, retRes, err := ChooseVariantContext(ctx, manifestUrl, cfg.WantRes)
 	if err != nil {
 		ui.PrintError("Failed to get video master manifest")
 		return "", nil, "", err
@@ -713,7 +729,7 @@ func downloadVideoContent(ctx context.Context, vidPathTs, manBaseUrl string, seg
 func convertAndUploadVideo(ctx context.Context, vidPathTs, vidPath, artistFolder string, meta *model.AlbArtResp, cfg *model.Config, chapsAvail bool, progressBox *model.ProgressBoxState, deps *Deps) error {
 	var chapsFilePath string
 	if chapsAvail {
-		dur, getDurErr := GetDuration(vidPathTs, cfg.FfmpegNameStr)
+		dur, getDurErr := GetDurationContext(ctx, vidPathTs, cfg.FfmpegNameStr)
 		if getDurErr != nil {
 			ui.PrintError("Failed to get TS duration")
 			return getDurErr
@@ -731,13 +747,15 @@ func convertAndUploadVideo(ctx context.Context, vidPathTs, vidPath, artistFolder
 	}
 	ui.PrintInfo("Putting into MP4 container...")
 	if progressBox != nil {
-		progressBox.SetPhase(model.PhaseVerify)
+		if err := progressBox.SetPhase(model.PhaseVerify); err != nil {
+			return err
+		}
 		progressBox.SetMessage(model.MessagePriorityStatus, model.VideoConvertStatusLabel, model.StatusMessageDuration)
 		if deps.RenderProgressBox != nil {
 			deps.RenderProgressBox(progressBox)
 		}
 	}
-	if err := TsToMp4(vidPathTs, vidPath, cfg.FfmpegNameStr, chapsFilePath); err != nil {
+	if err := TsToMp4Context(ctx, vidPathTs, vidPath, cfg.FfmpegNameStr, chapsFilePath); err != nil {
 		ui.PrintError("Failed to put TS into MP4 container")
 		return err
 	}
@@ -746,14 +764,16 @@ func convertAndUploadVideo(ctx context.Context, vidPathTs, vidPath, artistFolder
 	}
 	if cfg.RcloneEnabled {
 		if progressBox != nil {
-			progressBox.SetPhase(model.PhaseUpload)
+			if err := progressBox.SetPhase(model.PhaseUpload); err != nil {
+				return err
+			}
 			progressBox.SetMessage(model.MessagePriorityStatus, model.VideoUploadStatusLabel, model.StatusMessageDuration)
 			if deps.RenderProgressBox != nil {
 				deps.RenderProgressBox(progressBox)
 			}
 		}
 		if err := deps.UploadPath(ctx, vidPath, artistFolder, cfg, progressBox, true); err != nil {
-			helpers.HandleErr("Upload failed.", err, false)
+			return fmt.Errorf("upload video: %w", err)
 		}
 	}
 	return nil
@@ -797,7 +817,7 @@ func Video(ctx context.Context, videoID, uguID string, cfg *model.Config, stream
 		ui.PrintError("Failed to get video manifest base URL")
 		return err
 	}
-	segUrls, err := GetSegUrls(manBaseUrl+variant.URI, query)
+	segUrls, err := GetSegUrlsContext(ctx, manBaseUrl+variant.URI, query)
 	if err != nil {
 		ui.PrintError("Failed to get video segment URLs")
 		return err

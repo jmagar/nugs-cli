@@ -77,6 +77,8 @@ func (fl *FileLock) Release() error {
 
 // WithCacheLock executes a function with the catalog cache lock acquired.
 func WithCacheLock(fn func() error) error {
+	cacheProcessMu.Lock()
+	defer cacheProcessMu.Unlock()
 	cacheDir, err := GetCacheDir()
 	if err != nil {
 		return err

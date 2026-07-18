@@ -66,7 +66,11 @@ func TestReadContainersIndex_CorruptJSON(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetCacheDir() error = %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(cacheDir, "containers_index.json"), []byte("{corrupt"), 0644); err != nil {
+	indexPath, err := catalogArtifactPath(cacheDir, "containers_index.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(indexPath, []byte("{corrupt"), 0644); err != nil {
 		t.Fatalf("failed to write corrupt file: %v", err)
 	}
 

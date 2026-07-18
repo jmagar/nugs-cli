@@ -29,6 +29,9 @@ import (
 
 var bitrateRegex = regexp.MustCompile(`[\w]+(?:_(\d+)k_v\d+)`)
 
+// ErrEmptyHLSMaster identifies a syntactically valid master playlist without variants.
+var ErrEmptyHLSMaster = errors.New("HLS master playlist has no variants")
+
 var trackFallback = map[int]int{
 	1: 2,
 	2: 5,
@@ -85,11 +88,14 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 	req.Header.Add("Referer", api.PlayerURL)
 	req.Header.Add("User-Agent", api.UserAgent)
 	req.Header.Add("Range", "bytes=0-")
-	do, err := api.Client.Do(req)
+	do, err := api.Do(req)
 	if err != nil {
 		return err
 	}
-	defer do.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(do.Body, 64<<10))
+		_ = do.Body.Close()
+	}()
 	if do.StatusCode != http.StatusOK && do.StatusCode != http.StatusPartialContent {
 		return errors.New(do.Status)
 	}
@@ -97,7 +103,6 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 	totalBytes := do.ContentLength
 	totalStr := model.UnknownSizeLabelLower
 	if totalBytes > 0 {
@@ -113,10 +118,11 @@ func DownloadTrack(ctx context.Context, trackPath, _url string, onProgress func(
 		deps: deps,
 	}
 	_, err = io.Copy(f, io.TeeReader(do.Body, counter))
+	closeErr := f.Close()
 	if printNewline {
 		fmt.Println("")
 	}
-	if err != nil {
+	if err = errors.Join(err, closeErr); err != nil {
 		os.Remove(trackPath)
 		return err
 	}
@@ -142,9 +148,13 @@ func ExtractBitrate(manUrl string) string {
 	return ""
 }
 
-// ParseHlsMaster parses an HLS master playlist and selects the best variant.
-func ParseHlsMaster(qual *model.Quality) error {
-	req, err := api.Client.Get(qual.URL)
+// ParseHlsMasterContext fetches and parses a master playlist with cancellation.
+func ParseHlsMasterContext(ctx context.Context, qual *model.Quality) error {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, qual.URL, nil)
+	if err != nil {
+		return err
+	}
+	req, err := api.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -162,7 +172,7 @@ func ParseHlsMaster(qual *model.Quality) error {
 		return errors.New("expected HLS master playlist but got media playlist")
 	}
 	if len(master.Variants) == 0 {
-		return errors.New("HLS master playlist has no variants")
+		return ErrEmptyHLSMaster
 	}
 	sort.Slice(master.Variants, func(x, y int) bool {
 		return master.Variants[x].Bandwidth > master.Variants[y].Bandwidth
@@ -181,9 +191,13 @@ func ParseHlsMaster(qual *model.Quality) error {
 	return nil
 }
 
-// GetKey retrieves an AES encryption key from the given URL.
-func GetKey(keyUrl string) ([]byte, error) {
-	req, err := api.Client.Get(keyUrl)
+// GetKeyContext retrieves an AES key with cancellation.
+func GetKeyContext(ctx context.Context, keyUrl string) ([]byte, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, keyUrl, nil)
+	if err != nil {
+		return nil, err
+	}
+	req, err := api.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
@@ -232,16 +246,15 @@ func DecryptTrack(tempPath string, key, iv []byte) ([]byte, error) {
 	return decrypted, nil
 }
 
-// TsToAac converts a decrypted TS stream to AAC using ffmpeg.
-func TsToAac(decData []byte, outPath, ffmpegNameStr string) error {
+// TsToAacContext converts a decrypted TS stream and cancels ffmpeg with ctx.
+func TsToAacContext(ctx context.Context, decData []byte, outPath, ffmpegNameStr string) error {
 	var errBuffer bytes.Buffer
-	cmd := exec.Command(ffmpegNameStr, "-i", "pipe:", "-c:a", "copy", outPath)
+	cmd := exec.CommandContext(ctx, ffmpegNameStr, "-i", "pipe:", "-c:a", "copy", outPath)
 	cmd.Stdin = bytes.NewReader(decData)
 	cmd.Stderr = &errBuffer
 	err := cmd.Run()
 	if err != nil {
-		errString := fmt.Sprintf("%s\n%s", err, errBuffer.String())
-		return errors.New(errString)
+		return fmt.Errorf("ffmpeg AAC conversion: %w: %s", err, errBuffer.String())
 	}
 	return nil
 }
@@ -320,20 +333,24 @@ func DecryptTrackToFile(tempPath, decryptedPath string, key, iv []byte) error {
 	return errors.New("no encrypted data to decrypt")
 }
 
-// TsFileToAac converts a decrypted TS file to AAC using ffmpeg.
-func TsFileToAac(decPath, outPath, ffmpegNameStr string) error {
+// TsFileToAacContext converts a file and cancels ffmpeg with ctx.
+func TsFileToAacContext(ctx context.Context, decPath, outPath, ffmpegNameStr string) error {
 	var errBuffer bytes.Buffer
-	cmd := exec.Command(ffmpegNameStr, "-i", decPath, "-c:a", "copy", outPath)
+	cmd := exec.CommandContext(ctx, ffmpegNameStr, "-i", decPath, "-c:a", "copy", outPath)
 	cmd.Stderr = &errBuffer
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("%s\n%s", err, errBuffer.String())
+		return fmt.Errorf("ffmpeg AAC conversion: %w: %s", err, errBuffer.String())
 	}
 	return nil
 }
 
 // HlsOnly downloads an HLS-only track (encrypted), decrypts it, and converts to AAC.
 func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onProgress func(downloaded, total, speed int64), printNewline bool, deps *Deps) error {
-	req, err := api.Client.Get(manUrl)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, manUrl, nil)
+	if err != nil {
+		return err
+	}
+	req, err := api.Do(httpReq)
 	if err != nil {
 		return err
 	}
@@ -365,7 +382,7 @@ func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onPro
 	tsUrl := manBase + media.Segments[0].URI + q
 
 	key := media.Key
-	keyBytes, err := GetKey(manBase + key.URI)
+	keyBytes, err := GetKeyContext(ctx, manBase+key.URI)
 	if err != nil {
 		return err
 	}
@@ -398,7 +415,7 @@ func HlsOnly(ctx context.Context, trackPath, manUrl, ffmpegNameStr string, onPro
 	if err := DecryptTrackToFile(tempPath, decryptedPath, keyBytes, iv); err != nil {
 		return err
 	}
-	return TsFileToAac(decryptedPath, trackPath, ffmpegNameStr)
+	return TsFileToAacContext(ctx, decryptedPath, trackPath, ffmpegNameStr)
 }
 
 // CheckIfHlsOnly checks if all qualities are HLS-only streams.
@@ -423,7 +440,7 @@ func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *m
 			isHlsOnly := strings.Contains(track.TrackURL, ".m3u8?")
 			if isHlsOnly {
 				ui.PrintInfo("HLS-only track. Only AAC is available, tags currently unsupported")
-				if err := ParseHlsMaster(qual); err != nil {
+				if err := ParseHlsMasterContext(ctx, qual); err != nil {
 					return nil, true, wantFmt, err
 				}
 			}
@@ -443,7 +460,7 @@ func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *m
 		}
 		quality := api.QueryQuality(streamUrl)
 		if quality == nil {
-			ui.PrintError(fmt.Sprintf("The API returned an unsupported format: %s", streamUrl))
+			ui.PrintError(fmt.Sprintf("The API returned an unsupported format: %s", helpers.RedactURL(streamUrl)))
 			continue
 		}
 		quals = append(quals, quality)
@@ -457,7 +474,7 @@ func selectTrackQuality(ctx context.Context, track *model.Track, streamParams *m
 	if isHlsOnly {
 		ui.PrintInfo("HLS-only track. Only AAC is available, tags currently unsupported")
 		chosenQual := quals[0]
-		if err := ParseHlsMaster(chosenQual); err != nil {
+		if err := ParseHlsMasterContext(ctx, chosenQual); err != nil {
 			return nil, true, wantFmt, err
 		}
 		return chosenQual, true, wantFmt, nil
@@ -668,9 +685,13 @@ func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParam
 						return
 					}
 
-					streamURL, err := api.GetStreamMeta(ctx, track.TrackID, 0, 1, streamParams)
-					if err != nil || streamURL == "" {
-						continue
+					streamURL := track.TrackURL
+					if streamURL == "" {
+						var err error
+						streamURL, err = api.GetStreamMeta(ctx, track.TrackID, 0, 1, streamParams)
+						if err != nil || streamURL == "" {
+							continue
+						}
 					}
 
 					reqCtx, reqCancel := context.WithTimeout(ctx, model.PreCalcPerRequestTimeout)
@@ -679,9 +700,9 @@ func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParam
 						reqCancel()
 						continue
 					}
-					resp, err := api.Client.Do(req)
-					reqCancel()
+					resp, err := api.Do(req)
 					if err != nil {
+						reqCancel()
 						continue
 					}
 					if resp.ContentLength > 0 {
@@ -689,7 +710,9 @@ func PreCalculateShowSize(ctx context.Context, tracks []model.Track, streamParam
 						totalSize += resp.ContentLength
 						mu.Unlock()
 					}
-					resp.Body.Close()
+					_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+					_ = resp.Body.Close()
+					reqCancel()
 				}
 			}
 		}()
@@ -846,6 +869,7 @@ func prepareAlbumProgressBox(meta *model.AlbArtResp, cfg *model.Config, batchSta
 
 func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, artistFolder string, cfg *model.Config, streamParams *model.StreamParams, progressBox *model.ProgressBoxState, downloadVideo bool, deps *Deps) error {
 	trackTotal := len(tracks)
+	var failures []error
 	for trackNum, track := range tracks {
 		if deps.WaitIfPausedOrCancelled != nil {
 			if err := deps.WaitIfPausedOrCancelled(); err != nil {
@@ -863,35 +887,41 @@ func downloadAlbumAudio(ctx context.Context, tracks []model.Track, albumPath, ar
 				progressBox.ErrorTracks++
 				progressBox.Mu.Unlock()
 			}
-			helpers.HandleErr("Track failed.", err, false)
+			helpers.ReportErr("Track failed.", err)
+			failures = append(failures, fmt.Errorf("track %d (%s): %w", trackNum, track.SongTitle, err))
 		}
 	}
 	if progressBox != nil {
-		progressBox.IsComplete = true
+		progressBox.Mu.Lock()
+		progressBox.IsComplete = len(failures) == 0
 		progressBox.CompletionTime = time.Now()
 		progressBox.TotalDuration = time.Since(progressBox.StartTime)
+		progressBox.Mu.Unlock()
 	}
-	if cfg.RcloneEnabled {
+	if cfg.RcloneEnabled && len(failures) == 0 {
 		if err := deps.UploadPath(ctx, albumPath, artistFolder, cfg, progressBox, false); err != nil {
-			helpers.HandleErr("Upload failed.", err, false)
+			helpers.ReportErr("Upload failed.", err)
+			failures = append(failures, fmt.Errorf("upload album: %w", err))
 		}
 	}
 	if !downloadVideo && deps.RenderCompletionSummary != nil {
 		deps.RenderCompletionSummary(progressBox)
 		fmt.Println("")
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
-func downloadAlbumVideo(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, meta *model.AlbArtResp, progressBox *model.ProgressBoxState, hadAudio bool, deps *Deps) {
+func downloadAlbumVideo(ctx context.Context, albumID string, cfg *model.Config, streamParams *model.StreamParams, meta *model.AlbArtResp, progressBox *model.ProgressBoxState, hadAudio bool, deps *Deps) error {
 	if hadAudio {
 		fmt.Println("")
 		ui.PrintInfo("Downloading video...")
 	}
 	err := Video(ctx, albumID, "", cfg, streamParams, meta, false, progressBox, deps)
 	if err != nil {
-		helpers.HandleErr("Video download failed.", err, false)
+		helpers.ReportErr("Video download failed.", err)
+		return fmt.Errorf("video download: %w", err)
 	}
+	return nil
 }
 
 // Album downloads an album or show from Nugs.net using the provided albumID.
@@ -926,15 +956,18 @@ func Album(ctx context.Context, albumID string, cfg *model.Config, streamParams 
 			}
 		}()
 	}
+	var failures []error
 	if downloadAudio && trackTotal > 0 {
 		if err := downloadAlbumAudio(ctx, tracks, albumPath, artistFolder, cfg, streamParams, progressBox, downloadVideo, deps); err != nil {
-			return err
+			failures = append(failures, err)
 		}
 	}
 	if downloadVideo && skuID != 0 {
-		downloadAlbumVideo(ctx, albumID, cfg, streamParams, meta, progressBox, downloadAudio && trackTotal > 0, deps)
+		if err := downloadAlbumVideo(ctx, albumID, cfg, streamParams, meta, progressBox, downloadAudio && trackTotal > 0, deps); err != nil {
+			failures = append(failures, err)
+		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 // GetAlbumTotal counts the total number of containers across all artist metadata pages.

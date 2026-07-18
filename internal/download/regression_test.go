@@ -29,9 +29,6 @@ func httpResponse(status int, body string) *http.Response {
 	}
 }
 
-// NOTE: Tests in this file mutate the global api.Client and restore it via t.Cleanup.
-// They MUST NOT use t.Parallel() — concurrent subtests would race on the shared client.
-
 func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -61,10 +58,7 @@ func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			oldClient := api.Client
-			t.Cleanup(func() { api.Client = oldClient })
-
-			api.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				switch {
 				case strings.Contains(req.URL.Path, "/bigriver/subPlayer.aspx"):
 					return httpResponse(http.StatusOK, fmt.Sprintf(`{"streamLink":%q}`, tc.streamURL)), nil
@@ -74,24 +68,16 @@ func TestProcessTrack_QualityFallback_NoHang(t *testing.T) {
 					return nil, fmt.Errorf("unexpected request: %s", req.URL.String())
 				}
 			})}
+			ctx, cancel := context.WithTimeout(api.WithHTTPClient(context.Background(), client), 5*time.Second)
+			defer cancel()
 
 			dir := t.TempDir()
 			cfg := &model.Config{Format: tc.wantFmt}
 			track := &model.Track{TrackID: 1234, SongTitle: "Track Name"}
 			streamParams := &model.StreamParams{}
 
-			errCh := make(chan error, 1)
-			go func() {
-				errCh <- ProcessTrack(context.Background(), dir, 1, 1, cfg, track, streamParams, nil, &Deps{})
-			}()
-
-			select {
-			case err := <-errCh:
-				if err != nil {
-					t.Fatalf("ProcessTrack returned error: %v", err)
-				}
-			case <-time.After(2 * time.Second):
-				t.Fatal("ProcessTrack timed out (possible fallback loop regression)")
+			if err := ProcessTrack(ctx, dir, 1, 1, cfg, track, streamParams, nil, &Deps{}); err != nil {
+				t.Fatalf("ProcessTrack returned error: %v", err)
 			}
 
 			matches, err := filepath.Glob(filepath.Join(dir, "*"+tc.wantExt))
@@ -130,15 +116,14 @@ func TestHlsOnly_ValidationErrors_NoPanic(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			oldClient := api.Client
-			t.Cleanup(func() { api.Client = oldClient })
-
-			api.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			t.Parallel()
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 				if strings.HasSuffix(req.URL.Path, "/manifest.m3u8") {
 					return httpResponse(http.StatusOK, tc.playlist), nil
 				}
 				return nil, fmt.Errorf("unexpected request: %s", req.URL.String())
 			})}
+			ctx := api.WithHTTPClient(context.Background(), client)
 
 			panicked := false
 			var gotErr error
@@ -148,7 +133,7 @@ func TestHlsOnly_ValidationErrors_NoPanic(t *testing.T) {
 						panicked = true
 					}
 				}()
-				gotErr = HlsOnly(context.Background(), filepath.Join(t.TempDir(), "out.m4a"), "https://stream.test/manifest.m3u8", "ffmpeg", nil, false, &Deps{})
+				gotErr = HlsOnly(ctx, filepath.Join(t.TempDir(), "out.m4a"), "https://stream.test/manifest.m3u8", "ffmpeg", nil, false, &Deps{})
 			}()
 
 			if panicked {
@@ -165,10 +150,7 @@ func TestHlsOnly_ValidationErrors_NoPanic(t *testing.T) {
 }
 
 func TestChooseVariant_InvalidResolution_NoPanic(t *testing.T) {
-	oldClient := api.Client
-	t.Cleanup(func() { api.Client = oldClient })
-
-	api.Client = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if strings.HasSuffix(req.URL.Path, "/master.m3u8") {
 			playlist := "#EXTM3U\n" +
 				"#EXT-X-STREAM-INF:BANDWIDTH=5000000,RESOLUTION=bad-resolution\n" +
@@ -177,6 +159,7 @@ func TestChooseVariant_InvalidResolution_NoPanic(t *testing.T) {
 		}
 		return nil, fmt.Errorf("unexpected request: %s", req.URL.String())
 	})}
+	ctx := api.WithHTTPClient(context.Background(), client)
 
 	panicked := false
 	var gotErr error
@@ -186,7 +169,7 @@ func TestChooseVariant_InvalidResolution_NoPanic(t *testing.T) {
 				panicked = true
 			}
 		}()
-		_, _, gotErr = ChooseVariant("https://video.test/master.m3u8", "2160")
+		_, _, gotErr = ChooseVariant(ctx, "https://video.test/master.m3u8", "2160")
 	}()
 
 	if panicked {

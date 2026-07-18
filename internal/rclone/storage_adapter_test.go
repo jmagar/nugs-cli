@@ -26,7 +26,7 @@ func TestStorageAdapterUploadWithHooksAndDelete(t *testing.T) {
 		if !isVideo {
 			t.Fatal("expected video upload request")
 		}
-		return exec.Command("echo"), "remote:path/artist/local", nil
+		return exec.CommandContext(ctx, "echo"), "remote:path/artist/local", nil
 	}
 	adapter.runWithProgress = func(cmd *exec.Cmd, onProgress UploadProgressFunc) error {
 		if onProgress == nil {
@@ -35,11 +35,11 @@ func TestStorageAdapterUploadWithHooksAndDelete(t *testing.T) {
 		onProgress(55, "8 MiB/s", "440 MiB", "800 MiB")
 		return nil
 	}
-	adapter.buildVerifyCommand = func(localPath, remoteFullPath string) (*exec.Cmd, error) {
+	adapter.buildVerifyCommand = func(ctx context.Context, localPath, remoteFullPath string) (*exec.Cmd, error) {
 		if remoteFullPath != "remote:path/artist/local" {
 			t.Fatalf("verify remote path = %q", remoteFullPath)
 		}
-		return exec.Command("echo"), nil
+		return exec.CommandContext(ctx, "echo"), nil
 	}
 	adapter.runCommand = func(*exec.Cmd) error { return nil }
 	deletedPath := ""
@@ -97,7 +97,7 @@ func TestStorageAdapterPathExistsHandlesExitCodeThree(t *testing.T) {
 	adapter := NewStorageAdapter()
 	adapter.validatePath = func(string) error { return nil }
 	adapter.commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		return exec.Command("echo")
+		return exec.CommandContext(ctx, "echo")
 	}
 	notFoundErr := errors.New("missing")
 	adapter.runCommand = func(*exec.Cmd) error { return notFoundErr }
@@ -125,7 +125,7 @@ func TestStorageAdapterListArtistFoldersParsesOutput(t *testing.T) {
 	adapter := NewStorageAdapter()
 	adapter.validatePath = func(string) error { return nil }
 	adapter.commandContext = func(ctx context.Context, name string, args ...string) *exec.Cmd {
-		return exec.Command("echo")
+		return exec.CommandContext(ctx, "echo")
 	}
 	adapter.outputCommand = func(*exec.Cmd) ([]byte, error) {
 		return []byte("2026-01-01/\n2026-01-02/\n\n"), nil

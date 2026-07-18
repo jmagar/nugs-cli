@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,6 +21,9 @@ func init() {
 	if slices.Contains(os.Args, "--json") {
 		return
 	}
+	if isVersionRequest(os.Args[1:]) {
+		return
+	}
 	// Suppress banner for completion command to avoid breaking shell completion parsing
 	if len(os.Args) > 1 && os.Args[1] == "completion" {
 		return
@@ -33,13 +37,28 @@ func init() {
 }
 
 func main() {
-	cfg, jsonLevel := bootstrap()
-	run(cfg, jsonLevel)
+	os.Exit(realMain())
+}
+
+func realMain() int {
+	if isVersionRequest(os.Args[1:]) {
+		printVersion(os.Stdout)
+		return 0
+	}
+	cfg, jsonLevel, err := bootstrap()
+	if err == nil {
+		err = run(cfg, jsonLevel)
+	}
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	return 0
 }
 
 // bootstrap handles early setup: session persistence, working directory,
 // config file detection, JSON flag parsing, and config/arg parsing.
-func bootstrap() (*Config, string) {
+func bootstrap() (*Config, string, error) {
 	setupSessionPersistence()
 
 	configExists := false
@@ -59,7 +78,7 @@ func bootstrap() (*Config, string) {
 	if !configExists {
 		err := promptForConfig()
 		if err != nil {
-			handleErr("Failed to create config.", err, true)
+			return nil, "", fmt.Errorf("failed to create config: %w", err)
 		}
 	}
 
@@ -74,9 +93,7 @@ func bootstrap() (*Config, string) {
 	for i := 0; i < len(os.Args); i++ {
 		if os.Args[i] == "--json" {
 			if i+1 >= len(os.Args) {
-				fmt.Println("Error: --json flag requires a level argument (minimal, standard, extended, raw)")
-				printInfo("Usage: nugs list artists --json <level>")
-				os.Exit(1)
+				return nil, "", errors.New("--json flag requires a level argument (minimal, standard, extended, raw)")
 			}
 			jsonLevel = os.Args[i+1]
 			os.Args = append(os.Args[:i], os.Args[i+2:]...)
@@ -86,13 +103,12 @@ func bootstrap() (*Config, string) {
 
 	// Validate json level
 	if jsonLevel != "" && jsonLevel != JSONLevelMinimal && jsonLevel != JSONLevelStandard && jsonLevel != JSONLevelExtended && jsonLevel != JSONLevelRaw {
-		fmt.Printf("Invalid JSON level: %s. Valid options: %s, %s, %s, %s\n", jsonLevel, JSONLevelMinimal, JSONLevelStandard, JSONLevelExtended, JSONLevelRaw)
-		os.Exit(1)
+		return nil, "", fmt.Errorf("invalid JSON level %q: valid options are %s, %s, %s, %s", jsonLevel, JSONLevelMinimal, JSONLevelStandard, JSONLevelExtended, JSONLevelRaw)
 	}
 
 	cfg, err := parseCfg()
 	if err != nil {
-		handleErr("Failed to parse config/args.", err, true)
+		return nil, "", fmt.Errorf("failed to parse config/args: %w", err)
 	}
 	cfg.Urls = normalizeCliAliases(cfg.Urls)
 	printActiveRuntimeHint(os.Getpid(), cfg.Urls)
@@ -106,48 +122,43 @@ func bootstrap() (*Config, string) {
 		}
 	}
 
-	return cfg, jsonLevel
+	return cfg, jsonLevel, nil
 }
 
 // run is the main orchestration function: handles early-exit commands (detach, status,
 // cancel, completion), runtime tracking, environment setup, command routing (list,
 // catalog, artist shortcuts), authentication, and dispatching URL downloads.
-func run(cfg *Config, jsonLevel string) {
+func run(cfg *Config, jsonLevel string) (runErr error) {
 	if maybeDetachAndExit(os.Args[1:], cfg.Urls) {
-		return
+		return nil
 	}
 
 	if len(cfg.Urls) == 1 && cfg.Urls[0] == "status" {
 		printRuntimeStatus()
-		return
+		return nil
 	}
 
 	if len(cfg.Urls) == 1 && cfg.Urls[0] == "cancel" {
 		status, err := readRuntimeStatus()
 		if err != nil {
 			printWarning("No active crawl status found")
-			return
+			return nil
 		}
 		if status.State != "running" {
 			printWarning(fmt.Sprintf("No running crawl found (state: %s)", status.State))
-			return
+			return nil
 		}
 		if err := requestRuntimeCancel(); err != nil {
-			handleErr("Failed to request crawl cancellation.", err, false)
-			return
+			return fmt.Errorf("failed to request crawl cancellation: %w", err)
 		}
 		_ = cancelProcessByPID(status.PID)
 		printSuccess(fmt.Sprintf("Cancellation requested for crawl pid=%d", status.PID))
-		return
+		return nil
 	}
 
 	// Completion command - generate shell completion scripts
 	if len(cfg.Urls) > 0 && cfg.Urls[0] == "completion" {
-		err := completionCommand(cfg.Urls)
-		if err != nil {
-			handleErr("Completion command failed.", err, true)
-		}
-		return
+		return completionCommand(cfg.Urls)
 	}
 
 	trackRuntime := !isReadOnlyCommand(cfg.Urls)
@@ -159,11 +170,7 @@ func run(cfg *Config, jsonLevel string) {
 		if !trackRuntime {
 			return
 		}
-		if runCancelled {
-			finalizeRuntimeStatus("cancelled")
-			return
-		}
-		finalizeRuntimeStatus("completed")
+		finalizeRuntimeStatus(runtimeFinalState(runCancelled, runErr))
 	}()
 	stopHotkeys := startCrawlHotkeysIfNeeded(cfg.Urls)
 	defer stopHotkeys()
@@ -179,12 +186,12 @@ func run(cfg *Config, jsonLevel string) {
 
 	// Check if rclone is available when enabled
 	if cfg.RcloneEnabled {
-		err = checkRcloneAvailable(jsonLevel != "")
+		err = checkRcloneAvailable(ctx, jsonLevel != "")
 		if err != nil {
-			handleErr("Rclone check failed.", err, true)
+			return fmt.Errorf("rclone check failed: %w", err)
 		}
 	}
-	printStartupEnvironment(cfg, jsonLevel)
+	printStartupEnvironment(ctx, cfg, jsonLevel)
 
 	// Show welcome screen if no arguments provided
 	if len(cfg.Urls) == 0 {
@@ -192,52 +199,81 @@ func run(cfg *Config, jsonLevel string) {
 		if err != nil {
 			fmt.Printf("Error displaying welcome screen: %v\n", err)
 		}
-		return
+		return err
 	}
 
 	// Route list and catalog commands (pre-auth)
-	if handleListCommand(ctx, cfg, jsonLevel) {
-		return
+	if handled, err := handleListCommand(ctx, cfg, jsonLevel); handled {
+		return err
 	}
-	if handleCatalogCommand(ctx, cfg, jsonLevel) {
-		return
+	if handled, err := handleCatalogCommand(ctx, cfg, jsonLevel); handled {
+		return err
 	}
-	if handleWatchCommand(ctx, cfg, jsonLevel) {
-		return
+	if handled, err := handleWatchCommand(ctx, cfg, jsonLevel); handled {
+		return err
 	}
 
 	// Handle "<artistID> latest/full" shorthand
 	if len(cfg.Urls) == 2 || len(cfg.Urls) == 3 {
-		if handled := handleArtistShorthand(cfg); handled {
-			return
+		if handled, err := handleArtistShorthand(cfg); handled {
+			return err
 		}
 	}
 
-	// Authenticate
-	var token string
-	err = makeDirs(cfg.OutPath)
+	streamParams, legacyToken, uguID, err := authenticateForDownloads(ctx, cfg)
 	if err != nil {
-		handleErr("Failed to make output folder.", err, true)
+		return err
 	}
+
+	// Handle "catalog gaps <artist_id> [...] fill" (requires auth)
+	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
+		return handleCatalogGapsFill(ctx, cfg, streamParams, jsonLevel)
+	}
+
+	// Handle "watch check" (requires auth)
+	if handled, err := handleWatchCheckCommand(ctx, cfg, streamParams, jsonLevel); handled {
+		return err
+	}
+
+	runCancelled, runErr = dispatch(ctx, cfg, streamParams, legacyToken, uguID)
+	return runErr
+}
+
+func runtimeFinalState(cancelled bool, err error) string {
+	if cancelled || isCrawlCancelledErr(err) {
+		return "cancelled"
+	}
+	if err != nil {
+		return "failed"
+	}
+	return "completed"
+}
+
+func authenticateForDownloads(ctx context.Context, cfg *Config) (*StreamParams, string, string, error) {
+	if err := makeDirs(cfg.OutPath); err != nil {
+		return nil, "", "", fmt.Errorf("failed to make output folder: %w", err)
+	}
+	var token string
+	var err error
 	if cfg.Token == "" {
 		token, err = auth(ctx, cfg.Email, cfg.Password)
 		if err != nil {
-			handleErr("Failed to auth.", err, true)
+			return nil, "", "", fmt.Errorf("failed to authenticate: %w", err)
 		}
 	} else {
 		token = cfg.Token
 	}
 	userId, err := getUserInfo(ctx, token)
 	if err != nil {
-		handleErr("Failed to get user info.", err, true)
+		return nil, "", "", fmt.Errorf("failed to get user info: %w", err)
 	}
 	subInfo, err := getSubInfo(ctx, token)
 	if err != nil {
-		handleErr("Failed to get subscription info.", err, true)
+		return nil, "", "", fmt.Errorf("failed to get subscription info: %w", err)
 	}
 	legacyToken, uguID, err := extractLegToken(token)
 	if err != nil {
-		handleErr("Failed to extract legacy token.", err, true)
+		return nil, "", "", fmt.Errorf("failed to extract legacy token: %w", err)
 	}
 	planDesc, isPromo := getPlan(subInfo)
 	if !subInfo.IsContentAccessible {
@@ -246,34 +282,22 @@ func run(cfg *Config, jsonLevel string) {
 	printSuccess(fmt.Sprintf("Signed in - %s%s%s", colorCyan, planDesc, colorReset))
 	streamParams, err := parseStreamParams(userId, subInfo, isPromo)
 	if err != nil {
-		handleErr("Failed to parse subscription timestamps.", err, true)
+		return nil, "", "", fmt.Errorf("failed to parse subscription timestamps: %w", err)
 	}
-
-	// Handle "catalog gaps <artist_id> [...] fill" (requires auth)
-	if len(cfg.Urls) >= 4 && cfg.Urls[0] == "catalog" && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill" {
-		handleCatalogGapsFill(ctx, cfg, streamParams, jsonLevel)
-		return
-	}
-
-	// Handle "watch check" (requires auth)
-	if handleWatchCheckCommand(ctx, cfg, streamParams, jsonLevel) {
-		return
-	}
-
-	runCancelled = dispatch(ctx, cfg, streamParams, legacyToken, uguID)
+	return streamParams, legacyToken, uguID, nil
 }
 
 // handleListCommand routes "list" subcommands. Returns true if handled.
-func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) bool {
+func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) (bool, error) {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "list" {
-		return false
+		return false, nil
 	}
 	if len(cfg.Urls) < 2 {
 		printInfo("Usage: nugs list artists | list <artist_id> [shows \"venue\" | latest <N>]")
 		fmt.Println("       list <show_count_filter>")
 		fmt.Println("       list <artist_id> [audio|video|both]")
 		fmt.Println("       list <artist_id> [\"venue\" | latest <N>]")
-		return true
+		return true, nil
 	}
 
 	subCmd := cfg.Urls[1]
@@ -291,15 +315,12 @@ func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) bool 
 				fmt.Println("  list <=50")
 				fmt.Println("  list =25")
 				fmt.Println("Operators: >, <, >=, <=, =")
-				return true
+				return true, nil
 			}
 			showFilter = remainingArgs[1]
 		}
 		err := listArtists(ctx, jsonLevel, showFilter)
-		if err != nil {
-			handleErr("List artists failed.", err, true)
-		}
-		return true
+		return true, wrapCommandError("list artists", err)
 	}
 
 	artistId := subCmd
@@ -311,44 +332,37 @@ func handleListCommand(ctx context.Context, cfg *Config, jsonLevel string) bool 
 	// Check for venue filter: list <artist_id> shows "venue"
 	if len(remainingArgs) > 0 && remainingArgs[0] == "shows" {
 		if len(remainingArgs) < 2 {
-			printInfo("Usage: nugs list <artist_id> shows \"<venue_name>\"")
-			fmt.Println("Or:    list <artist_id> shows \"<venue_name>\"")
-			fmt.Println("Example: list 461 \"Red Rocks\"")
-			return true
+			return true, errors.New("list shows requires a venue name: nugs list <artist_id> shows \"<venue_name>\"")
 		}
 		venueFilter := strings.Join(remainingArgs[1:], " ")
 		err := listArtistShowsByVenue(ctx, artistId, venueFilter, jsonLevel)
-		if err != nil {
-			handleErr("List shows by venue failed.", err, true)
-		}
-		return true
+		return true, wrapCommandError("list shows by venue", err)
 	}
 
 	// Check for latest N: list <artist_id> latest <N>
 	if len(remainingArgs) > 0 && remainingArgs[0] == "latest" {
 		limit := 10
 		if len(remainingArgs) > 1 {
-			if parsedLimit, parseErr := strconv.Atoi(remainingArgs[1]); parseErr == nil {
-				if parsedLimit < 1 {
-					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
-					return true
-				}
-				limit = parsedLimit
+			parsedLimit, parseErr := strconv.Atoi(remainingArgs[1])
+			if parseErr != nil || parsedLimit < 1 {
+				return true, fmt.Errorf("list latest limit must be a positive integer: %q", remainingArgs[1])
 			}
+			limit = parsedLimit
 		}
 		err := listArtistLatestShows(ctx, artistId, limit, jsonLevel)
-		if err != nil {
-			handleErr("List latest shows failed.", err, true)
-		}
-		return true
+		return true, wrapCommandError("list latest shows", err)
 	}
 
 	// Default: list all shows for artist (with optional media filter)
 	err := listArtistShows(ctx, artistId, jsonLevel, mediaFilter)
-	if err != nil {
-		handleErr("List shows failed.", err, true)
+	return true, wrapCommandError("list shows", err)
+}
+
+func wrapCommandError(command string, err error) error {
+	if err == nil {
+		return nil
 	}
-	return true
+	return fmt.Errorf("%s failed: %w", command, err)
 }
 
 // handleCatalogCommand routes pre-auth "catalog" subcommands. Returns true if handled.
@@ -368,14 +382,14 @@ func parseMediaModifier(args []string) (MediaType, []string) {
 	return MediaTypeUnknown, args
 }
 
-func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bool {
+func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) (bool, error) {
 	if len(cfg.Urls) == 0 || cfg.Urls[0] != "catalog" {
-		return false
+		return false, nil
 	}
 	// "catalog gaps ... fill" requires auth — skip here, handled post-auth in run()
 	isCatalogGapsFill := len(cfg.Urls) >= 4 && cfg.Urls[1] == "gaps" && cfg.Urls[len(cfg.Urls)-1] == "fill"
 	if isCatalogGapsFill {
-		return false
+		return false, nil
 	}
 
 	if len(cfg.Urls) < 2 {
@@ -390,26 +404,17 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 		fmt.Println("       catalog config enable|disable|set")
 		fmt.Println()
 		fmt.Println("       Note: catalog = cached/offline, list = live API")
-		return true
+		return true, nil
 	}
 
 	subCmd := cfg.Urls[1]
 	switch subCmd {
 	case "update":
-		err := catalogUpdate(ctx, jsonLevel)
-		if err != nil {
-			handleErr("Catalog update failed.", err, true)
-		}
+		return true, wrapCommandError("catalog update", catalogUpdate(ctx, jsonLevel))
 	case "cache":
-		err := catalogCacheStatus(jsonLevel)
-		if err != nil {
-			handleErr("Catalog cache status failed.", err, true)
-		}
+		return true, wrapCommandError("catalog cache status", catalogCacheStatus(jsonLevel))
 	case "stats":
-		err := catalogStats(ctx, cfg, jsonLevel)
-		if err != nil {
-			handleErr("Catalog stats failed.", err, true)
-		}
+		return true, wrapCommandError("catalog stats", catalogStats(ctx, cfg, jsonLevel))
 	case "latest":
 		limit := 15
 		argsAfterLatest := []string{}
@@ -425,23 +430,18 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 
 		// Parse limit from remaining args
 		if len(remainingArgs) > 0 {
-			if parsedLimit, err := strconv.Atoi(remainingArgs[0]); err == nil {
-				if parsedLimit < 1 {
-					fmt.Println("Error: limit must be a positive number (got", parsedLimit, ")")
-					return true
-				}
-				limit = parsedLimit
+			parsedLimit, parseErr := strconv.Atoi(remainingArgs[0])
+			if parseErr != nil || parsedLimit < 1 {
+				return true, fmt.Errorf("catalog latest limit must be a positive integer: %q", remainingArgs[0])
 			}
+			limit = parsedLimit
 		}
-		err := catalogLatest(ctx, limit, jsonLevel)
-		if err != nil {
-			handleErr("Catalog latest failed.", err, true)
-		}
+		return true, wrapCommandError("catalog latest", catalogLatest(ctx, limit, jsonLevel))
 	case "gaps":
 		if len(cfg.Urls) < 3 {
 			printInfo("Usage: nugs catalog gaps <artist_id> [...] [audio|video|both] [fill]")
 			fmt.Println("       catalog gaps <artist_id> [...] [audio|video|both] --ids-only")
-			return true
+			return true, nil
 		}
 
 		// Extract media modifier from args after "catalog gaps"
@@ -460,27 +460,20 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 		}
 
 		if len(artistIds) == 0 {
-			fmt.Println("Error: No artist IDs provided")
-			return true
+			return true, errors.New("catalog gaps requires at least one artist ID")
 		}
-		err := catalogGaps(ctx, artistIds, cfg, jsonLevel, idsOnly, mediaFilter)
-		if err != nil {
-			handleErr("Catalog gaps failed.", err, true)
-		}
+		return true, wrapCommandError("catalog gaps", catalogGaps(ctx, artistIds, cfg, jsonLevel, idsOnly, mediaFilter))
 	case "list":
 		if len(cfg.Urls) < 3 {
 			printInfo("Usage: nugs catalog list <artist_id> [...] [audio|video|both]")
-			return true
+			return true, nil
 		}
 
 		// Extract media modifier from args after "catalog list"
 		argsAfterList := cfg.Urls[2:]
 		mediaFilter, artistIds := parseMediaModifier(argsAfterList)
 
-		err := catalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter)
-		if err != nil {
-			handleErr("Catalog list failed.", err, true)
-		}
+		return true, wrapCommandError("catalog list", catalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter))
 	case "coverage":
 		argsAfterCoverage := []string{}
 		if len(cfg.Urls) > 2 {
@@ -490,48 +483,35 @@ func handleCatalogCommand(ctx context.Context, cfg *Config, jsonLevel string) bo
 		// Extract media modifier
 		mediaFilter, artistIds := parseMediaModifier(argsAfterCoverage)
 
-		err := catalogCoverage(ctx, artistIds, cfg, jsonLevel, mediaFilter)
-		if err != nil {
-			handleErr("Catalog coverage failed.", err, true)
-		}
+		return true, wrapCommandError("catalog coverage", catalogCoverage(ctx, artistIds, cfg, jsonLevel, mediaFilter))
 	case "config":
 		if len(cfg.Urls) < 3 {
 			printInfo("Usage: nugs catalog config enable|disable|set")
-			return true
+			return true, nil
 		}
 		action := cfg.Urls[2]
 		switch action {
 		case "enable":
-			err := enableAutoRefresh(cfg)
-			if err != nil {
-				handleErr("Enable auto-refresh failed.", err, true)
-			}
+			return true, wrapCommandError("enable auto-refresh", enableAutoRefresh(cfg))
 		case "disable":
-			err := disableAutoRefresh(cfg)
-			if err != nil {
-				handleErr("Disable auto-refresh failed.", err, true)
-			}
+			return true, wrapCommandError("disable auto-refresh", disableAutoRefresh(cfg))
 		case "set":
-			err := configureAutoRefresh(cfg)
-			if err != nil {
-				handleErr("Configure auto-refresh failed.", err, true)
-			}
+			return true, wrapCommandError("configure auto-refresh", configureAutoRefresh(cfg))
 		default:
-			fmt.Printf("Unknown config action: %s\n", action)
+			return true, fmt.Errorf("unknown catalog config action: %s", action)
 		}
 	default:
-		fmt.Printf("Unknown catalog command: %s\n", subCmd)
+		return true, fmt.Errorf("unknown catalog command: %s", subCmd)
 	}
-	return true
 }
 
 // handleArtistShorthand handles "<artistID> latest/full [media]" shortcuts.
 // Returns true if the input was handled (including error cases).
 // Accepts optional media type modifier: "audio", "video", or "both"
-func handleArtistShorthand(cfg *Config) bool {
+func handleArtistShorthand(cfg *Config) (bool, error) {
 	artistID, err := strconv.Atoi(cfg.Urls[0])
 	if err != nil {
-		return false
+		return false, nil
 	}
 
 	// Check for media type modifier (3rd arg: "audio", "video", "both")
@@ -570,20 +550,20 @@ func handleArtistShorthand(cfg *Config) bool {
 		fmt.Printf("  • %snugs %d full%s [audio|video|both]   - Download entire catalog\n\n", colorBold, artistID, colorReset)
 		fmt.Printf("For catalog commands, use:\n")
 		fmt.Printf("  • %snugs catalog %s %d%s\n", colorBold, cfg.Urls[1], artistID, colorReset)
-		os.Exit(1)
+		return true, fmt.Errorf("invalid artist shortcut %q", cfg.Urls[1])
 	default:
 		fmt.Printf("%s✗ Unknown command: %s%s\n\n", colorRed, cfg.Urls[1], colorReset)
 		fmt.Printf("Valid artist shortcuts:\n")
 		fmt.Printf("  • %snugs %d latest%s [audio|video|both] - Download latest shows\n", colorBold, artistID, colorReset)
 		fmt.Printf("  • %snugs %d full%s [audio|video|both]   - Download entire catalog\n\n", colorBold, artistID, colorReset)
-		os.Exit(1)
+		return true, fmt.Errorf("unknown artist shortcut %q", cfg.Urls[1])
 	}
-	return false // continue to auth+dispatch with rewritten URL
+	return false, nil // continue to auth+dispatch with rewritten URL
 }
 
 // handleCatalogGapsFill handles the "catalog gaps <artist_id> [...] fill" command
 // which requires authentication.
-func handleCatalogGapsFill(ctx context.Context, cfg *Config, streamParams *StreamParams, jsonLevel string) {
+func handleCatalogGapsFill(ctx context.Context, cfg *Config, streamParams *StreamParams, jsonLevel string) error {
 	// Extract media modifier from args (between "gaps" and "fill")
 	argsAfterGaps := cfg.Urls[2 : len(cfg.Urls)-1] // Everything between "gaps" and "fill"
 	mediaFilter, artistIds := parseMediaModifier(argsAfterGaps)
@@ -591,8 +571,9 @@ func handleCatalogGapsFill(ctx context.Context, cfg *Config, streamParams *Strea
 	if len(artistIds) == 0 {
 		fmt.Println("Error: No artist IDs provided")
 		fmt.Println("Usage: catalog gaps <artist_id> [...] [audio|video|both] fill")
-		return
+		return errors.New("catalog gaps fill requires at least one artist ID")
 	}
+	var failures []error
 	for idx, artistId := range artistIds {
 		if idx > 0 && jsonLevel == "" {
 			fmt.Println()
@@ -601,27 +582,26 @@ func handleCatalogGapsFill(ctx context.Context, cfg *Config, streamParams *Strea
 		}
 		err := catalogGapsFill(ctx, artistId, cfg, streamParams, jsonLevel, mediaFilter)
 		if err != nil {
-			if len(artistIds) > 1 {
-				printWarning(fmt.Sprintf("Failed to fill gaps for artist %s: %v", artistId, err))
-				continue
-			}
-			handleErr("Catalog gaps fill failed.", err, true)
+			printWarning(fmt.Sprintf("Failed to fill gaps for artist %s: %v", artistId, err))
+			failures = append(failures, fmt.Errorf("artist %s: %w", artistId, err))
 		}
 	}
+	return errors.Join(failures...)
 }
 
 // dispatch iterates over URLs, resolves their type, and routes each to the
 // appropriate handler (album, playlist, video, artist, etc.).
 // Returns true if the run was cancelled.
-func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, legacyToken, uguID string) bool {
+func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, legacyToken, uguID string) (bool, error) {
 	albumTotal := len(cfg.Urls)
 	var itemErr error
 	completedItems := 0
+	var failures []error
 	for albumNum, _url := range cfg.Urls {
 		if err := waitIfPausedOrCancelled(); err != nil {
 			if isCrawlCancelledErr(err) {
 				printWarning("Crawl cancelled")
-				return true
+				return true, err
 			}
 		}
 		errorsBefore := ui.RunErrorCount.Load()
@@ -630,6 +610,7 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 		itemId, mediaType := checkURL(_url)
 		if itemId == "" {
 			fmt.Println("Invalid URL:", _url)
+			failures = append(failures, fmt.Errorf("item %d: invalid URL %q", albumNum+1, _url))
 			continue
 		}
 		switch mediaType {
@@ -653,11 +634,13 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 		if itemErr != nil {
 			if isCrawlCancelledErr(itemErr) {
 				printWarning("Crawl cancelled")
-				return true
+				return true, itemErr
 			}
-			handleErr("Item failed.", itemErr, false)
+			fmt.Fprintf(os.Stderr, "item %d failed: %v\n", albumNum+1, itemErr)
+			failures = append(failures, fmt.Errorf("item %d: %w", albumNum+1, itemErr))
+		} else {
+			completedItems++
 		}
-		completedItems++
 		itemErrors := ui.RunErrorCount.Load() - errorsBefore
 		itemWarnings := ui.RunWarningCount.Load() - warningsBefore
 		itemStatus := fmt.Sprintf("Item %d/%d complete", albumNum+1, albumTotal)
@@ -671,5 +654,5 @@ func dispatch(ctx context.Context, cfg *Config, streamParams *StreamParams, lega
 	printSection("Run Summary")
 	printInfo(fmt.Sprintf("Completed %d/%d items", completedItems, albumTotal))
 	printInfo(fmt.Sprintf("Total health: errors=%d warnings=%d", ui.RunErrorCount.Load(), ui.RunWarningCount.Load()))
-	return false
+	return false, errors.Join(failures...)
 }

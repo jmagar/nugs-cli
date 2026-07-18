@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -33,8 +35,8 @@ const (
 )
 
 var (
-	Jar    = mustCookieJar()
-	Client = &http.Client{
+	Jar               = mustCookieJar()
+	defaultHTTPClient = &http.Client{
 		Jar:     Jar,
 		Timeout: 30 * time.Second,
 	}
@@ -47,7 +49,72 @@ var (
 	// CircuitBreaker trips after 5 consecutive API-level failures (HTTP 429 or 5xx)
 	// and stays open for 60 seconds before probing recovery.
 	CircuitBreaker = newCircuitBreaker(5, 60*time.Second)
+	circuitMu      sync.Mutex
+	circuits       = map[string]*circuitBreaker{}
 )
+
+type httpClientContextKey struct{}
+
+// WithHTTPClient returns a context that scopes HTTP execution to client. It is
+// primarily useful for tests and avoids mutating process-global transport state.
+func WithHTTPClient(ctx context.Context, client *http.Client) context.Context {
+	if client == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, httpClientContextKey{}, client)
+}
+
+// Do executes req with the client scoped to its context, or the immutable
+// process default when no override is present.
+func Do(req *http.Request) (*http.Response, error) {
+	client, _ := req.Context().Value(httpClientContextKey{}).(*http.Client)
+	if client == nil {
+		client = defaultHTTPClient
+	}
+	return client.Do(req)
+}
+
+const maxDrainBytes = 64 << 10
+
+func failureDomain(label string) string {
+	switch {
+	case label == "auth" || label == "userinfo" || label == "subscriptions":
+		return "identity"
+	case strings.Contains(label, "Player") || strings.Contains(label, "stream"):
+		return "stream"
+	default:
+		return "catalog"
+	}
+}
+
+func breakerFor(label string) *circuitBreaker {
+	domain := failureDomain(label)
+	circuitMu.Lock()
+	defer circuitMu.Unlock()
+	if cb := circuits[domain]; cb != nil {
+		return cb
+	}
+	cb := newCircuitBreaker(5, 60*time.Second)
+	circuits[domain] = cb
+	return cb
+}
+
+func failHalfOpenProbe(breaker *circuitBreaker, label string, state circuitState) {
+	if state != circuitHalfOpen {
+		return
+	}
+	newState := breaker.RecordFailure()
+	LogCircuitStateChange("circuit_opened", label, state.String(), newState.String())
+}
+
+func drainAndClose(body io.ReadCloser) error {
+	if body == nil {
+		return nil
+	}
+	_, copyErr := io.Copy(io.Discard, io.LimitReader(body, maxDrainBytes))
+	closeErr := body.Close()
+	return errors.Join(copyErr, closeErr)
+}
 
 func mustCookieJar() *cookiejar.Jar {
 	jar, err := cookiejar.New(nil)
@@ -73,6 +140,7 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 	backoff := 500 * time.Millisecond
 
 	for attempt := 0; ; attempt++ {
+		breaker := breakerFor(label)
 		// 1. Rate limiter — block until a token is available.
 		waited, err := RateLimiter.Wait(ctx)
 		if err != nil {
@@ -84,7 +152,7 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		}
 
 		// 2. Circuit breaker — fail fast when the API is known-down.
-		cbState, allowed := CircuitBreaker.Allow()
+		cbState, allowed := breaker.Allow()
 		if !allowed {
 			LogCircuitRejected(label)
 			return nil, fmt.Errorf("%w (label: %s)", ErrCircuitOpen, label)
@@ -93,15 +161,17 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		// 3. Build and execute the request.
 		req, err := makeReq()
 		if err != nil {
+			failHalfOpenProbe(breaker, label, cbState)
 			return nil, err
 		}
 		start := time.Now()
-		resp, err := Client.Do(req)
+		resp, err := Do(req)
 		duration := time.Since(start)
 
 		if err != nil {
-			// Network-level error: log but do NOT trip the circuit breaker.
-			// Network hiccups are distinct from the API being overloaded.
+			// Network-level errors do not trip a closed circuit, but a failed
+			// half-open recovery probe must reopen it so the probe slot cannot wedge.
+			failHalfOpenProbe(breaker, label, cbState)
 			LogRequest(label, 0, duration, attempt, cbState.String(), err)
 			return nil, err
 		}
@@ -109,7 +179,7 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		isAPIError := resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500
 		if !isAPIError {
 			// Success (2xx, 3xx, or client-error 4xx — server is healthy).
-			prev := CircuitBreaker.RecordSuccess()
+			prev := breaker.RecordSuccess()
 			if prev != circuitClosed {
 				LogCircuitStateChange("circuit_closed", label, prev.String(), circuitClosed.String())
 			}
@@ -118,8 +188,8 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		}
 
 		// API-level error: trip circuit breaker, log, then retry or give up.
-		resp.Body.Close()
-		newState := CircuitBreaker.RecordFailure()
+		_ = drainAndClose(resp.Body)
+		newState := breaker.RecordFailure()
 		if newState == circuitOpen && cbState != circuitOpen {
 			LogCircuitStateChange("circuit_opened", label, cbState.String(), newState.String())
 		}
@@ -143,6 +213,25 @@ func retryDo(ctx context.Context, label string, makeReq func() (*http.Request, e
 		}
 		backoff = min(backoff*2, 30*time.Second)
 	}
+}
+
+// doJSON centralizes retry execution, status validation, bounded body draining,
+// and JSON decoding for API endpoints.
+func doJSON[T any](ctx context.Context, label string, expectedStatus int, makeReq func() (*http.Request, error)) (T, error) {
+	var zero T
+	resp, err := retryDo(ctx, label, makeReq)
+	if err != nil {
+		return zero, err
+	}
+	defer func() { _ = drainAndClose(resp.Body) }()
+	if resp.StatusCode != expectedStatus {
+		return zero, fmt.Errorf("API %s failed: %s", label, resp.Status)
+	}
+	var value T
+	if err := json.NewDecoder(resp.Body).Decode(&value); err != nil {
+		return zero, fmt.Errorf("API %s decode: %w", label, err)
+	}
+	return value, nil
 }
 
 // qualityPattern pairs a URL substring with its quality info.
@@ -185,7 +274,7 @@ func Auth(ctx context.Context, email, pwd string) (string, error) {
 	data.Set("username", email)
 	data.Set("password", pwd)
 	encoded := data.Encode()
-	do, err := retryDo(ctx, "auth", func() (*http.Request, error) {
+	obj, err := doJSON[model.Auth](ctx, "auth", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, AuthURL, strings.NewReader(encoded))
 		if err != nil {
 			return nil, err
@@ -197,20 +286,12 @@ func Auth(ctx context.Context, email, pwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API authentication failed: %s", do.Status)
-	}
-	var obj model.Auth
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
-		return "", err
-	}
 	return obj.AccessToken, nil
 }
 
 // GetUserInfo retrieves user subscription ID.
 func GetUserInfo(ctx context.Context, token string) (string, error) {
-	do, err := retryDo(ctx, "userinfo", func() (*http.Request, error) {
+	obj, err := doJSON[model.UserInfo](ctx, "userinfo", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, UserInfoURL, nil)
 		if err != nil {
 			return nil, err
@@ -222,20 +303,12 @@ func GetUserInfo(ctx context.Context, token string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API GetUserInfo failed: %s", do.Status)
-	}
-	var obj model.UserInfo
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
-		return "", err
-	}
 	return obj.Sub, nil
 }
 
 // GetSubInfo retrieves subscription information.
 func GetSubInfo(ctx context.Context, token string) (*model.SubInfo, error) {
-	do, err := retryDo(ctx, "subscriptions", func() (*http.Request, error) {
+	obj, err := doJSON[model.SubInfo](ctx, "subscriptions", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, SubInfoURL, nil)
 		if err != nil {
 			return nil, err
@@ -245,14 +318,6 @@ func GetSubInfo(ctx context.Context, token string) (*model.SubInfo, error) {
 		return req, nil
 	})
 	if err != nil {
-		return nil, err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API GetSubInfo failed: %s", do.Status)
-	}
-	var obj model.SubInfo
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return nil, err
 	}
 	return &obj, nil
@@ -292,7 +357,7 @@ func GetAlbumMeta(ctx context.Context, albumId string) (*model.AlbumMeta, error)
 	query.Set("containerID", albumId)
 	query.Set("vdisp", "1")
 	rawQuery := query.Encode()
-	do, err := retryDo(ctx, "catalog.container", func() (*http.Request, error) {
+	obj, err := doJSON[model.AlbumMeta](ctx, "catalog.container", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 		if err != nil {
 			return nil, err
@@ -302,14 +367,6 @@ func GetAlbumMeta(ctx context.Context, albumId string) (*model.AlbumMeta, error)
 		return req, nil
 	})
 	if err != nil {
-		return nil, err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API GetAlbumMeta failed: %s", do.Status)
-	}
-	var obj model.AlbumMeta
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return nil, err
 	}
 	return &obj, nil
@@ -337,7 +394,7 @@ func GetPlistMeta(ctx context.Context, plistId, email, legacyToken string, cat b
 		query.Set("token", legacyToken)
 	}
 	rawQuery := query.Encode()
-	do, err := retryDo(ctx, label, func() (*http.Request, error) {
+	obj, err := doJSON[model.PlistMeta](ctx, label, http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+apiPath, nil)
 		if err != nil {
 			return nil, err
@@ -349,14 +406,6 @@ func GetPlistMeta(ctx context.Context, plistId, email, legacyToken string, cat b
 	if err != nil {
 		return nil, err
 	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API GetPlistMeta failed: %s", do.Status)
-	}
-	var obj model.PlistMeta
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
-		return nil, err
-	}
 	return &obj, nil
 }
 
@@ -366,7 +415,7 @@ func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
 	query.Set("method", "catalog.latest")
 	query.Set("vdisp", "1")
 	rawQuery := query.Encode()
-	do, err := retryDo(ctx, "catalog.latest", func() (*http.Request, error) {
+	obj, err := doJSON[model.LatestCatalogResp](ctx, "catalog.latest", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 		if err != nil {
 			return nil, err
@@ -376,14 +425,6 @@ func GetLatestCatalog(ctx context.Context) (*model.LatestCatalogResp, error) {
 		return req, nil
 	})
 	if err != nil {
-		return nil, err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API GetLatestCatalog failed: %s", do.Status)
-	}
-	var obj model.LatestCatalogResp
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return nil, err
 	}
 	return &obj, nil
@@ -400,7 +441,7 @@ func getArtistMetaByAvailType(ctx context.Context, artistId string, availType in
 	baseQuery.Set("vdisp", "1")
 	for {
 		currentOffset := offset // capture for closure
-		do, err := retryDo(ctx, "catalog.containersAll", func() (*http.Request, error) {
+		obj, err := doJSON[model.ArtistMeta](ctx, "catalog.containersAll", http.StatusOK, func() (*http.Request, error) {
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 			if err != nil {
 				return nil, err
@@ -411,16 +452,6 @@ func getArtistMetaByAvailType(ctx context.Context, artistId string, availType in
 			req.Header.Add("User-Agent", UserAgent)
 			return req, nil
 		})
-		if err != nil {
-			return nil, err
-		}
-		if do.StatusCode != http.StatusOK {
-			do.Body.Close()
-			return nil, fmt.Errorf("API getArtistMetaByAvailType failed: %s", do.Status)
-		}
-		var obj model.ArtistMeta
-		err = json.NewDecoder(do.Body).Decode(&obj)
-		do.Body.Close()
 		if err != nil {
 			return nil, err
 		}
@@ -450,7 +481,7 @@ func GetArtistList(ctx context.Context) (*model.ArtistListResp, error) {
 	query.Set("method", "catalog.artists")
 	query.Set("vdisp", "1")
 	rawQuery := query.Encode()
-	do, err := retryDo(ctx, "catalog.artists", func() (*http.Request, error) {
+	obj, err := doJSON[model.ArtistListResp](ctx, "catalog.artists", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"api.aspx", nil)
 		if err != nil {
 			return nil, err
@@ -460,14 +491,6 @@ func GetArtistList(ctx context.Context) (*model.ArtistListResp, error) {
 		return req, nil
 	})
 	if err != nil {
-		return nil, err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("API GetArtistList failed: %s", do.Status)
-	}
-	var obj model.ArtistListResp
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return nil, err
 	}
 	return &obj, nil
@@ -482,7 +505,7 @@ func GetPurchasedManURL(ctx context.Context, skuID int, showID, userID, uguID st
 	query.Set("nn_userID", userID)
 	query.Set("app", "1")
 	rawQuery := query.Encode()
-	do, err := retryDo(ctx, "vidPlayer", func() (*http.Request, error) {
+	obj, err := doJSON[model.PurchasedManResp](ctx, "vidPlayer", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"bigriver/vidPlayer.aspx", nil)
 		if err != nil {
 			return nil, err
@@ -492,14 +515,6 @@ func GetPurchasedManURL(ctx context.Context, skuID int, showID, userID, uguID st
 		return req, nil
 	})
 	if err != nil {
-		return "", err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API GetPurchasedManURL failed: %s", do.Status)
-	}
-	var obj model.PurchasedManResp
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return "", err
 	}
 	return obj.FileURL, nil
@@ -527,7 +542,7 @@ func GetStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams
 		return q.Encode()
 	}
 	rawQuery := buildQuery()
-	do, err := retryDo(ctx, "subPlayer", func() (*http.Request, error) {
+	obj, err := doJSON[model.StreamMeta](ctx, "subPlayer", http.StatusOK, func() (*http.Request, error) {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, StreamAPIBase+"bigriver/subPlayer.aspx", nil)
 		if err != nil {
 			return nil, err
@@ -537,14 +552,6 @@ func GetStreamMeta(ctx context.Context, trackId, skuId, format int, streamParams
 		return req, nil
 	})
 	if err != nil {
-		return "", err
-	}
-	defer do.Body.Close()
-	if do.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("API GetStreamMeta failed: %s", do.Status)
-	}
-	var obj model.StreamMeta
-	if err = json.NewDecoder(do.Body).Decode(&obj); err != nil {
 		return "", err
 	}
 	return obj.StreamLink, nil

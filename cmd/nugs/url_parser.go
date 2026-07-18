@@ -1,7 +1,6 @@
 package main
 
-// URL parser wrappers delegating to internal/api during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for URL parsing.
 
 import "github.com/jmagar/nugs-cli/internal/api"
 

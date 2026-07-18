@@ -36,34 +36,6 @@ type Config struct {
 	SkipSizePreCalculation bool     `json:"skipSizePreCalculation,omitempty"`
 }
 
-// ArgsDescriptionFunc is set by package main's init() (in cmd/nugs/model_aliases.go)
-// to provide colored help text. This is a startup-time side effect that wires the
-// root package's argsDescription() into the model layer. Tests that call
-// Description() should set this explicitly or accept the empty-string default.
-// If nil, Description() returns an empty string (go-arg will use default help).
-var ArgsDescriptionFunc func() string
-
-// Args holds CLI arguments parsed by go-arg.
-type Args struct {
-	Urls         []string `arg:"positional"`
-	Format       int      `arg:"-f" default:"-1" help:"Track download format.\n\t\t\t 1 = 16-bit / 44.1 kHz ALAC\n\t\t\t 2 = 16-bit / 44.1 kHz FLAC\n\t\t\t 3 = 24-bit / 48 kHz MQA\n\t\t\t 4 = 360 Reality Audio / best available\n\t\t\t 5 = 150 Kbps AAC"`
-	VideoFormat  int      `arg:"-F" default:"-1" help:"Video download format.\n\t\t\t 1 = 480p\n\t\t\t 2 = 720p\n\t\t\t 3 = 1080p\n\t\t\t 4 = 1440p\n\t\t\t 5 = 4K / best available"`
-	OutPath      string   `arg:"-o" help:"Where to download to. Path will be made if it doesn't already exist."`
-	ForceVideo   bool     `arg:"--force-video" help:"[Deprecated] Use 'nugs grab <id> video' or set defaultOutputs in config."`
-	SkipVideos   bool     `arg:"--skip-videos" help:"[Deprecated] Use 'nugs grab <id> audio' or set defaultOutputs in config."`
-	SkipChapters bool     `arg:"--skip-chapters" help:"Skips chapters for videos."`
-}
-
-// Description provides custom help text for go-arg.
-// It delegates to ArgsDescriptionFunc if set, allowing the root package
-// to inject colored output without model depending on UI code.
-func (Args) Description() string {
-	if ArgsDescriptionFunc != nil {
-		return ArgsDescriptionFunc()
-	}
-	return ""
-}
-
 // Transport is used as a custom HTTP transport.
 type Transport struct{}
 

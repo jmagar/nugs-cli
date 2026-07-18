@@ -241,14 +241,37 @@ func promptRclone(scanner *bufio.Scanner) (rcloneSettings, error) {
 
 // atomicWriteFile writes data to a temp file then atomically renames it to the target path.
 func atomicWriteFile(targetPath string, data []byte, perm os.FileMode) error {
-	tmpPath := targetPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, perm); err != nil {
-		return fmt.Errorf("failed to write temp file %s: %w", tmpPath, err)
+	dir := filepath.Dir(targetPath)
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(targetPath)+".*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		return fmt.Errorf("chmod temp file: %w", err)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temp file: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, targetPath); err != nil {
-		// Clean up temp file on rename failure
-		os.Remove(tmpPath)
-		return fmt.Errorf("failed to rename %s to %s: %w", tmpPath, targetPath, err)
+		return fmt.Errorf("rename temp file: %w", err)
+	}
+	committed = true
+	if err := syncDirectory(dir); err != nil {
+		return fmt.Errorf("sync config directory: %w", err)
 	}
 	return nil
 }
@@ -420,45 +443,23 @@ func ParseCfg() (*model.Config, error) {
 func ResolveFfmpegBinary(cfg *model.Config) (string, error) {
 	preferred := strings.TrimSpace(cfg.FfmpegNameStr)
 
-	// Respect explicit non-default binary names/paths from config.
-	if preferred != "" && preferred != "./ffmpeg" && preferred != "ffmpeg" {
+	// Explicit filesystem paths must be absolute. This prevents a repository or
+	// download directory from silently supplying the executable.
+	if preferred != "" && preferred != "ffmpeg" {
+		if strings.ContainsAny(preferred, `/\\`) && !filepath.IsAbs(preferred) {
+			return "", fmt.Errorf("configured ffmpeg path must be absolute: %s", preferred)
+		}
 		if resolved, err := exec.LookPath(preferred); err == nil {
 			return resolved, nil
-		}
-		if info, err := os.Stat(preferred); err == nil && !info.IsDir() {
-			return preferred, nil
 		}
 		return "", fmt.Errorf("configured ffmpeg binary not found: %s", preferred)
 	}
 
-	if cfg.UseFfmpegEnvVar || preferred == "ffmpeg" {
-		if resolved, err := exec.LookPath("ffmpeg"); err == nil {
-			return resolved, nil
-		}
-		return "", errors.New("ffmpeg not found in PATH (install ffmpeg or set ffmpegNameStr to an absolute/local binary path)")
-	}
-
-	// Backward-compatible default: local ./ffmpeg first.
-	candidates := []string{"./ffmpeg"}
-	if exePath, err := os.Executable(); err == nil {
-		exeDir := filepath.Dir(exePath)
-		exeLocal := filepath.Join(exeDir, "ffmpeg")
-		if exeLocal != "./ffmpeg" {
-			candidates = append(candidates, exeLocal)
-		}
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate, nil
-		}
-	}
-
-	// Fallback: use system ffmpeg if available.
+	// Defaults and the legacy environment flag both resolve only through PATH.
 	if resolved, err := exec.LookPath("ffmpeg"); err == nil {
 		return resolved, nil
 	}
-
-	return "", errors.New("ffmpeg binary not found (checked ./ffmpeg and PATH)")
+	return "", errors.New("ffmpeg not found in PATH (install ffmpeg or configure an absolute ffmpegNameStr path)")
 }
 
 var showCountFilterRegex = regexp.MustCompile(`^(>=|<=|>|<|=)\d+$`)
@@ -590,9 +591,35 @@ func ReadConfig() (*model.Config, error) {
 	return &obj, nil
 }
 
+// Args owns the CLI argument contract. Keeping it in config avoids making the
+// foundation model package depend behaviorally on package-main initialization.
+type Args struct {
+	Urls         []string `arg:"positional"`
+	Format       int      `arg:"-f" default:"-1" help:"Track format (1-5)"`
+	VideoFormat  int      `arg:"-F" default:"-1" help:"Video format (1-5)"`
+	OutPath      string   `arg:"-o" help:"Download directory"`
+	ForceVideo   bool     `arg:"--force-video" help:"Deprecated: use a video media modifier"`
+	SkipVideos   bool     `arg:"--skip-videos" help:"Deprecated: use an audio media modifier"`
+	SkipChapters bool     `arg:"--skip-chapters" help:"Skip video chapters"`
+}
+
+func (Args) Description() string {
+	return `Download music and videos from Nugs.net.
+
+Commands:
+  nugs grab <id|url> [audio|video|both]
+  nugs <artist-id> latest|full [audio|video|both]
+  nugs list [artists|<artist-id>]
+  nugs catalog update|cache|stats|latest|list|gaps|coverage|config
+  nugs watch add|remove|list|check|enable|disable
+  nugs status|cancel|version
+
+Use README.md or docs/COMMANDS.md for complete examples.`
+}
+
 // ParseArgs parses CLI arguments using go-arg.
-func ParseArgs() *model.Args {
-	var args model.Args
+func ParseArgs() *Args {
+	var args Args
 	arg.MustParse(&args)
 	return &args
 }

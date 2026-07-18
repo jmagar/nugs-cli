@@ -25,7 +25,7 @@ func SpawnDetached(args []string) (int, string, error) {
 		return 0, "", err
 	}
 	logPath := filepath.Join(cacheDir, "runtime.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := openRuntimeLog(logPath)
 	if err != nil {
 		return 0, "", err
 	}
@@ -41,6 +41,18 @@ func SpawnDetached(args []string) (int, string, error) {
 		return 0, "", err
 	}
 	return cmd.Process.Pid, logPath, nil
+}
+
+func openRuntimeLog(logPath string) (*os.File, error) {
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return nil, err
+	}
+	if err := logFile.Chmod(0600); err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("secure runtime log: %w", err)
+	}
+	return logFile, nil
 }
 
 // MaybeDetachAndExit checks if the process should detach and, if so, spawns

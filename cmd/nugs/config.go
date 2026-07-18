@@ -1,7 +1,6 @@
 package main
 
-// Config wrappers delegating to internal/config during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for configuration loading.
 
 import "github.com/jmagar/nugs-cli/internal/config"
 

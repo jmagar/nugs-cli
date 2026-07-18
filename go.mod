@@ -1,6 +1,6 @@
 module github.com/jmagar/nugs-cli
 
-go 1.24.12
+go 1.25.12
 
 require (
 	github.com/alexflint/go-arg v1.5.0

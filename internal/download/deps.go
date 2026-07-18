@@ -5,9 +5,12 @@ package download
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jmagar/nugs-cli/internal/model"
 )
+
+var errStorageDependencyMissing = errors.New("rclone is enabled but no storage provider is configured")
 
 // Deps holds callbacks to root-package functions that the download package needs.
 // These cannot be imported directly because they live in the root (main) package.
@@ -60,6 +63,9 @@ func (d *Deps) UploadPath(ctx context.Context, localPath, artistFolder string, c
 			IsVideo:      isVideo,
 		}, model.StorageHooks{})
 	}
+	if cfg != nil && cfg.RcloneEnabled {
+		return errStorageDependencyMissing
+	}
 	return nil
 }
 
@@ -70,6 +76,9 @@ func (d *Deps) CheckRemotePathExists(ctx context.Context, remotePath string, cfg
 	}
 	if d != nil && d.Storage != nil {
 		return d.Storage.PathExists(ctx, cfg, remotePath, isVideo)
+	}
+	if cfg != nil && cfg.RcloneEnabled {
+		return false, errStorageDependencyMissing
 	}
 	return false, nil
 }

@@ -1,7 +1,6 @@
 package main
 
-// Rclone wrappers delegating to internal/rclone during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for remote storage operations.
 
 import (
 	"context"
@@ -19,8 +18,12 @@ const (
 	uploadCompleteVisibilityDelay = 500 * time.Millisecond
 )
 
-func checkRcloneAvailable(quiet bool) error    { return rclone.CheckRcloneAvailable(quiet) }
-func checkRclonePathOnline(cfg *Config) string { return rclone.CheckRclonePathOnline(cfg) }
+func checkRcloneAvailable(ctx context.Context, quiet bool) error {
+	return rclone.CheckRcloneAvailable(ctx, quiet)
+}
+func checkRclonePathOnline(ctx context.Context, cfg *Config) string {
+	return rclone.CheckRclonePathOnline(ctx, cfg)
+}
 
 func uploadToRclone(ctx context.Context, localPath string, artistFolder string, cfg *Config, progressBox *ProgressBoxState, isVideo bool) error {
 	if progressBox != nil {

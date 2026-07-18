@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jmagar/nugs-cli/internal/cache"
 	"github.com/jmagar/nugs-cli/internal/helpers"
 	"github.com/jmagar/nugs-cli/internal/model"
 	"github.com/jmagar/nugs-cli/internal/ui"
@@ -219,9 +220,24 @@ func AnalyzeArtistCatalogMediaAware(ctx context.Context, artistID string, cfg *m
 		return nil, fmt.Errorf("GetArtistMetaCached callback not configured")
 	}
 
-	artistMetas, cacheUsed, cacheStaleUse, err := deps.GetArtistMetaCached(ctx, artistID, ArtistMetaCacheTTL)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get artist metadata: %w", err)
+	// A fresh durable shard is authoritative for warm catalog analysis and keeps
+	// normal coverage/gap commands within their zero-network request budget.
+	// A catalog update invalidates older shards so new releases are fetched.
+	artistMetas, _, shardUpdatedAt, localErr := cache.ReadFullCatalogArtist(artistID)
+	localFresh := localErr == nil && cache.FullCatalogArtistFresh(shardUpdatedAt, ArtistMetaCacheTTL)
+	cacheUsed, cacheStaleUse := localFresh, false
+	if !localFresh {
+		var err error
+		requestTTL := ArtistMetaCacheTTL
+		if localErr == nil {
+			// A stale durable shard implies the ordinary artist cache contains
+			// the same stale pages. Force the callback through to the API.
+			requestTTL = 0
+		}
+		artistMetas, cacheUsed, cacheStaleUse, err = deps.GetArtistMetaCached(ctx, artistID, requestTTL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get artist metadata: %w", err)
+		}
 	}
 
 	if len(artistMetas) == 0 {

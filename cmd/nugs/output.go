@@ -1,9 +1,9 @@
 package main
 
-// Output wrappers delegating to internal/ui during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for terminal output.
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -19,7 +19,7 @@ func describeAudioFormat(format int) string      { return ui.DescribeAudioFormat
 func describeVideoFormat(videoFormat int) string { return ui.DescribeVideoFormat(videoFormat) }
 func describeAuthStatus(cfg *Config) string      { return ui.DescribeAuthStatus(cfg) }
 
-func printStartupEnvironment(cfg *Config, jsonLevel string) {
+func printStartupEnvironment(ctx context.Context, cfg *Config, jsonLevel string) {
 	if jsonLevel != "" {
 		return
 	}
@@ -44,7 +44,7 @@ func printStartupEnvironment(cfg *Config, jsonLevel string) {
 	printKeyValue("Rclone Audio Path", rcloneAudioPath, colorCyan)
 	printKeyValue("Rclone Video Path", rcloneVideoPath, colorCyan)
 	if cfg.RcloneEnabled {
-		printKeyValue("Rclone Status", checkRclonePathOnline(cfg), colorYellow)
+		printKeyValue("Rclone Status", checkRclonePathOnline(ctx, cfg), colorYellow)
 	} else {
 		printKeyValue("Rclone Status", "Disabled", colorYellow)
 	}

@@ -6,12 +6,42 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
-var httpClient = &http.Client{Timeout: 5 * time.Second}
+var httpClient = &http.Client{
+	Timeout: 5 * time.Second,
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		// The token is a credential. Never replay it to a redirect target.
+		return http.ErrUseLastResponse
+	},
+}
+
+func validateServerURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return nil, fmt.Errorf("gotify: invalid server URL")
+	}
+	if u.User != nil {
+		return nil, fmt.Errorf("gotify: server URL must not contain userinfo")
+	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("gotify: server URL must not contain query parameters or fragments")
+	}
+	if u.Scheme == "https" {
+		return u, nil
+	}
+	ip := net.ParseIP(u.Hostname())
+	if u.Scheme == "http" && (u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()) {
+		return u, nil
+	}
+	return nil, fmt.Errorf("gotify: HTTPS is required for non-loopback servers")
+}
 
 // Send posts a message to a Gotify server.
 // Returns nil immediately if url or token are empty.
@@ -20,7 +50,13 @@ func Send(ctx context.Context, serverURL, token, title, message string, priority
 		return nil
 	}
 
-	url := strings.TrimRight(serverURL, "/") + "/message"
+	base, err := validateServerURL(serverURL)
+	if err != nil {
+		return err
+	}
+	base.Path = strings.TrimRight(base.Path, "/") + "/message"
+	base.RawPath = ""
+	requestURL := base.String()
 
 	body, err := json.Marshal(map[string]any{
 		"title":    title,
@@ -31,7 +67,7 @@ func Send(ctx context.Context, serverURL, token, title, message string, priority
 		return fmt.Errorf("gotify: marshal failed: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, requestURL, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("gotify: create request failed: %w", err)
 	}
@@ -42,7 +78,10 @@ func Send(ctx context.Context, serverURL, token, title, message string, priority
 	if err != nil {
 		return fmt.Errorf("gotify: send failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return fmt.Errorf("gotify: server returned %d", resp.StatusCode)

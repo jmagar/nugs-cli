@@ -2,6 +2,7 @@ package download
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jmagar/nugs-cli/internal/model"
@@ -14,6 +15,17 @@ type fakeStorageProvider struct {
 	lastPath        string
 	lastPathIsVideo bool
 	pathExists      bool
+}
+
+func TestDepsRejectsEnabledRcloneWithoutStorageDependency(t *testing.T) {
+	cfg := &model.Config{RcloneEnabled: true}
+
+	if err := (*Deps)(nil).UploadPath(context.Background(), "/tmp/album", "artist", cfg, nil, false); !errors.Is(err, errStorageDependencyMissing) {
+		t.Fatalf("UploadPath error = %v, want %v", err, errStorageDependencyMissing)
+	}
+	if _, err := (*Deps)(nil).CheckRemotePathExists(context.Background(), "artist/show", cfg, false); !errors.Is(err, errStorageDependencyMissing) {
+		t.Fatalf("CheckRemotePathExists error = %v, want %v", err, errStorageDependencyMissing)
+	}
 }
 
 func (f *fakeStorageProvider) Upload(_ context.Context, _ *model.Config, req model.UploadRequest, _ model.StorageHooks) error {

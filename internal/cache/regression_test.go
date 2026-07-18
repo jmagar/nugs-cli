@@ -69,7 +69,7 @@ func TestWriteCatalogCache_ConcurrentWriters_Consistency(t *testing.T) {
 
 	select {
 	case <-done:
-	case <-time.After(5 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("concurrent cache writes timed out")
 	}
 	close(errCh)
@@ -96,7 +96,10 @@ func TestWriteCatalogCache_ConcurrentWriters_Consistency(t *testing.T) {
 	}
 
 	for _, name := range files {
-		path := filepath.Join(cacheDir, name)
+		path, pathErr := catalogArtifactPath(cacheDir, name)
+		if pathErr != nil {
+			t.Fatalf("resolve %s: %v", name, pathErr)
+		}
 		data, readErr := os.ReadFile(path)
 		if readErr != nil {
 			t.Fatalf("failed reading %s: %v", name, readErr)

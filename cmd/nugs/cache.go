@@ -1,7 +1,6 @@
 package main
 
-// Cache wrappers delegating to internal/cache during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for cache operations.
 
 import (
 	"time"

@@ -1,7 +1,6 @@
 package main
 
-// Batch wrappers delegating to internal/download during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for batch downloads.
 
 import (
 	"context"

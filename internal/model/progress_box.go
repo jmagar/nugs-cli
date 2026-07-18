@@ -139,7 +139,8 @@ func (s *ProgressBoxState) isValidTransition(from, to string) bool {
 	case PhaseUpload:
 		return to == PhaseVerify || to == PhaseComplete || to == PhasePaused
 	case PhaseVerify:
-		return to == PhaseComplete || to == PhaseError
+		// Verification/conversion may precede an optional remote upload.
+		return to == PhaseUpload || to == PhaseComplete || to == PhaseError
 	case PhasePaused:
 		return to == PhaseDownload || to == PhaseUpload || to == PhaseVerify
 	case PhaseComplete, PhaseError:

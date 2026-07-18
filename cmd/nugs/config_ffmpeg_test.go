@@ -8,7 +8,7 @@ import (
 	"github.com/jmagar/nugs-cli/internal/testutil"
 )
 
-func TestResolveFfmpegBinary_LocalPreferred(t *testing.T) {
+func TestResolveFfmpegBinary_DoesNotImplicitlyUseCurrentDirectory(t *testing.T) {
 	tmp := testutil.ChdirTemp(t)
 	local := filepath.Join(tmp, "ffmpeg")
 	testutil.WriteExecutable(t, local)
@@ -16,12 +16,23 @@ func TestResolveFfmpegBinary_LocalPreferred(t *testing.T) {
 	t.Setenv("PATH", "")
 
 	cfg := &Config{UseFfmpegEnvVar: false}
-	got, err := resolveFfmpegBinary(cfg)
+	if _, err := resolveFfmpegBinary(cfg); err == nil {
+		t.Fatal("resolveFfmpegBinary implicitly trusted ./ffmpeg")
+	}
+}
+
+func TestResolveFfmpegBinary_ExplicitAbsolutePath(t *testing.T) {
+	tmp := t.TempDir()
+	local := filepath.Join(tmp, "ffmpeg")
+	testutil.WriteExecutable(t, local)
+	t.Setenv("PATH", "")
+
+	got, err := resolveFfmpegBinary(&Config{FfmpegNameStr: local})
 	if err != nil {
 		t.Fatalf("resolveFfmpegBinary returned error: %v", err)
 	}
-	if got != "./ffmpeg" {
-		t.Fatalf("expected ./ffmpeg, got %q", got)
+	if got != local {
+		t.Fatalf("got %q, want %q", got, local)
 	}
 }
 

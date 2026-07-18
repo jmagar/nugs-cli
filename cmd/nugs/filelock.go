@@ -1,7 +1,6 @@
 package main
 
-// Filelock wrappers delegating to internal/cache during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command aliases for cache locking.
 
 import "github.com/jmagar/nugs-cli/internal/cache"
 

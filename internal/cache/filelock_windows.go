@@ -3,56 +3,50 @@
 package cache
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // FileLock represents a file-based lock (Windows stub).
 type FileLock struct {
 	lockFile *os.File
-	path     string
 }
 
-// staleLockThreshold is the age beyond which a lock file is considered stale.
-// This handles the case where a process crashes without calling Release().
-const staleLockThreshold = 10 * time.Second
-
 // AcquireLock acquires an exclusive lock on a lock file.
-// On Windows this uses a simple file-existence check as a best-effort lock.
-// Includes stale lock detection: if the lock file is older than staleLockThreshold
-// after all retries are exhausted, it is removed and one final attempt is made.
+// On Windows this uses LockFileEx so process death releases the kernel lock;
+// the lock file itself is persistent and is never guessed to be stale.
 func AcquireLock(lockPath string, maxRetries int) (*FileLock, error) {
 	lockDir := filepath.Dir(lockPath)
 	if err := os.MkdirAll(lockDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create lock directory: %w", err)
 	}
 
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open lock file: %w", err)
+	}
 	var lastErr error
 	for i := 0; i <= maxRetries; i++ {
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
+		var overlapped windows.Overlapped
+		err := windows.LockFileEx(windows.Handle(f.Fd()), windows.LOCKFILE_EXCLUSIVE_LOCK|windows.LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &overlapped)
 		if err == nil {
-			return &FileLock{lockFile: f, path: lockPath}, nil
+			return &FileLock{lockFile: f}, nil
 		}
 		lastErr = err
+		if !errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+			_ = f.Close()
+			return nil, fmt.Errorf("failed to lock cache file: %w", err)
+		}
 		if i < maxRetries {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
-
-	// Check if the lock file is stale (older than threshold)
-	info, statErr := os.Stat(lockPath)
-	if statErr == nil && time.Since(info.ModTime()) > staleLockThreshold {
-		_ = os.Remove(lockPath)
-		// One final attempt after removing stale lock
-		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0644)
-		if err == nil {
-			return &FileLock{lockFile: f, path: lockPath}, nil
-		}
-		lastErr = err
-	}
-
+	_ = f.Close()
 	return nil, fmt.Errorf("failed to acquire lock after %d retries: %w", maxRetries, lastErr)
 }
 
@@ -61,14 +55,20 @@ func (fl *FileLock) Release() error {
 	if fl.lockFile == nil {
 		return nil
 	}
-	err := fl.lockFile.Close()
+	var overlapped windows.Overlapped
+	unlockErr := windows.UnlockFileEx(windows.Handle(fl.lockFile.Fd()), 0, 1, 0, &overlapped)
+	closeErr := fl.lockFile.Close()
 	fl.lockFile = nil
-	_ = os.Remove(fl.path)
-	return err
+	if unlockErr != nil {
+		return unlockErr
+	}
+	return closeErr
 }
 
 // WithCacheLock executes a function with the catalog cache lock acquired.
 func WithCacheLock(fn func() error) error {
+	cacheProcessMu.Lock()
+	defer cacheProcessMu.Unlock()
 	cacheDir, err := GetCacheDir()
 	if err != nil {
 		return err

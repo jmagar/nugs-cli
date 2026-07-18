@@ -1,7 +1,6 @@
 package main
 
-// Catalog handler wrappers delegating to internal/catalog during migration.
-// These will be removed in Phase 12 when all callers move to internal packages.
+// Command adapters for catalog operations.
 
 import (
 	"context"
@@ -69,4 +68,3 @@ func catalogCoverage(ctx context.Context, artistIds []string, cfg *Config, jsonL
 func catalogList(ctx context.Context, artistIds []string, cfg *Config, jsonLevel string, mediaFilter MediaType) error {
 	return catalog.CatalogList(ctx, artistIds, cfg, jsonLevel, mediaFilter, buildCatalogDeps())
 }
-

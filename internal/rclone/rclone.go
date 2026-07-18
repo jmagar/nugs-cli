@@ -30,22 +30,22 @@ var (
 	speedPattern              = regexp.MustCompile(`(?:^|,)\s*@?\s*([^,]*?/s)\s*(?:,|$)`)
 )
 
+// defaultStorageProvider is immutable. Alternate providers are injected through
+// download.Deps instead of mutating process-global state.
 var defaultStorageProvider model.StorageProvider = NewStorageAdapter()
 
-// SetStorageProvider swaps the default storage provider used by rclone wrappers.
-// Passing nil resets it to the standard rclone adapter.
-func SetStorageProvider(provider model.StorageProvider) {
-	if provider == nil {
-		defaultStorageProvider = NewStorageAdapter()
-		return
-	}
-	defaultStorageProvider = provider
-}
-
 // CheckRcloneAvailable verifies rclone is installed and available in PATH.
-func CheckRcloneAvailable(quiet bool) error {
-	cmd := exec.Command("rclone", "version")
-	output, err := cmd.Output()
+func CheckRcloneAvailable(ctx context.Context, quiet bool) error {
+	if ctx == nil {
+		return fmt.Errorf("rclone availability context is required")
+	}
+	cmd := exec.CommandContext(ctx, "rclone", "version")
+	var output []byte
+	err := WithProcessSlot(ctx, func() error {
+		var runErr error
+		output, runErr = cmd.Output()
+		return runErr
+	})
 	if err != nil {
 		return fmt.Errorf("rclone is not installed or not available in PATH: %w\n"+
 			"Please install rclone from https://rclone.org/downloads/ or disable rclone in config.json", err)
@@ -62,7 +62,10 @@ func CheckRcloneAvailable(quiet bool) error {
 }
 
 // CheckRclonePathOnline checks if the configured rclone remote is reachable.
-func CheckRclonePathOnline(cfg *model.Config) string {
+func CheckRclonePathOnline(ctx context.Context, cfg *model.Config) string {
+	if ctx == nil {
+		return "Offline (context required)"
+	}
 	if !cfg.RcloneEnabled {
 		return "Disabled"
 	}
@@ -70,10 +73,10 @@ func CheckRclonePathOnline(cfg *model.Config) string {
 		return "Offline (remote not configured)"
 	}
 	target := cfg.RcloneRemote + ":" + helpers.GetRcloneBasePath(cfg, false)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "rclone", "lsf", target)
-	err := cmd.Run()
+	err := WithProcessSlot(ctx, cmd.Run)
 	if err == nil {
 		return "Online"
 	}
@@ -109,11 +112,6 @@ func UploadToRclone(ctx context.Context, localPath string, artistFolder string, 
 		OnComplete:          onComplete,
 		OnDeleteAfterUpload: onDeleteAfterUpload,
 	})
-}
-
-// BuildRcloneUploadCommand constructs the rclone copy/copyto command.
-func BuildRcloneUploadCommand(localPath, artistFolder string, cfg *model.Config, transfers int, isVideo bool) (*exec.Cmd, string, error) {
-	return BuildRcloneUploadCommandContext(context.Background(), localPath, artistFolder, cfg, transfers, isVideo)
 }
 
 // BuildRcloneUploadCommandContext constructs the rclone copy/copyto command with context support.
@@ -336,21 +334,21 @@ func RunRcloneWithProgress(cmd *exec.Cmd, onProgress func(percent int, speed, up
 	return waitErr
 }
 
-// BuildRcloneVerifyCommand constructs the rclone check command for upload verification.
-func BuildRcloneVerifyCommand(localPath, remoteFullPath string) (*exec.Cmd, error) {
+// BuildRcloneVerifyCommandContext constructs a cancellable rclone check command.
+func BuildRcloneVerifyCommandContext(ctx context.Context, localPath, remoteFullPath string) (*exec.Cmd, error) {
 	localInfo, err := os.Stat(localPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to stat local path for verification: %w", err)
 	}
 
 	if localInfo.IsDir() {
-		return exec.Command("rclone", "check", "--one-way", localPath, remoteFullPath), nil
+		return exec.CommandContext(ctx, "rclone", "check", "--one-way", localPath, remoteFullPath), nil
 	}
 
 	localDir := filepath.Dir(localPath)
 	remoteDir := path.Dir(remoteFullPath)
 	fileName := filepath.Base(localPath)
-	return exec.Command("rclone", "check", "--one-way", "--include", fileName, localDir, remoteDir), nil
+	return exec.CommandContext(ctx, "rclone", "check", "--one-way", "--include", fileName, localDir, remoteDir), nil
 }
 
 // RemotePathExists checks if a path exists on the configured rclone remote.

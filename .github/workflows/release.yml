@@ -1,0 +1,121 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-assets-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and smoke-test ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary: nugs
+            smoke: true
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            binary: nugs
+            smoke: true
+          - target: darwin-amd64
+            runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            binary: nugs
+            smoke: true
+          - target: darwin-arm64
+            runner: macos-14
+            goos: darwin
+            goarch: arm64
+            binary: nugs
+            smoke: true
+          - target: windows-amd64
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            binary: nugs.exe
+            smoke: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Build release binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.event.release.tag_name }}
+          COMMIT: ${{ github.sha }}
+          RELEASE_BINARY: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/package
+          build_date="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=${build_date}" \
+            -o "dist/package/${RELEASE_BINARY}" ./cmd/nugs
+      - name: Smoke-test native binary
+        if: matrix.smoke
+        shell: bash
+        env:
+          RELEASE_BINARY: ${{ matrix.binary }}
+        run: '"dist/package/${RELEASE_BINARY}" version'
+      - name: Create archive
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_BINARY: ${{ matrix.binary }}
+        run: tar -C dist/package -czf "dist/nugs-${RELEASE_TAG}-${RELEASE_TARGET}.tar.gz" "${RELEASE_BINARY}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish checksummed assets and provenance
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write # Attach checksums and archives to the release.
+      id-token: write # Authenticate GitHub's keyless provenance signer.
+      attestations: write # Publish the provenance attestation.
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Create checksums
+        run: cd dist && sha256sum -- *.tar.gz > checksums.txt
+      - name: Attest release archives
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*.tar.gz
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "${RELEASE_TAG}" dist/*.tar.gz dist/checksums.txt --clobber

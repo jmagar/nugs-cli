@@ -3,37 +3,45 @@ name: OpenWiki Update
 on:
   workflow_dispatch:
   schedule:
-    # GitHub schedules use UTC; 08:00 UTC is midnight PST.
     - cron: "0 8 * * *"
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+
+concurrency:
+  group: openwiki-update
+  cancel-in-progress: false
 
 jobs:
-  update:
+  generate:
+    name: Generate documentation (secret-bearing, read-only)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/openwiki/package-lock.json
+
+      - name: Install integrity-locked OpenWiki
+        run: npm ci --ignore-scripts --prefix tools/openwiki
 
       - name: Connect Tailscale
-        uses: tailscale/github-action@v4
+        uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
           ping: 100.120.242.29
-
-      - name: Install OpenWiki
-        run: npm install --global openwiki
 
       - name: Preflight OpenWiki API
         env:
@@ -41,38 +49,23 @@ jobs:
           OPENAI_COMPATIBLE_BASE_URL: http://100.120.242.29:8317/v1
         run: |
           set -euo pipefail
-
-          for env_file in "$HOME/docs/.env" /home/jmagar/docs/.env; do
-            if [[ -f "$env_file" ]]; then
-              set -a
-              source "$env_file"
-              set +a
-              break
-            fi
-          done
-          export OPENAI_COMPATIBLE_BASE_URL="http://100.120.242.29:8317/v1"
-
           if [[ -z "${OPENAI_COMPATIBLE_API_KEY:-}" ]]; then
-            echo "::error::OPENAI_COMPATIBLE_API_KEY is required for OpenWiki updates"
+            echo "::error title=Missing OpenWiki API key::Configure the OPENAI_COMPATIBLE_API_KEY repository secret"
             exit 1
           fi
-
           response="$(mktemp)"
-          status="$(
-            curl --silent --show-error --location \
-              --output "$response" \
-              --write-out "%{http_code}" \
-              --header "Authorization: Bearer ${OPENAI_COMPATIBLE_API_KEY}" \
-              "${OPENAI_COMPATIBLE_BASE_URL%/}/models" || true
-          )"
+          trap 'rm -f "$response"' EXIT
+          status="$(curl --silent --show-error --location --max-time 30 --connect-timeout 10 \
+            --output "$response" --write-out "%{http_code}" \
+            --header "Authorization: Bearer ${OPENAI_COMPATIBLE_API_KEY}" \
+            "${OPENAI_COMPATIBLE_BASE_URL%/}/models")"
           if [[ "$status" != "200" ]]; then
-            echo "::error::OpenWiki API preflight failed for ${OPENAI_COMPATIBLE_BASE_URL%/}/models with HTTP ${status}"
+            echo "::error::OpenWiki API preflight failed with HTTP ${status}"
             head -c 300 "$response"
-            echo
             exit 1
           fi
 
-      - name: Run OpenWiki
+      - name: Generate OpenWiki content
         env:
           OPENWIKI_PROVIDER: openai-compatible
           OPENAI_COMPATIBLE_API_KEY: ${{ secrets.OPENAI_COMPATIBLE_API_KEY }}
@@ -80,33 +73,64 @@ jobs:
           OPENWIKI_MODEL_ID: gpt-5.3-codex-spark
         run: |
           set -euo pipefail
+          timeout --signal=TERM --kill-after=30s 20m \
+            tools/openwiki/node_modules/.bin/openwiki --update --print
+          test -d openwiki
+          test -n "$(find openwiki -type f -print -quit)"
 
-          for env_file in "$HOME/docs/.env" /home/jmagar/docs/.env; do
-            if [[ -f "$env_file" ]]; then
-              set -a
-              source "$env_file"
-              set +a
-              break
-            fi
-          done
-          export OPENWIKI_PROVIDER="${OPENWIKI_PROVIDER:-openai-compatible}"
-          export OPENAI_COMPATIBLE_BASE_URL="http://100.120.242.29:8317/v1"
-          export OPENWIKI_MODEL_ID="${OPENWIKI_MODEL_ID:-gpt-5.3-codex-spark}"
-
-          if [[ -z "${OPENAI_COMPATIBLE_API_KEY:-}" ]]; then
-            echo "::error::OPENAI_COMPATIBLE_API_KEY is required for OpenWiki updates"
-            exit 1
-          fi
-
-          openwiki --update --print
-      - name: Create OpenWiki update pull request
-        uses: peter-evans/create-pull-request@v7
+      - name: Upload generated documentation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          add-paths: openwiki
-          branch: openwiki/update
-          commit-message: "docs: update OpenWiki"
-          title: "docs: update OpenWiki"
-          body: |
-            Automated OpenWiki documentation update.
+          name: openwiki-generated
+          path: openwiki
+          if-no-files-found: error
+          retention-days: 1
 
-            This PR was generated by the scheduled OpenWiki workflow.
+  publish:
+    name: Publish pull request (write-capable, no service secrets)
+    needs: generate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # Push the generated documentation branch.
+      pull-requests: write # Create or update the generated documentation PR.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+
+      - name: Clear previously generated documentation
+        run: rm -rf -- openwiki
+
+      - name: Download generated documentation
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: openwiki-generated
+          path: openwiki
+
+      - name: Create or update OpenWiki pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git fetch origin '+refs/heads/openwiki/update:refs/remotes/origin/openwiki/update' || true
+          git switch -C openwiki/update
+          git add -A -- openwiki
+          if git diff --cached --quiet; then
+            echo "No OpenWiki changes"
+            exit 0
+          fi
+          git commit -m "docs: update OpenWiki"
+          gh auth setup-git
+          git push --force-with-lease origin openwiki/update
+          if gh pr view openwiki/update >/dev/null 2>&1; then
+            gh pr edit openwiki/update --title "docs: update OpenWiki" \
+              --body "Automated update generated in a separate read-only, secret-bearing job."
+          else
+            gh pr create --base main --head openwiki/update \
+              --title "docs: update OpenWiki" \
+              --body "Automated update generated in a separate read-only, secret-bearing job."
+          fi
