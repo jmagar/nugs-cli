@@ -33,7 +33,11 @@ jobs:
           cache-dependency-path: tools/openwiki/package-lock.json
 
       - name: Install integrity-locked OpenWiki
-        run: npm ci --ignore-scripts --prefix tools/openwiki
+        run: |
+          npm ci --ignore-scripts --prefix tools/openwiki
+          # --ignore-scripts skips better-sqlite3's native build; rebuild only
+          # that module or OpenWiki dies with "Could not locate the bindings file".
+          npm rebuild --prefix tools/openwiki better-sqlite3
 
       - name: Connect Tailscale
         uses: tailscale/github-action@306e68a486fd2350f2bfc3b19fcd143891a4a2d8 # v4
